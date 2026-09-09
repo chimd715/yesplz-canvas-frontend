@@ -88,6 +88,19 @@ describe('HTMLRenderer', () => {
     vi.clearAllMocks();
   });
 
+  it('keeps generated browser scripts isolated from the workspace origin', () => {
+    Reflect.deleteProperty(window, 'electronAPI');
+    const { container } = render(
+      <HTMLRenderer content='<script>parent.document.body.textContent = "unsafe"</script>' />
+    );
+    const iframe = container.querySelector('iframe');
+    const permissions = iframe?.getAttribute('sandbox')?.split(/\s+/);
+
+    expect(iframe).toHaveAttribute('srcdoc');
+    expect(permissions).toContain('allow-scripts');
+    expect(permissions).not.toContain('allow-same-origin');
+  });
+
   it('loads clean local HTML files through file URL in Electron', () => {
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
