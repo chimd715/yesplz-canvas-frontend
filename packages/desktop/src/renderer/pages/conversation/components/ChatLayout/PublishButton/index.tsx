@@ -184,6 +184,12 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
           </div>
         </div>
       )}
+      <form action='/api/platform/preview' method='post' target='_blank' rel='noopener'>
+        <Input type='hidden' name='conversationId' value={conversationId} readOnly />
+        <Button htmlType='submit' long disabled={!data.connected || !data.workspaceMatches}>
+          {t('preview.preview')}
+        </Button>
+      </form>
       <Button className={styles.primary} long disabled={!canPublish} loading={busy} onClick={() => void publish()}>
         {t(
           busy

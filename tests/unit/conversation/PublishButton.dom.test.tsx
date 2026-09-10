@@ -79,7 +79,27 @@ describe('conversation publishing', () => {
     await open();
     expect(await screen.findByText(key('noApp'))).toBeInTheDocument();
     expect(screen.getByRole('button', { name: key('publishApp') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'preview.preview', exact: true })).toBeDisabled();
     expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
+  it('opens preview with a native form containing only the selected conversation', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => status());
+    vi.stubGlobal('fetch', fetcher);
+    view('selected-conversation');
+    await open();
+    const button = screen.getByRole('button', { name: 'preview.preview', exact: true });
+    const form = button.closest('form')!;
+    expect(form).toHaveAttribute('action', '/api/platform/preview');
+    expect(form).toHaveAttribute('method', 'post');
+    expect(form).toHaveAttribute('target', '_blank');
+    expect(form).toHaveAttribute('rel', 'noopener');
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    form.addEventListener('submit', submitted);
+    fireEvent.click(button);
+    expect(submitted).toHaveBeenCalledOnce();
+    expect([...new FormData(form).entries()]).toEqual([['conversationId', 'selected-conversation']]);
+    expect(fetcher.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
   });
 
   it('publishes once on explicit action, polls pending work, and shares only a safe current-conversation URL', async () => {
