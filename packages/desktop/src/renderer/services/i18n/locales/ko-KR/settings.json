@@ -906,6 +906,7 @@
   "envLabel": "환경 변수",
   "envKeyPlaceholder": "키",
   "envValuePlaceholder": "값",
+  "storedEnvValuePlaceholder": "저장된 값 — 변경할 값 입력",
   "addEnvVar": "변수 추가",
   "testConnectionBtn": "연결 테스트",
   "testConnectionTesting": "테스트 중...",

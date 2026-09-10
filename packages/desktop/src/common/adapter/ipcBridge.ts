@@ -1125,12 +1125,16 @@ export const acpConversation = {
   /** Management view used by Agent settings. */
   getManagedAgents: httpGet<import('@/renderer/utils/model/agentTypes').ManagedAgent[], void>('/api/agents/management'),
   getAgentOverrides: httpGet<
-    { command_override?: string; env_override: { name: string; value: string }[] },
+    { command_override?: string; env_override: { name: string; value: string; redacted?: boolean }[] },
     { id: string }
   >((p) => `/api/agents/${encodeURIComponent(p.id)}/overrides`),
   setAgentOverrides: httpPut<
     import('@/renderer/utils/model/agentTypes').ManagedAgent,
-    { id: string; command_override?: string | null; env_override?: { name: string; value: string }[] }
+    {
+      id: string;
+      command_override?: string | null;
+      env_override?: ({ name: string; value: string } | { name: string; preserve: true })[];
+    }
   >(
     (p) => `/api/agents/${encodeURIComponent(p.id)}/overrides`,
     (p) => ({ command_override: p.command_override, env_override: p.env_override })

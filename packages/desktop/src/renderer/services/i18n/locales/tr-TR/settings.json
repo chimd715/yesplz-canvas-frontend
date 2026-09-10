@@ -906,6 +906,7 @@
   "envLabel": "Ortam Değişkenleri",
   "envKeyPlaceholder": "ANAHTAR",
   "envValuePlaceholder": "değer",
+  "storedEnvValuePlaceholder": "Kayıtlı değer — değiştirmek için girin",
   "addEnvVar": "Değişken Ekle",
   "testConnectionBtn": "Bağlantıyı Test Et",
   "testConnectionTesting": "Test ediliyor...",

@@ -869,6 +869,7 @@
   "envLabel": "Змінні оточення",
   "envKeyPlaceholder": "КЛЮЧ",
   "envValuePlaceholder": "значення",
+  "storedEnvValuePlaceholder": "Збережено — введіть нове значення",
   "addEnvVar": "Додати змінну",
   "testConnectionBtn": "Тест підключення",
   "testConnectionTesting": "Тестування...",

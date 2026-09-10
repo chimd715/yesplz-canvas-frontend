@@ -906,6 +906,7 @@
   "envLabel": "Variables de entorno",
   "envKeyPlaceholder": "CLAVE",
   "envValuePlaceholder": "valor",
+  "storedEnvValuePlaceholder": "Valor guardado — escribe uno nuevo",
   "addEnvVar": "Agregar variable",
   "testConnectionBtn": "Probar conexión",
   "testConnectionTesting": "Probando...",

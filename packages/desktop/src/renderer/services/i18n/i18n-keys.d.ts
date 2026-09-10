@@ -2586,6 +2586,7 @@ export type I18nKey =
   | 'settings.startOnBootDesc'
   | 'settings.startOnBootUnsupported'
   | 'settings.startOnBootUpdateFailed'
+  | 'settings.storedEnvValuePlaceholder'
   | 'settings.switchPlatform'
   | 'settings.switchToPreset'
   | 'settings.system'

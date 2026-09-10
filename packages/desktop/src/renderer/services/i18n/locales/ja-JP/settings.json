@@ -906,6 +906,7 @@
   "envLabel": "環境変数",
   "envKeyPlaceholder": "キー",
   "envValuePlaceholder": "値",
+  "storedEnvValuePlaceholder": "保存済み — 変更する値を入力",
   "addEnvVar": "変数を追加",
   "testConnectionBtn": "接続テスト",
   "testConnectionTesting": "テスト中...",

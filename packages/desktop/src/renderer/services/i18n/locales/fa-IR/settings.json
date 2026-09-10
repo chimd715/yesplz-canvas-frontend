@@ -918,6 +918,7 @@
   "envLabel": "متغیرهای محیطی",
   "envKeyPlaceholder": "KEY",
   "envValuePlaceholder": "مقدار",
+  "storedEnvValuePlaceholder": "مقدار ذخیره‌شده — مقدار جایگزین را وارد کنید",
   "addEnvVar": "افزودن متغیر",
   "testConnectionBtn": "آزمایش اتصال",
   "testConnectionTesting": "در حال آزمایش...",

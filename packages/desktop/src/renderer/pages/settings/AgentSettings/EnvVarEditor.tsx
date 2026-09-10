@@ -10,7 +10,7 @@ import { Plus, Delete, PreviewOpen, PreviewClose } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import { uuid } from '@/common/utils';
 
-export type EnvVarRow = { id: string; key: string; value: string };
+export type EnvVarRow = { id: string; key: string; value: string; redacted?: boolean };
 
 type EnvVarEditorProps = {
   value: EnvVarRow[];
@@ -41,7 +41,7 @@ const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ value, onChange }) => {
 
   const handleUpdateValue = useCallback(
     (id: string, newValue: string) => {
-      onChange(value.map((v) => (v.id === id ? { ...v, value: newValue } : v)));
+      onChange(value.map((v) => (v.id === id ? { ...v, value: newValue, redacted: false } : v)));
     },
     [value, onChange]
   );
@@ -71,6 +71,7 @@ const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ value, onChange }) => {
               <Input
                 size='large'
                 value={envVar.key}
+                disabled={envVar.redacted}
                 onChange={(v) => handleUpdateKey(envVar.id, v)}
                 placeholder={t('settings.envKeyPlaceholder')}
               />
@@ -78,12 +79,15 @@ const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ value, onChange }) => {
                 size='large'
                 type={isVisible ? 'text' : 'password'}
                 value={envVar.value}
+                autoComplete='off'
                 onChange={(v) => handleUpdateValue(envVar.id, v)}
-                placeholder={t('settings.envValuePlaceholder')}
+                placeholder={t(envVar.redacted ? 'settings.storedEnvValuePlaceholder' : 'settings.envValuePlaceholder')}
               />
               <Button
                 type='text'
                 size='small'
+                aria-label={t(isVisible ? 'common.hide' : 'common.show')}
+                disabled={envVar.redacted}
                 icon={
                   isVisible ? <PreviewClose theme='outline' size={16} /> : <PreviewOpen theme='outline' size={16} />
                 }
@@ -93,6 +97,7 @@ const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ value, onChange }) => {
               <Button
                 type='text'
                 size='small'
+                aria-label={t('common.delete')}
                 icon={<Delete theme='outline' size={16} />}
                 onClick={() => handleRemove(envVar.id)}
                 className='!h-36px !w-36px !rounded-10px !px-0 text-t-tertiary hover:text-danger'

@@ -908,6 +908,7 @@
   "envLabel": "Umgebungsvariablen",
   "envKeyPlaceholder": "SCHLÜSSEL",
   "envValuePlaceholder": "wert",
+  "storedEnvValuePlaceholder": "Gespeichert — neuen Wert eingeben",
   "addEnvVar": "Variable hinzufügen",
   "testConnectionBtn": "Verbindung testen",
   "testConnectionTesting": "Testet...",

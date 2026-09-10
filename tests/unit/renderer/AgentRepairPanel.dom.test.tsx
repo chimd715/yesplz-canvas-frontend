@@ -47,6 +47,7 @@ describe('AgentRepairPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(Message, 'success').mockImplementation(() => undefined as never);
+    vi.spyOn(Message, 'warning').mockImplementation(() => undefined as never);
   });
 
   it('loads current overrides on mount without an unlock step', async () => {
@@ -120,6 +121,88 @@ describe('AgentRepairPanel', () => {
       expect(Message.success).toHaveBeenCalledWith('settings.agentManagement.testConnectionOnline');
       expect(onSaved).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('preserves redacted values without submitting a placeholder or clearing the launch path', async () => {
+    const user = userEvent.setup();
+    vi.mocked(acpConversation.getAgentOverrides.invoke).mockResolvedValue({
+      command_override: '/custom/path/cli',
+      env_override: [{ name: 'API_KEY', value: '', redacted: true }],
+    });
+    vi.mocked(acpConversation.setAgentOverrides.invoke).mockResolvedValue(mockAgent);
+    render(<AgentRepairPanel agent={mockAgent} onSaved={vi.fn()} />);
+
+    const storedValue = await screen.findByPlaceholderText('settings.storedEnvValuePlaceholder');
+    expect(storedValue).toHaveValue('');
+    expect(screen.getByDisplayValue('API_KEY')).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /repair\.saveAndTest/ }));
+
+    expect(acpConversation.setAgentOverrides.invoke).toHaveBeenCalledWith({
+      id: mockAgent.id,
+      command_override: '/custom/path/cli',
+      env_override: [{ name: 'API_KEY', preserve: true }],
+    });
+  });
+
+  it('replaces a stored key while preserving another stored environment value', async () => {
+    const user = userEvent.setup();
+    vi.mocked(acpConversation.getAgentOverrides.invoke).mockResolvedValue({
+      env_override: [
+        { name: 'API_KEY', value: '', redacted: true },
+        { name: 'PRIVATE_URL', value: '', redacted: true },
+      ],
+    });
+    vi.mocked(acpConversation.setAgentOverrides.invoke).mockResolvedValue(mockAgent);
+    render(<AgentRepairPanel agent={mockAgent} onSaved={vi.fn()} />);
+
+    const storedValues = await screen.findAllByPlaceholderText('settings.storedEnvValuePlaceholder');
+    await user.type(storedValues[0], 'replacement-fixture');
+    await user.click(screen.getByRole('button', { name: /repair\.saveAndTest/ }));
+
+    expect(acpConversation.setAgentOverrides.invoke).toHaveBeenCalledWith({
+      id: mockAgent.id,
+      command_override: undefined,
+      env_override: [
+        { name: 'API_KEY', value: 'replacement-fixture' },
+        { name: 'PRIVATE_URL', preserve: true },
+      ],
+    });
+    await waitFor(() => expect(screen.queryByDisplayValue('replacement-fixture')).not.toBeInTheDocument());
+  });
+
+  it('removes only the deleted stored entry', async () => {
+    const user = userEvent.setup();
+    vi.mocked(acpConversation.getAgentOverrides.invoke).mockResolvedValue({
+      env_override: [
+        { name: 'API_KEY', value: '', redacted: true },
+        { name: 'PRIVATE_URL', value: '', redacted: true },
+      ],
+    });
+    vi.mocked(acpConversation.setAgentOverrides.invoke).mockResolvedValue(mockAgent);
+    render(<AgentRepairPanel agent={mockAgent} onSaved={vi.fn()} />);
+
+    await screen.findAllByPlaceholderText('settings.storedEnvValuePlaceholder');
+    await user.click(screen.getAllByRole('button', { name: 'common.delete' })[0]);
+    await user.click(screen.getByRole('button', { name: /repair\.saveAndTest/ }));
+
+    expect(acpConversation.setAgentOverrides.invoke).toHaveBeenCalledWith({
+      id: mockAgent.id,
+      command_override: undefined,
+      env_override: [{ name: 'PRIVATE_URL', preserve: true }],
+    });
+  });
+
+  it('blocks replacement when the existing configuration could not be loaded', async () => {
+    const user = userEvent.setup();
+    vi.mocked(acpConversation.getAgentOverrides.invoke).mockRejectedValue(new Error('Unavailable'));
+    render(<AgentRepairPanel agent={mockAgent} onSaved={vi.fn()} />);
+
+    await screen.findByText('Unavailable');
+    const save = screen.getByRole('button', { name: /repair\.saveAndTest/ });
+    await user.click(save);
+
+    expect(save).toBeDisabled();
+    expect(acpConversation.setAgentOverrides.invoke).not.toHaveBeenCalled();
   });
 
   it('blocks save on duplicate env keys', async () => {

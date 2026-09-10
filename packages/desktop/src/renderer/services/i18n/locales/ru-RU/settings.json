@@ -910,6 +910,7 @@
   "envLabel": "Переменные окружения",
   "envKeyPlaceholder": "КЛЮЧ",
   "envValuePlaceholder": "значение",
+  "storedEnvValuePlaceholder": "Сохранено — введите новое значение",
   "addEnvVar": "Добавить переменную",
   "testConnectionBtn": "Тест подключения",
   "testConnectionTesting": "Тестирование...",

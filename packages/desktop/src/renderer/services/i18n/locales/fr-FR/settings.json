@@ -918,6 +918,7 @@
   "envLabel": "Variables d'environnement",
   "envKeyPlaceholder": "CLÉ",
   "envValuePlaceholder": "valeur",
+  "storedEnvValuePlaceholder": "Valeur enregistrée — saisir un remplacement",
   "addEnvVar": "Ajouter une variable",
   "testConnectionBtn": "Tester la connexion",
   "testConnectionTesting": "Test en cours...",

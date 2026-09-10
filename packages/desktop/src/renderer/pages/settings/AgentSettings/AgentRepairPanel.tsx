@@ -88,6 +88,8 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
   const [envRows, setEnvRows] = useState<EnvVarRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadedAgentId, setLoadedAgentId] = useState<string>();
+  const [reloadVersion, setReloadVersion] = useState(0);
   const savingRef = useRef(false);
   const initialHasOverridesRef = useRef(false);
   const isInternalAionCli = agent.agent_type === 'aionrs' && agent.agent_source === 'internal';
@@ -95,6 +97,7 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
   // Load current overrides on mount. The repair page is itself the explicit
   // entry point, so there's no separate unlock step.
   useEffect(() => {
+    setLoadedAgentId(undefined);
     if (isInternalAionCli) return;
 
     let cancelled = false;
@@ -107,7 +110,10 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
         initialHasOverridesRef.current =
           Boolean(loadedCommandOverride.trim()) || loadedEnvOverride.some((env) => Boolean(env.name.trim()));
         setCommandOverride(loadedCommandOverride);
-        setEnvRows(loadedEnvOverride.map((env) => ({ id: uuid(), key: env.name, value: env.value })));
+        setEnvRows(
+          loadedEnvOverride.map((env) => ({ id: uuid(), key: env.name, value: env.value, redacted: env.redacted }))
+        );
+        setLoadedAgentId(agent.id);
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch agent overrides:', err);
@@ -117,14 +123,14 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
     return () => {
       cancelled = true;
     };
-  }, [agent.id, isInternalAionCli]);
+  }, [agent.id, isInternalAionCli, reloadVersion]);
 
   const handleReset = useCallback(() => {
     setCommandOverride('');
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (savingRef.current || isSaving) return;
+    if (savingRef.current || isSaving || loadedAgentId !== agent.id) return;
 
     // Check for duplicate keys
     const keys = envRows.map((row) => row.key.trim()).filter(Boolean);
@@ -136,7 +142,9 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
 
     const envOverride = envRows
       .filter((row) => row.key.trim())
-      .map((row) => ({ name: row.key.trim(), value: row.value }));
+      .map((row) =>
+        row.redacted ? { name: row.key.trim(), preserve: true as const } : { name: row.key.trim(), value: row.value }
+      );
     const hasCurrentOverrides = Boolean(commandOverride.trim()) || envOverride.length > 0;
     if (!hasCurrentOverrides && !initialHasOverridesRef.current) {
       setError(t('settings.repair.emptyOverridesError'));
@@ -158,6 +166,8 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
       });
 
       showSaveAndTestResult(t, result);
+      setLoadedAgentId(undefined);
+      setReloadVersion((version) => version + 1);
       onSaved();
     } catch (err) {
       console.error('Failed to save agent overrides:', err);
@@ -166,7 +176,7 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
       savingRef.current = false;
       setIsSaving(false);
     }
-  }, [agent.id, commandOverride, envRows, isSaving, onSaved, t]);
+  }, [agent.id, commandOverride, envRows, isSaving, loadedAgentId, onSaved, t]);
 
   const banner = resolveDiagnosticBanner(t, agent);
 
@@ -260,7 +270,7 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
         <Button
           type='primary'
           size='large'
-          disabled={isSaving}
+          disabled={isSaving || loadedAgentId !== agent.id}
           loading={isSaving}
           onClick={handleSave}
           className='!rounded-8px'

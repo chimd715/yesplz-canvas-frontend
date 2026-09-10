@@ -918,6 +918,7 @@
   "envLabel": "環境變數",
   "envKeyPlaceholder": "變數名",
   "envValuePlaceholder": "值",
+  "storedEnvValuePlaceholder": "已儲存 — 輸入新值以取代",
   "addEnvVar": "新增變數",
   "testConnectionBtn": "測試連線",
   "testConnectionTesting": "測試中...",
