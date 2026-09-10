@@ -119,7 +119,8 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
           redirect: 'error',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ conversationId }),
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+          // Allow the streamed job's 780-second deadline plus its final response.
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(795000)]),
         })
       );
       if (!controller.signal.aborted) await mutate(next, { revalidate: false });

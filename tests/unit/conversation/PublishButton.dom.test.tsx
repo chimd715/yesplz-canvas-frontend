@@ -169,6 +169,61 @@ describe('conversation publishing', () => {
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 
+  it('waits past the status timeout for a streamed publishing result', async () => {
+    let body: ReadableStreamDefaultController<Uint8Array>;
+    let submitted: AbortSignal | null | undefined;
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+        if (init?.method !== 'POST') return status();
+        submitted = init.signal;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              body = controller;
+              controller.enqueue(encoder.encode('\n'));
+              submitted?.addEventListener('abort', () => controller.error(new Error('Request aborted')));
+            },
+          }),
+          { status: 202 }
+        );
+      })
+    );
+    view();
+    await open();
+    const publish = screen.getByRole('button', { name: key('publishApp') });
+    await waitFor(() => expect(publish).toBeEnabled());
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), milliseconds);
+      return controller.signal;
+    });
+    try {
+      fireEvent.click(publish);
+      await act(async () => vi.advanceTimersByTimeAsync(16000));
+      expect(submitted?.aborted).toBe(false);
+      await act(async () => {
+        body.enqueue(
+          encoder.encode(
+            await status({ history: [{ url: 'https://streamed.example.app/', conversationId: 'first' }] }).text()
+          )
+        );
+        body.close();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByRole('link', { name: key('openApp') })).toHaveAttribute(
+        'href',
+        'https://streamed.example.app/'
+      );
+    } finally {
+      timeout.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('disables publishing when a status refresh fails and retries only the status request', async () => {
     let unavailable = false;
     const fetcher = vi
