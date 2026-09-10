@@ -42,6 +42,7 @@ class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
 
   readyState = FakeWebSocket.CONNECTING;
+  send = vi.fn<(data: string) => void>();
   private readonly listeners: { [K in keyof FakeSocketEventMap]: FakeSocketEventMap[K][] } = {
     open: [],
     message: [],
@@ -64,6 +65,10 @@ class FakeWebSocket {
   dispatchOpen() {
     this.readyState = FakeWebSocket.OPEN;
     for (const listener of this.listeners.open) listener();
+  }
+
+  dispatchMessage(data: unknown) {
+    for (const listener of this.listeners.message) listener({ data: JSON.stringify(data) } as MessageEvent<string>);
   }
 
   dispatchClose() {
@@ -363,6 +368,28 @@ describe('httpBridge', () => {
   });
 
   describe('wsEmitter', () => {
+    it('answers heartbeat pings on the message socket and continues dispatching chat events', async () => {
+      vi.resetModules();
+      const { wsEmitter: isolatedWsEmitter } = await import('@/common/adapter/httpBridge');
+      vi.useFakeTimers();
+      vi.stubGlobal('window', { __backendPort: 13400 });
+      vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
+      vi.spyOn(console, 'debug').mockImplementation(() => {});
+      FakeWebSocket.instances = [];
+      const received = vi.fn();
+      const unsubscribe = isolatedWsEmitter('message.stream').on(received);
+      const socket = FakeWebSocket.instances[0];
+      socket.dispatchOpen();
+      socket.dispatchMessage({ name: 'ping', data: { timestamp: 1 } });
+      socket.dispatchMessage({ name: 'message.stream', data: { conversation_id: 'test', type: 'finish' } });
+      expect(JSON.parse(socket.send.mock.calls[0][0])).toEqual({ name: 'pong', data: { timestamp: Date.now() } });
+      expect(received).toHaveBeenCalledExactlyOnceWith({ conversation_id: 'test', type: 'finish' });
+      socket.dispatchClose();
+      vi.clearAllTimers();
+      unsubscribe();
+      vi.useRealTimers();
+    });
+
     it('emits realtime.reconnected only after a prior websocket open', () => {
       vi.useFakeTimers();
       vi.stubGlobal('window', { __backendPort: 13400 });

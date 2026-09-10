@@ -473,6 +473,12 @@ function ensureWs(): void {
         data?: unknown;
         payload?: unknown;
       };
+      if (msg.name === 'ping') {
+        if (current.readyState === WebSocket.OPEN) {
+          current.send(JSON.stringify({ name: 'pong', data: { timestamp: Date.now() } }));
+        }
+        return;
+      }
       const eventName = msg.name ?? msg.event;
       const payload = msg.data ?? msg.payload;
       console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
