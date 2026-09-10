@@ -31,14 +31,15 @@ import {
 } from './search/searchStore';
 
 const FS_EVENT = 'fs';
-const RECONNECT_EVENT = 'realtime.reconnected';
+const CONNECT_EVENT = 'realtime.connected';
 
 /** Transport over the WS singleton: `fs` event族 in, `wsSend('fs', …)` out. */
 export function createWsMonitorTransport(): MonitorTransport {
   return {
     send: (frame) => wsSend(FS_EVENT, frame),
     onFrame: (cb) => wsEmitter<unknown>(FS_EVENT).on(cb),
-    onReconnect: (cb) => wsEmitter(RECONNECT_EVENT).on(cb),
+    // Re-declare subscriptions on the first open too: the initial send may have been dropped.
+    onReconnect: (cb) => wsEmitter(CONNECT_EVENT).on(cb),
   };
 }
 

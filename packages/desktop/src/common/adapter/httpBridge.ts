@@ -395,6 +395,7 @@ export function stubProvider<Data, Params = undefined>(name: string, defaultValu
 // ---------------------------------------------------------------------------
 
 type WsCallback = (data: unknown) => void;
+const REALTIME_CONNECTED_EVENT = 'realtime.connected';
 const REALTIME_RECONNECTED_EVENT = 'realtime.reconnected';
 const wsListeners = new Map<string, Set<WsCallback>>();
 let ws: WebSocket | null = null;
@@ -441,6 +442,8 @@ function ensureWs(): void {
     const isReconnect = wsHasOpened;
     wsHasOpened = true;
     wsReconnectAttempt = 0;
+    // File subscriptions dropped while CONNECTING must also retry on the first open.
+    dispatchWsEvent(REALTIME_CONNECTED_EVENT, { timestamp: Date.now() });
     if (isReconnect) {
       dispatchWsEvent(REALTIME_RECONNECTED_EVENT, { timestamp: Date.now() });
     }

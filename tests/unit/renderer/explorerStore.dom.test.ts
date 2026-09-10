@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DirRef, Entry, PeKey, TreeNode } from '@/renderer/pages/conversation/explorer/explorerModel';
 import { peKey, refToKey } from '@/renderer/pages/conversation/explorer/explorerModel';
@@ -25,6 +25,59 @@ const flush = async (): Promise<void> => {
 
 const dir = (name: string): Entry => ({ name, kind: 'dir' });
 const file = (name: string): Entry => ({ name, kind: 'file' });
+
+it('loads the expanded Files root when the first WebSocket opens after the initial subscribe was dropped', async () => {
+  vi.resetModules();
+  class DelayedSocket extends EventTarget {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    static instance: DelayedSocket;
+    readyState = DelayedSocket.CONNECTING;
+    send = vi.fn<(data: string) => void>();
+    constructor(_url: string) {
+      super();
+      DelayedSocket.instance = this;
+    }
+    close() {
+      this.readyState = 3;
+    }
+  }
+  vi.stubGlobal('WebSocket', DelayedSocket);
+  const store = await import('@/renderer/pages/conversation/explorer/explorerStore');
+  const { initExplorerRuntime } = await import('@/renderer/pages/conversation/explorer/monitorTransport');
+  const client = initExplorerRuntime();
+  try {
+    store.openProject('first-connection', [{ pe_id: 'workspace', title: 'app' }]);
+    await flush();
+    const socket = DelayedSocket.instance;
+    expect(socket.send).not.toHaveBeenCalled();
+    socket.readyState = DelayedSocket.OPEN;
+    socket.dispatchEvent(new Event('open'));
+    await flush();
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(socket.send.mock.calls[0][0]) as { data: { id: number } };
+    socket.dispatchEvent(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          name: 'fs',
+          data: {
+            jsonrpc: '2.0',
+            id: request.data.id,
+            result: {
+              snapshots: [{ target: { pe_id: 'workspace', relative_path: '' }, entries: [file('index.html')] }],
+            },
+          },
+        }),
+      })
+    );
+    await flush();
+    expect(store.getExplorerSnapshot().treeData[0].children?.map((entry) => entry.title)).toEqual(['index.html']);
+  } finally {
+    client.dispose();
+    store.resetExplorerStoreForTest();
+    vi.unstubAllGlobals();
+  }
+});
 
 type PortHarness = {
   port: MonitorPort;
