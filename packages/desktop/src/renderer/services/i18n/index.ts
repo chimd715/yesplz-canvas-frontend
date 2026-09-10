@@ -34,6 +34,12 @@ export type { I18nKey, I18nModule } from './i18n-keys';
 export { normalizeLanguageCode } from '@/common/config/i18n';
 export type { SupportedLanguage } from '@/common/config/i18n';
 
+export const isHostedEnglish =
+  typeof document !== 'undefined' &&
+  typeof window !== 'undefined' &&
+  !window.electronAPI &&
+  Boolean(document.querySelector('meta[name="ai-builder-preview"][content="enabled"]'));
+
 export const supportedLanguages = i18nConfig.supportedLanguages;
 
 const localeData: LocaleData = {
@@ -84,6 +90,7 @@ function getElectronSystemLanguageHint(): string | null {
 }
 
 function getInitialLanguage(): SupportedLanguage {
+  if (isHostedEnglish) return 'en-US';
   const backendStartupFailed =
     typeof window !== 'undefined' && (window as Window & { __backendStartupFailed?: boolean }).__backendStartupFailed;
   const localStorageLanguage = getLocalStorageLanguageHint();
@@ -142,6 +149,7 @@ i18n
 // fetched from the backend rather than the empty cache that exists during
 // module load.
 async function initLanguage(): Promise<void> {
+  if (isHostedEnglish) return;
   try {
     await configService.whenReady();
     const savedLanguage = configService.get('language');
@@ -183,6 +191,7 @@ void initLanguage();
 // This enables real-time sync between desktop and WebUI — when one changes language,
 // the other updates immediately without requiring a restart.
 ipcBridge.systemSettings.languageChanged.on(async ({ language }) => {
+  if (isHostedEnglish) return;
   const normalized = normalizeLanguageCode(language);
   // Skip if already on this language (we're the one who triggered the change)
   if (i18n.language === normalized) return;
@@ -196,6 +205,7 @@ ipcBridge.systemSettings.languageChanged.on(async ({ language }) => {
  * Change language with lazy loading.
  */
 export async function changeLanguage(lang: string): Promise<void> {
+  if (isHostedEnglish) return;
   await ensureAndSwitch(i18n, lang, loadLocaleModules);
   const normalized = normalizeLanguageCode(lang);
   await configService.set('language', normalized);

@@ -2,7 +2,7 @@ import AionSelect from '@/renderer/components/base/AionSelect';
 import type { SelectHandle } from '@arco-design/web-react/es/Select/interface';
 import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { changeLanguage } from '@/renderer/services/i18n';
+import { changeLanguage, isHostedEnglish } from '@/renderer/services/i18n';
 
 const LanguageSwitcher: React.FC = () => {
   const { i18n } = useTranslation();
@@ -29,7 +29,13 @@ const LanguageSwitcher: React.FC = () => {
 
   return (
     <div className='flex items-center gap-8px'>
-      <AionSelect ref={selectRef} className='w-160px' value={i18n.language} onChange={handleLanguageChange}>
+      <AionSelect
+        disabled={isHostedEnglish}
+        ref={selectRef}
+        className='w-160px'
+        value={i18n.language}
+        onChange={handleLanguageChange}
+      >
         <AionSelect.Option value='zh-CN'>简体中文</AionSelect.Option>
         <AionSelect.Option value='zh-TW'>繁體中文</AionSelect.Option>
         <AionSelect.Option value='ja-JP'>日本語</AionSelect.Option>

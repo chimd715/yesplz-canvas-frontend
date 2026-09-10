@@ -1,7 +1,7 @@
-import loginLogo from '@renderer/assets/logos/brand/app.png';
+import loginLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { changeLanguage } from '@/renderer/services/i18n';
+import { changeLanguage, isHostedEnglish } from '@/renderer/services/i18n';
 import { useNavigate } from 'react-router-dom';
 import AppLoader from '@renderer/components/layout/AppLoader';
 import { useAuth } from '../../hooks/context/AuthContext';
@@ -200,20 +200,22 @@ const LoginPage: React.FC = () => {
       </div> */}
 
       <div className='login-page__card'>
-        <label className='login-page__lang-select-wrapper' htmlFor='lang-select'>
-          <select
-            id='lang-select'
-            className='login-page__lang-select'
-            value={i18n.language}
-            onChange={handleLanguageChange}
-          >
-            {supportedLanguages.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!isHostedEnglish && (
+          <label className='login-page__lang-select-wrapper' htmlFor='lang-select'>
+            <select
+              id='lang-select'
+              className='login-page__lang-select'
+              value={i18n.language}
+              onChange={handleLanguageChange}
+            >
+              {supportedLanguages.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <div className='login-page__header'>
           <div className='login-page__logo'>
