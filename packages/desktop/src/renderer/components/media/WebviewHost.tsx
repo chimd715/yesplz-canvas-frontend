@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Left, Right, Refresh, Loading } from '@icon-park/react';
 import { ipcBridge } from '@/common';
@@ -56,14 +56,36 @@ const WebBrowserHost: React.FC<WebviewHostProps> = ({
   resolveUrlInput,
   onUrlChange,
   onTitleChange,
+  onDidFinishLoad,
+  onDidFailLoad,
 }) => {
   const { t } = useTranslation();
+  const frameName = `ai-builder-preview-${useId()}`;
   const [inputUrl, setInputUrl] = useState(url === 'about:blank' ? '' : url);
+  const [displayUrl, setDisplayUrl] = useState(url);
+  const [reload, setReload] = useState(0);
   const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
     setInputUrl(url === 'about:blank' ? '' : url);
-    setFailed(false);
+    setDisplayUrl(url);
   }, [url]);
+  let frameUrl: string | undefined;
+  try {
+    const parsed = new URL(displayUrl);
+    if (['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password) frameUrl = parsed.href;
+  } catch {
+    /* A new tab has no address yet. */
+  }
+  const hosted = Boolean(frameUrl && isHostedPreviewUrl(frameUrl));
+  useEffect(() => {
+    setFailed(false);
+    setLoading(hosted);
+    if (hosted && frameUrl && !openWebBrowserUrl(frameUrl, frameName)) {
+      setFailed(true);
+      setLoading(false);
+    }
+  }, [frameUrl, hosted, frameName, reload]);
   const raw = inputUrl.trim();
   const target = raw
     ? resolveUrlInput
@@ -74,32 +96,74 @@ const WebBrowserHost: React.FC<WebviewHostProps> = ({
     : null;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!target || !openWebBrowserUrl(target)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(target || '');
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password)
+        throw new Error('Invalid URL');
+    } catch {
       setFailed(true);
       return;
     }
     setFailed(false);
-    onUrlChange?.(target);
-    onTitleChange?.(new URL(target).hostname);
+    if (displayUrl === parsed.href) setReload((value) => value + 1);
+    setDisplayUrl(parsed.href);
+    onUrlChange?.(parsed.href);
+    onTitleChange?.(parsed.hostname);
   };
   return (
-    <div className={`h-full w-full flex items-center justify-center p-16px ${className ?? ''}`} style={style}>
-      <form onSubmit={submit} className='w-full max-w-480px flex flex-col gap-12px'>
+    <div className={`h-full w-full flex flex-col min-h-0 ${className ?? ''}`} style={style}>
+      <form
+        onSubmit={submit}
+        className='flex items-center gap-6px h-40px px-10px bg-bg-2 border-b border-border-1 shrink-0'
+      >
+        <Button
+          aria-label={t('common.reload')}
+          title={t('common.reload')}
+          disabled={!frameUrl}
+          type='text'
+          size='small'
+          className='shrink-0'
+          icon={loading ? <Loading size={16} className='animate-spin' /> : <Refresh size={16} />}
+          onClick={() => setReload((value) => value + 1)}
+        />
         <Input
+          className='flex-1 min-w-0'
+          size='small'
           value={inputUrl}
           onChange={setInputUrl}
           aria-label={t('preview.browser.addressPlaceholder')}
           placeholder={t('preview.browser.addressPlaceholder')}
         />
-        <Button type='primary' htmlType='submit' disabled={!raw}>
-          {t(target && isHostedPreviewUrl(target) ? 'preview.preview' : 'common.openInSystemBrowser')}
-        </Button>
-        {failed && (
-          <div role='alert' className='text-danger text-13px'>
-            {t('messages.openLinkFailed')}
-          </div>
+        {!hosted && frameUrl && (
+          <Button onClick={() => openWebBrowserUrl(frameUrl)}>{t('common.openInSystemBrowser')}</Button>
         )}
       </form>
+      {failed && (
+        <div role='alert' className='text-danger text-13px p-8px'>
+          {t('messages.openLinkFailed')}
+        </div>
+      )}
+      {hosted && frameUrl && (
+        <iframe
+          key={`${displayUrl}:${reload}`}
+          name={frameName}
+          title={t('preview.preview')}
+          sandbox='allow-scripts allow-same-origin allow-forms'
+          referrerPolicy='no-referrer'
+          className='w-full flex-1 min-h-0 border-0'
+          onLoad={() => {
+            setLoading(false);
+            onTitleChange?.(new URL(frameUrl).hostname);
+            onDidFinishLoad?.();
+          }}
+          onError={() => {
+            setLoading(false);
+            setFailed(true);
+            onDidFailLoad?.(-1, t('messages.openLinkFailed'));
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -97,14 +97,20 @@ export const openExternalUrl = async (url: string): Promise<void> => {
 export const isHostedPreviewUrl = (value: string): boolean => {
   if (!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]')) return false;
   try {
-    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
+    const url = new URL(value);
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    );
   } catch {
     return false;
   }
 };
 
-/** Open a WebUI link during a user gesture; desktop keeps its native browser tabs. */
-export const openWebBrowserUrl = (value: string): boolean => {
+/** Open a WebUI link, or load an owned app into an existing named preview frame. */
+export const openWebBrowserUrl = (value: string, frameName?: string): boolean => {
   if (isElectronDesktop()) return false;
   let url: URL;
   try {
@@ -123,9 +129,9 @@ export const openWebBrowserUrl = (value: string): boolean => {
   const form = document.createElement('form'),
     input = document.createElement('input');
   form.method = 'post';
-  form.action = '/api/platform/preview';
-  form.target = '_blank';
-  form.rel = 'noopener';
+  form.action = frameName ? '/api/platform/preview/embed' : '/api/platform/preview';
+  form.target = frameName || '_blank';
+  if (!frameName) form.rel = 'noopener';
   input.type = 'hidden';
   input.name = 'conversationId';
   input.value = conversationId;

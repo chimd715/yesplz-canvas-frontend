@@ -89,7 +89,16 @@ describe('WebUI browser navigation', () => {
     opened = vi.spyOn(window, 'open').mockReturnValue(null);
   });
 
-  it('sends a hosted localhost chat link through the owned preview form with only its conversation', () => {
+  it('keeps a hosted localhost chat link in the existing right browser tabs', () => {
+    hosted();
+    renderProvider();
+    act(() => ctx.openBrowserTab('http://localhost:8000/private-path?ignored=1'));
+    expect(browserTabs().map((tab) => tab.content)).toEqual(['http://localhost:8000/private-path?ignored=1']);
+    expect(ctx.isOpen).toBe(true);
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('automatically loads a restored hosted app inside its sandboxed frame using only the current conversation', () => {
     hosted();
     const submitted: Record<string, unknown>[] = [];
     vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function () {
@@ -97,23 +106,24 @@ describe('WebUI browser navigation', () => {
         action: this.getAttribute('action'),
         method: this.method,
         target: this.target,
-        rel: this.rel,
         fields: [...new FormData(this).entries()],
       });
     });
-    renderProvider();
-    act(() => ctx.openBrowserTab('http://localhost:8000/private-path?ignored=1'));
+    const view = browser('http://localhost:8000/private-path?ignored=1');
+    const frame = view.container.querySelector('iframe')!;
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
     expect(submitted).toEqual([
       {
-        action: '/api/platform/preview',
+        action: '/api/platform/preview/embed',
         method: 'post',
-        target: '_blank',
-        rel: 'noopener',
+        target: frame.name,
         fields: [['conversationId', 'selected']],
       },
     ]);
     expect(opened).not.toHaveBeenCalled();
-    expect(browserTabs()).toHaveLength(0);
+    expect(view.container.querySelector('webview')).toBeNull();
+    expect(frame).not.toHaveAttribute('srcdoc');
+    expect(screen.queryByRole('button', { name: 'preview.preview' })).not.toBeInTheDocument();
   });
 
   it('opens external chat links and standalone local links in the real browser', () => {
@@ -127,9 +137,10 @@ describe('WebUI browser navigation', () => {
     expect(browserTabs()).toHaveLength(0);
   });
 
-  it('shows a restored URL as an explicit browser action without an inert webview or automatic popup', () => {
+  it('keeps restored external URLs as explicit browser actions without embedding them or opening a popup', () => {
     const view = render(<URLViewer url='https://example.com/restored' />);
     expect(view.container.querySelector('webview')).toBeNull();
+    expect(view.container.querySelector('iframe')).toBeNull();
     expect(opened).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'common.openInSystemBrowser' }));
     expect(opened).toHaveBeenCalledWith('https://example.com/restored', '_blank', 'noopener,noreferrer');
@@ -143,6 +154,20 @@ describe('WebUI browser navigation', () => {
     fireEvent.submit(screen.getByRole('textbox').closest('form')!);
     expect(submit).toHaveBeenCalledOnce();
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('reloads the owned app in the same frame and gives separate tabs distinct form targets', () => {
+    hosted();
+    const targets: string[] = [];
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function () {
+      targets.push(this.target);
+    });
+    browser('http://localhost:8000/');
+    fireEvent.click(screen.getByRole('button', { name: 'common.reload' }));
+    browser('http://localhost:8000/');
+    expect(targets).toHaveLength(3);
+    expect(targets[0]).toBe(targets[1]);
+    expect(targets[2]).not.toBe(targets[0]);
   });
 
   it('refuses a hosted loopback URL without a current conversation or an unsafe URL scheme', () => {

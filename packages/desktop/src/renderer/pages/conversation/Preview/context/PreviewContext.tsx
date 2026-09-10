@@ -9,7 +9,7 @@ import type { PreviewContentType } from '@/common/types/office/preview';
 import type { ChatFileRef, ContentEncoding } from '@/common/types/chatFile';
 import { chatFileRefKey, isChatFileRef } from '@/common/types/chatFile';
 import { emitter } from '@/renderer/utils/emitter';
-import { openWebBrowserUrl } from '@/renderer/utils/platform';
+import { isHostedPreviewUrl, openWebBrowserUrl } from '@/renderer/utils/platform';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { BROWSER_BLANK_URL, BROWSER_TAB_FALLBACK_TITLE, MAX_BROWSER_TABS } from '../browser/constants';
 import { isBrowserMcpActivity, isBrowserMcpSettled } from '../browser/agentActivity';
@@ -877,7 +877,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
    */
   const openBrowserTab = useCallback(
     (url?: string) => {
-      if (url && openWebBrowserUrl(url)) return;
+      if (url && !isHostedPreviewUrl(url) && openWebBrowserUrl(url)) return;
       openPreview(url?.trim() || BROWSER_BLANK_URL, 'browser');
     },
     [openPreview]
