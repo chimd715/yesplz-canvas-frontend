@@ -8,6 +8,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Left, Right, Refresh, Loading } from '@icon-park/react';
 import { ipcBridge } from '@/common';
+import { Button, Input } from '@arco-design/web-react';
+import { isElectronDesktop, isHostedPreviewUrl, openWebBrowserUrl } from '@/renderer/utils/platform';
 import { InternalNavTracker, shouldResetHistoryForUrlProp } from './webviewHistory';
 
 export interface WebviewHostProps {
@@ -47,6 +49,61 @@ export interface WebviewHostProps {
 const MIN_ZOOM_FACTOR = 0.75;
 const MAX_ZOOM_FACTOR = 1.5;
 
+const WebBrowserHost: React.FC<WebviewHostProps> = ({
+  url,
+  className,
+  style,
+  resolveUrlInput,
+  onUrlChange,
+  onTitleChange,
+}) => {
+  const { t } = useTranslation();
+  const [inputUrl, setInputUrl] = useState(url === 'about:blank' ? '' : url);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setInputUrl(url === 'about:blank' ? '' : url);
+    setFailed(false);
+  }, [url]);
+  const raw = inputUrl.trim();
+  const target = raw
+    ? resolveUrlInput
+      ? resolveUrlInput(raw)
+      : /^https?:\/\//i.test(raw)
+        ? raw
+        : `https://${raw}`
+    : null;
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!target || !openWebBrowserUrl(target)) {
+      setFailed(true);
+      return;
+    }
+    setFailed(false);
+    onUrlChange?.(target);
+    onTitleChange?.(new URL(target).hostname);
+  };
+  return (
+    <div className={`h-full w-full flex items-center justify-center p-16px ${className ?? ''}`} style={style}>
+      <form onSubmit={submit} className='w-full max-w-480px flex flex-col gap-12px'>
+        <Input
+          value={inputUrl}
+          onChange={setInputUrl}
+          aria-label={t('preview.browser.addressPlaceholder')}
+          placeholder={t('preview.browser.addressPlaceholder')}
+        />
+        <Button type='primary' htmlType='submit' disabled={!raw}>
+          {t(target && isHostedPreviewUrl(target) ? 'preview.preview' : 'common.openInSystemBrowser')}
+        </Button>
+        {failed && (
+          <div role='alert' className='text-danger text-13px'>
+            {t('messages.openLinkFailed')}
+          </div>
+        )}
+      </form>
+    </div>
+  );
+};
+
 /**
  * Shared webview host component — extracted from URLViewer.
  *
@@ -57,7 +114,7 @@ const MAX_ZOOM_FACTOR = 1.5;
  * - Partition support for cache isolation
  * - Optional navigation bar (hidden by default for embedded use)
  */
-const WebviewHost: React.FC<WebviewHostProps> = ({
+const ElectronWebviewHost: React.FC<WebviewHostProps> = ({
   url,
   id: _id,
   showNavBar = false,
@@ -796,5 +853,8 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
     </div>
   );
 };
+
+const WebviewHost: React.FC<WebviewHostProps> = (props) =>
+  isElectronDesktop() ? <ElectronWebviewHost {...props} /> : <WebBrowserHost {...props} />;
 
 export default WebviewHost;

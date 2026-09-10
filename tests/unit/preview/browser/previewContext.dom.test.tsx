@@ -16,8 +16,8 @@
  */
 
 import React from 'react';
-import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -31,6 +31,8 @@ vi.mock('@/common', () => ({
 vi.mock('@/renderer/pages/conversation/Preview/browser/firstUseNotice', () => ({
   maybeNotifyFirstAgentBrowserUse: vi.fn(),
 }));
+vi.mock('@/common/adapter/httpBridge', () => ({ getBaseUrl: () => window.location.origin }));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 import {
   PreviewProvider,
@@ -38,6 +40,8 @@ import {
   type PreviewContextValue,
 } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
 import { MAX_BROWSER_TABS } from '@/renderer/pages/conversation/Preview/browser/constants';
+import BrowserViewer from '@/renderer/pages/conversation/Preview/browser/BrowserViewer';
+import URLViewer from '@/renderer/pages/conversation/Preview/components/viewers/URLViewer';
 
 let ctx: PreviewContextValue;
 
@@ -54,12 +58,114 @@ const renderProvider = () =>
   );
 
 const browserTabs = () => ctx.tabs.filter((tab) => tab.content_type === 'browser');
+const hosted = () => {
+  const marker = document.createElement('meta');
+  marker.name = 'ai-builder-preview';
+  marker.content = 'enabled';
+  document.head.append(marker);
+  history.replaceState({}, '', '/#/conversation/selected');
+};
 
 beforeEach(() => {
   localStorage.clear();
+  Object.defineProperty(window, 'electronAPI', { value: {}, configurable: true });
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  Reflect.deleteProperty(window, 'electronAPI');
+  document.querySelector('meta[name="ai-builder-preview"]')?.remove();
+  history.replaceState({}, '', '/');
+});
+
+describe('WebUI browser navigation', () => {
+  const browser = (url: string) =>
+    render(
+      <BrowserViewer url={url} tabId='tab' onUrlChange={vi.fn()} onTitleChange={vi.fn()} onFaviconChange={vi.fn()} />
+    );
+  let opened: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    Reflect.deleteProperty(window, 'electronAPI');
+    opened = vi.spyOn(window, 'open').mockReturnValue(null);
+  });
+
+  it('sends a hosted localhost chat link through the owned preview form with only its conversation', () => {
+    hosted();
+    const submitted: Record<string, unknown>[] = [];
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function () {
+      submitted.push({
+        action: this.getAttribute('action'),
+        method: this.method,
+        target: this.target,
+        rel: this.rel,
+        fields: [...new FormData(this).entries()],
+      });
+    });
+    renderProvider();
+    act(() => ctx.openBrowserTab('http://localhost:8000/private-path?ignored=1'));
+    expect(submitted).toEqual([
+      {
+        action: '/api/platform/preview',
+        method: 'post',
+        target: '_blank',
+        rel: 'noopener',
+        fields: [['conversationId', 'selected']],
+      },
+    ]);
+    expect(opened).not.toHaveBeenCalled();
+    expect(browserTabs()).toHaveLength(0);
+  });
+
+  it('opens external chat links and standalone local links in the real browser', () => {
+    renderProvider();
+    act(() => ctx.openBrowserTab('https://example.com/page'));
+    act(() => ctx.openBrowserTab('http://localhost:8000/'));
+    expect(opened.mock.calls).toEqual([
+      ['https://example.com/page', '_blank', 'noopener,noreferrer'],
+      ['http://localhost:8000/', '_blank', 'noopener,noreferrer'],
+    ]);
+    expect(browserTabs()).toHaveLength(0);
+  });
+
+  it('shows a restored URL as an explicit browser action without an inert webview or automatic popup', () => {
+    const view = render(<URLViewer url='https://example.com/restored' />);
+    expect(view.container.querySelector('webview')).toBeNull();
+    expect(opened).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.openInSystemBrowser' }));
+    expect(opened).toHaveBeenCalledWith('https://example.com/restored', '_blank', 'noopener,noreferrer');
+  });
+
+  it('routes a manually entered hosted loopback address through the same preview form', () => {
+    hosted();
+    const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
+    browser('about:blank');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'http://127.0.0.1:9000/' } });
+    fireEvent.submit(screen.getByRole('textbox').closest('form')!);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('refuses a hosted loopback URL without a current conversation or an unsafe URL scheme', () => {
+    hosted();
+    history.replaceState({}, '', '/#/guid');
+    const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
+    browser('http://localhost:8000/');
+    fireEvent.submit(screen.getByRole('textbox').closest('form')!);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'data:text/html,unsafe' } });
+    fireEvent.submit(screen.getByRole('textbox').closest('form')!);
+    expect(submit).not.toHaveBeenCalled();
+    expect(opened).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('messages.openLinkFailed');
+  });
 });
 
 describe('PreviewContext browser tabs', () => {
+  it('keeps Electron URL viewers on the native webview', () => {
+    const view = render(<URLViewer url='http://localhost:8000/' />);
+    expect(view.container.querySelector('webview')).toHaveAttribute('src', 'http://localhost:8000/');
+    expect(screen.queryByRole('button', { name: 'common.openInSystemBrowser' })).not.toBeInTheDocument();
+  });
+
   it('opens a blank browser tab with the placeholder title', () => {
     renderProvider();
     act(() => ctx.openBrowserTab());

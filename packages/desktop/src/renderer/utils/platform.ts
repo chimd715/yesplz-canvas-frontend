@@ -92,3 +92,49 @@ export const openExternalUrl = async (url: string): Promise<void> => {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 };
+
+/** Hosted loopback links refer to the current conversation's private app. */
+export const isHostedPreviewUrl = (value: string): boolean => {
+  if (!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]')) return false;
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/** Open a WebUI link during a user gesture; desktop keeps its native browser tabs. */
+export const openWebBrowserUrl = (value: string): boolean => {
+  if (isElectronDesktop()) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false;
+  if (!isHostedPreviewUrl(url.href)) {
+    void openExternalUrl(url.href);
+    return true;
+  }
+  const conversationId = /^#\/conversation\/([A-Za-z0-9_-]{1,100})$/.exec(window.location.hash.split('?')[0])?.[1];
+  if (!conversationId) return false;
+  // The gateway resolves the listener from owned metadata. Never send the link's host, port or path.
+  const form = document.createElement('form'),
+    input = document.createElement('input');
+  form.method = 'post';
+  form.action = '/api/platform/preview';
+  form.target = '_blank';
+  form.rel = 'noopener';
+  input.type = 'hidden';
+  input.name = 'conversationId';
+  input.value = conversationId;
+  form.append(input);
+  document.body.append(form);
+  try {
+    form.submit();
+  } finally {
+    form.remove();
+  }
+  return true;
+};
