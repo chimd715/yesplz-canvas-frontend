@@ -788,5 +788,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plano",
     "collapse": "Recolher plano"
+  },
+  "publishing": {
+    "publish": "Publicar",
+    "title": "Publicar aplicativo",
+    "noApp": "Nenhum aplicativo publicável foi encontrado nesta conversa.",
+    "notReady": "Prepare este projeto antes de publicar.",
+    "failed": "A publicação falhou. Verifique o projeto e tente novamente.",
+    "unavailable": "Não foi possível carregar o status da publicação.",
+    "publicUrl": "URL pública",
+    "openApp": "Abrir aplicativo",
+    "copyLink": "Copiar link",
+    "inProgress": "Publicando…",
+    "publishChanges": "Publicar alterações",
+    "publishApp": "Publicar aplicativo",
+    "phase": {
+      "unconfigured": "Não configurado",
+      "provisioning": "Preparando",
+      "ready": "Pronto",
+      "publishing": "Publicando",
+      "failed": "Falhou",
+      "interrupted": "Interrompido"
+    },
+    "requestFailed": "Não foi possível confirmar a solicitação de publicação. Verifique o status antes de tentar novamente."
   }
 }

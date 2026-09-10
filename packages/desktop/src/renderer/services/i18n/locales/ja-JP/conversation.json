@@ -782,5 +782,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "プランを展開",
     "collapse": "プランを折りたたむ"
+  },
+  "publishing": {
+    "publish": "公開",
+    "title": "アプリを公開",
+    "noApp": "この会話に公開可能なアプリが見つかりません。",
+    "notReady": "公開前にプロジェクトを準備してください。",
+    "failed": "公開に失敗しました。プロジェクトを確認して再試行してください。",
+    "unavailable": "公開状況を読み込めません。",
+    "publicUrl": "公開 URL",
+    "openApp": "アプリを開く",
+    "copyLink": "リンクをコピー",
+    "inProgress": "公開中…",
+    "publishChanges": "変更を公開",
+    "publishApp": "アプリを公開",
+    "phase": {
+      "unconfigured": "未設定",
+      "provisioning": "準備中",
+      "ready": "準備完了",
+      "publishing": "公開中",
+      "failed": "失敗",
+      "interrupted": "中断"
+    },
+    "requestFailed": "公開リクエストを確認できません。再試行前に状況を確認してください。"
   }
 }

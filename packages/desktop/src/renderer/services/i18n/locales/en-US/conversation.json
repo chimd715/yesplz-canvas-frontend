@@ -782,5 +782,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expand plan",
     "collapse": "Collapse plan"
+  },
+  "publishing": {
+    "publish": "Publish",
+    "title": "Publish app",
+    "noApp": "No publishable app found in this conversation.",
+    "notReady": "Prepare this project before publishing.",
+    "failed": "Publishing failed. Check the project and try again.",
+    "unavailable": "Unable to load publishing status.",
+    "publicUrl": "Public URL",
+    "openApp": "Open app",
+    "copyLink": "Copy link",
+    "inProgress": "Publishing…",
+    "publishChanges": "Publish changes",
+    "publishApp": "Publish app",
+    "phase": {
+      "unconfigured": "Not configured",
+      "provisioning": "Preparing",
+      "ready": "Ready",
+      "publishing": "Publishing",
+      "failed": "Failed",
+      "interrupted": "Interrupted"
+    },
+    "requestFailed": "Unable to confirm the publishing request. Check the status before retrying."
   }
 }

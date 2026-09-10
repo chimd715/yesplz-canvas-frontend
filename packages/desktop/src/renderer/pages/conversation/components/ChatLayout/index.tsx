@@ -6,6 +6,7 @@ import { useResizableSplit } from '@/renderer/hooks/ui/useResizableSplit';
 import ChatTitleEditor from '@/renderer/pages/conversation/components/ChatTitleEditor';
 import MobileWorkspaceOverlay from './MobileWorkspaceOverlay';
 import WorkspacePanelHeader from './WorkspacePanelHeader';
+import PublishButton from './PublishButton';
 import { useContainerWidth } from '@/renderer/pages/conversation/hooks/useContainerWidth';
 import { useLayoutConstraints } from '@/renderer/pages/conversation/hooks/useLayoutConstraints';
 import { useTitleRename } from '@/renderer/pages/conversation/hooks/useTitleRename';
@@ -196,6 +197,13 @@ const ChatLayout: React.FC<{
     return () => observer.disconnect();
   }, [layout?.isMobile]);
 
+  const headerActions = (
+    <>
+      {props.headerExtra}
+      {conversation_id && <PublishButton key={conversation_id} conversationId={conversation_id} />}
+    </>
+  );
+
   const desktopHeader = (
     <ArcoLayout.Header
       className={classNames(
@@ -228,15 +236,13 @@ const ChatLayout: React.FC<{
           }
         />
       </FlexFullContainer>
-      <div className='flex items-center gap-12px shrink-0'>{props.headerExtra}</div>
+      <div className='flex items-center gap-12px shrink-0'>{headerActions}</div>
     </ArcoLayout.Header>
   );
 
   const headerBlock = (
     <>
-      {layout?.isMobile
-        ? mobileActionsSlot && props.headerExtra && createPortal(props.headerExtra, mobileActionsSlot)
-        : desktopHeader}
+      {layout?.isMobile ? mobileActionsSlot && createPortal(headerActions, mobileActionsSlot) : desktopHeader}
       {props.tabsSlot}
     </>
   );

@@ -782,5 +782,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展开计划",
     "collapse": "收起计划"
+  },
+  "publishing": {
+    "publish": "发布",
+    "title": "发布应用",
+    "noApp": "此对话中未找到可发布的应用。",
+    "notReady": "发布前请先完成项目准备。",
+    "failed": "发布失败。请检查项目后重试。",
+    "unavailable": "无法加载发布状态。",
+    "publicUrl": "公开 URL",
+    "openApp": "打开应用",
+    "copyLink": "复制链接",
+    "inProgress": "发布中…",
+    "publishChanges": "发布更改",
+    "publishApp": "发布应用",
+    "phase": {
+      "unconfigured": "未配置",
+      "provisioning": "准备中",
+      "ready": "已就绪",
+      "publishing": "发布中",
+      "failed": "失败",
+      "interrupted": "已中断"
+    },
+    "requestFailed": "无法确认发布请求。重试前请检查状态。"
   }
 }

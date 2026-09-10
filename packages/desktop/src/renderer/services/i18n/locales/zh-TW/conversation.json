@@ -782,5 +782,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展開計劃",
     "collapse": "收合計劃"
+  },
+  "publishing": {
+    "publish": "發布",
+    "title": "發布應用程式",
+    "noApp": "此對話中找不到可發布的應用程式。",
+    "notReady": "發布前請先完成專案準備。",
+    "failed": "發布失敗。請檢查專案後重試。",
+    "unavailable": "無法載入發布狀態。",
+    "publicUrl": "公開 URL",
+    "openApp": "開啟應用程式",
+    "copyLink": "複製連結",
+    "inProgress": "發布中…",
+    "publishChanges": "發布變更",
+    "publishApp": "發布應用程式",
+    "phase": {
+      "unconfigured": "未設定",
+      "provisioning": "準備中",
+      "ready": "已就緒",
+      "publishing": "發布中",
+      "failed": "失敗",
+      "interrupted": "已中斷"
+    },
+    "requestFailed": "無法確認發布請求。重試前請檢查狀態。"
   }
 }

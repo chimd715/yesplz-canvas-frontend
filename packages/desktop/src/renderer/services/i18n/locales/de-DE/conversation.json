@@ -783,5 +783,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Plan ausklappen",
     "collapse": "Plan einklappen"
+  },
+  "publishing": {
+    "publish": "Veröffentlichen",
+    "title": "App veröffentlichen",
+    "noApp": "In dieser Unterhaltung wurde keine veröffentlichbare App gefunden.",
+    "notReady": "Bereiten Sie das Projekt vor der Veröffentlichung vor.",
+    "failed": "Veröffentlichung fehlgeschlagen. Prüfen Sie das Projekt und versuchen Sie es erneut.",
+    "unavailable": "Der Veröffentlichungsstatus konnte nicht geladen werden.",
+    "publicUrl": "Öffentliche URL",
+    "openApp": "App öffnen",
+    "copyLink": "Link kopieren",
+    "inProgress": "Wird veröffentlicht…",
+    "publishChanges": "Änderungen veröffentlichen",
+    "publishApp": "App veröffentlichen",
+    "phase": {
+      "unconfigured": "Nicht konfiguriert",
+      "provisioning": "Wird vorbereitet",
+      "ready": "Bereit",
+      "publishing": "Wird veröffentlicht",
+      "failed": "Fehlgeschlagen",
+      "interrupted": "Unterbrochen"
+    },
+    "requestFailed": "Die Veröffentlichung konnte nicht bestätigt werden. Prüfen Sie den Status vor einem erneuten Versuch."
   }
 }

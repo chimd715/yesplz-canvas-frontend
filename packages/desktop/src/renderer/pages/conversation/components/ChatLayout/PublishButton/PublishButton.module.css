@@ -1,0 +1,27 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+}
+
+.primary:global(.arco-btn) {
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: var(--bg-base);
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.primary:global(.arco-btn:not(.arco-btn-disabled):hover) {
+  background: var(--text-secondary);
+  border-color: var(--text-secondary);
+  color: var(--bg-base);
+}
+
+.primary:global(.arco-btn.arco-btn-disabled) {
+  background: var(--bg-3);
+  border-color: var(--bg-3);
+  color: var(--text-disabled);
+}

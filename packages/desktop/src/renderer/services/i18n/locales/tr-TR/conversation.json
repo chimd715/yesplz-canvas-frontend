@@ -784,5 +784,28 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Planı genişlet",
     "collapse": "Planı daralt"
+  },
+  "publishing": {
+    "publish": "Yayınla",
+    "title": "Uygulamayı yayınla",
+    "noApp": "Bu konuşmada yayınlanabilir bir uygulama bulunamadı.",
+    "notReady": "Yayınlamadan önce bu projeyi hazırlayın.",
+    "failed": "Yayınlama başarısız oldu. Projeyi kontrol edip tekrar deneyin.",
+    "unavailable": "Yayınlama durumu yüklenemedi.",
+    "publicUrl": "Herkese açık URL",
+    "openApp": "Uygulamayı aç",
+    "copyLink": "Bağlantıyı kopyala",
+    "inProgress": "Yayınlanıyor…",
+    "publishChanges": "Değişiklikleri yayınla",
+    "publishApp": "Uygulamayı yayınla",
+    "phase": {
+      "unconfigured": "Yapılandırılmadı",
+      "provisioning": "Hazırlanıyor",
+      "ready": "Hazır",
+      "publishing": "Yayınlanıyor",
+      "failed": "Başarısız",
+      "interrupted": "Kesintiye uğradı"
+    },
+    "requestFailed": "Yayınlama isteği doğrulanamadı. Tekrar denemeden önce durumu kontrol edin."
   }
 }
