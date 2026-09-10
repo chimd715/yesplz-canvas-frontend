@@ -5,6 +5,7 @@
  */
 
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import { AI_BUILDER_PROVIDER_ID } from '@/common/config/constants';
 import { useGoogleAuthModels } from '@/renderer/hooks/agent/useGoogleAuthModels';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { hasAvailableModels } from '../utils/modelUtils';
@@ -80,7 +81,7 @@ export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'aionrs'): Gu
 
       selectedModelKeyRef.current = null;
 
-      const defaultModel = modelList[0];
+      const defaultModel = modelList.find((provider) => provider.id === AI_BUILDER_PROVIDER_ID) ?? modelList[0];
       const resolvedUseModel = defaultModel?.models[0] ?? '';
 
       if (!defaultModel || !resolvedUseModel) return;

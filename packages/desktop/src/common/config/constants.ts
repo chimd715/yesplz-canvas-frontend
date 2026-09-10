@@ -115,3 +115,6 @@ export const TEAM_MODE_ENABLED = true;
 // Stable ID for the Google Auth virtual provider.
 // Shared between frontend (useModelProviderList) and backend (SystemActions).
 export const GOOGLE_AUTH_PROVIDER_ID = 'google-auth-gemini';
+
+// Reserved provider managed by the AI Builder gateway, not by workspace users.
+export const AI_BUILDER_PROVIDER_ID = 'ai-builder-openrouter';

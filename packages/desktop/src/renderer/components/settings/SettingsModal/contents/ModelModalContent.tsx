@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { IProvider } from '@/common/config/storage';
+import { AI_BUILDER_PROVIDER_ID } from '@/common/config/constants';
 import { supportsOpenAiApiMode } from '@/common/utils/modelCapabilities';
 import { Button, Divider, Message, Popconfirm, Collapse, Tag, Switch, Tooltip } from '@arco-design/web-react';
 import {
@@ -282,14 +283,15 @@ const ModelModalContent: React.FC = () => {
 
   const clearAllHealthData = () => {
     if (!data) return;
-    const nextArray: IProvider[] = data.map((platform: IProvider) => ({
-      ...platform,
-      model_health: undefined as IProvider['model_health'],
-    }));
+    const nextArray: IProvider[] = data.map((platform: IProvider) =>
+      platform.id === AI_BUILDER_PROVIDER_ID ? platform : { ...platform, model_health: undefined }
+    );
     void mutate(nextArray, false);
 
     Promise.all(
-      (data || []).map((platform) => ipcBridge.mode.updateProvider.invoke({ id: platform.id, model_health: {} }))
+      data
+        .filter((platform) => platform.id !== AI_BUILDER_PROVIDER_ID)
+        .map((platform) => ipcBridge.mode.updateProvider.invoke({ id: platform.id, model_health: {} }))
     )
       .then(() => {
         void mutate();
@@ -423,6 +425,27 @@ const ModelModalContent: React.FC = () => {
           <div className='space-y-16px'>
             {(data || []).map((platform: IProvider) => {
               const key = platform.id;
+              if (key === AI_BUILDER_PROVIDER_ID) {
+                return (
+                  <section
+                    key={key}
+                    aria-label={platform.name}
+                    className='overflow-hidden rounded-12px border border-solid border-[var(--color-border-2)] bg-bg-2'
+                  >
+                    <div className='flex min-h-32px flex-wrap items-center justify-between gap-8px bg-fill-0 px-12px py-8px'>
+                      <span className='min-w-0 truncate text-14px font-500 text-t-primary'>{platform.name}</span>
+                      <span className='text-12px text-t-secondary'>{t('common.readOnly')}</span>
+                    </div>
+                    <ul className='m-0 list-none border-t border-solid border-[var(--color-border-2)] bg-fill-1 px-18px py-8px'>
+                      {platform.models.map((model) => (
+                        <li key={model} className='break-words py-12px text-14px text-t-primary'>
+                          {model}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              }
               const isExpanded = collapseKey[platform.id] ?? false;
               return (
                 <Collapse

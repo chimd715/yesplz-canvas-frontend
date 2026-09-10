@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
 
@@ -116,6 +116,10 @@ vi.mock('@renderer/hooks/agent/useModeModeList', () => ({
 
 vi.mock('@/renderer/hooks/agent/useModelProviderList', () => ({
   useProvidersQuery: () => ({ data: mocks.providers, mutate: mocks.providerMutate }),
+}));
+
+vi.mock('@/renderer/hooks/agent/useGoogleAuthModels', () => ({
+  useGoogleAuthModels: () => ({ isGoogleAuth: false }),
 }));
 
 vi.mock('@/renderer/components/settings/SettingsModal/settingsViewContext', () => ({
@@ -269,6 +273,7 @@ import { supportsOpenAiApiMode, updateModelSettings } from '@/common/utils/model
 import AddModelModal from '@/renderer/pages/settings/components/AddModelModal';
 import AddPlatformModal from '@/renderer/pages/settings/components/AddPlatformModal';
 import ModelModalContent from '@/renderer/components/settings/SettingsModal/contents/ModelModalContent';
+import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 
 const provider = (overrides: Partial<IProvider> = {}): IProvider => ({
   api_key: 'test-key',
@@ -278,6 +283,72 @@ const provider = (overrides: Partial<IProvider> = {}): IProvider => ({
   name: 'OpenAI compatible',
   platform: 'openai',
   ...overrides,
+});
+
+describe('platform-managed provider', () => {
+  const managedProvider = provider({
+    id: 'ai-builder-openrouter',
+    name: 'AI Builder',
+    models: ['z-ai/glm-5.3', 'z-ai/glm-5.3-flash'],
+    api_key: '',
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.providers = [provider(), managedProvider];
+    mocks.updateProvider.mockResolvedValue(provider());
+  });
+
+  afterEach(cleanup);
+
+  it('shows both platform models without editable settings or key controls', () => {
+    render(<ModelModalContent />);
+
+    const managed = within(screen.getByRole('region', { name: 'AI Builder' }));
+    expect(managed.getAllByRole('listitem').map((item) => item.textContent)).toEqual(managedProvider.models);
+    expect(managed.getByText('common.readOnly')).toBeInTheDocument();
+    expect(managed.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('keeps private provider editing available', () => {
+    render(<ModelModalContent />);
+    fireEvent.click(screen.getByRole('button', { name: 'edit-provider' }));
+
+    expect(mocks.editModeOpen).toHaveBeenCalledWith({ data: mocks.providers[0] });
+  });
+
+  it('does not mutate the managed provider when clearing health status', async () => {
+    render(<ModelModalContent />);
+    fireEvent.click(screen.getByRole('button', { name: 'settings.clearStatus' }));
+
+    await waitFor(() => expect(mocks.updateProvider).toHaveBeenCalledTimes(1));
+    expect(mocks.updateProvider).toHaveBeenCalledWith({ id: 'provider-1', model_health: {} });
+    expect(mocks.providerMutate.mock.calls[0][0][1]).toBe(managedProvider);
+  });
+
+  it('uses the configured first platform model as the new-chat fallback', async () => {
+    const { result } = renderHook(() => useGuidModelSelection());
+
+    await waitFor(() => expect(result.current.current_model?.use_model).toBe('z-ai/glm-5.3'));
+    expect(result.current.current_model?.id).toBe(managedProvider.id);
+  });
+
+  it('keeps a valid private selection when the provider list refreshes', async () => {
+    const { result, rerender } = renderHook(() => useGuidModelSelection());
+    await act(async () => result.current.setCurrentModel({ ...mocks.providers[0], use_model: 'gpt-4o' }));
+    mocks.providers = [...mocks.providers];
+    rerender();
+
+    expect(result.current.current_model?.id).toBe('provider-1');
+    expect(result.current.current_model?.use_model).toBe('gpt-4o');
+  });
+
+  it('retains the native fallback when no platform models are configured', async () => {
+    mocks.providers = [provider(), { ...managedProvider, models: [] }];
+    const { result } = renderHook(() => useGuidModelSelection());
+
+    await waitFor(() => expect(result.current.current_model?.id).toBe('provider-1'));
+  });
 });
 
 describe('supportsOpenAiApiMode', () => {
