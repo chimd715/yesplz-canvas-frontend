@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { TFunction } from 'i18next';
+import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 
 /**
  * SWR key for the Agent settings management view (`/api/agents/management`).
@@ -169,7 +170,15 @@ export async function fetchManagedAgents(): Promise<ManagedAgent[]> {
   try {
     const agents = await ipcBridge.acpConversation.getManagedAgents.invoke();
     if (Array.isArray(agents)) {
-      return agents as ManagedAgent[];
+      return (agents as ManagedAgent[]).map((agent) =>
+        agent.id === '632f31d2' && agent.agent_type === 'aionrs' && agent.agent_source === 'internal'
+          ? {
+              ...agent,
+              name: resolveAssistantName({ id: `bare:${agent.id}`, name: agent.name }, 'en-US'),
+              name_i18n: {},
+            }
+          : agent
+      );
     }
   } catch {
     // fallback to empty

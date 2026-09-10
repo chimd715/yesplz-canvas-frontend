@@ -7,6 +7,7 @@
 import type { TChatConversation } from '@/common/config/storage';
 import type { PresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { resolveConversationLeadingMark } from '@/renderer/pages/conversation/utils/conversationAssistantIdentity';
+import builderLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 import { describe, expect, it } from 'vitest';
 
 const TEST_LOGOS = {
@@ -15,6 +16,39 @@ const TEST_LOGOS = {
 };
 
 describe('resolveConversationLeadingMark', () => {
+  it('shows the product name and supplied logo for the default native assistant', () => {
+    const result = resolveConversationLeadingMark(
+      makeConversation({
+        assistant: {
+          id: 'bare:632f31d2',
+          source: 'builtin',
+          backend: 'aionrs',
+          name: 'Aion CLI',
+          avatar: '/api/assets/logos/brand/aion.svg',
+        },
+      }),
+      undefined,
+      TEST_LOGOS
+    );
+
+    expect(result).toEqual({ kind: 'image', value: builderLogo, label: 'YesPlz AI Builder' });
+  });
+
+  it('preserves custom assistant names and external avatars that share the native asset pathname', () => {
+    for (const assistant of [
+      { id: 'custom-assistant', name: 'My assistant', avatar: '/api/assistants/custom-assistant/avatar' },
+      { id: 'bare:other-agent', name: 'Aion CLI', avatar: 'https://example.test/api/assets/logos/brand/aion.svg' },
+    ]) {
+      const result = resolveConversationLeadingMark(
+        makeConversation({ assistant: { ...assistant, source: 'custom', backend: 'claude' } }),
+        undefined,
+        TEST_LOGOS
+      );
+
+      expect(result).toEqual({ kind: 'image', value: assistant.avatar, label: assistant.name });
+    }
+  });
+
   it('prefers the assistant image avatar when assistant info exists', () => {
     const result = resolveConversationLeadingMark(
       makeConversation(),

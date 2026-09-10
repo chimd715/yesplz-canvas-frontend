@@ -10,6 +10,7 @@
  */
 
 import { getBaseUrl } from '@/common/adapter/httpBridge';
+import builderLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 
 /**
  * Check if running in Electron desktop environment
@@ -54,6 +55,7 @@ function isAbsoluteAssetUrl(url: string): boolean {
  */
 export const resolveBackendAssetUrl = (url: string | undefined): string | undefined => {
   if (!url) return url;
+  if (url.split(/[?#]/, 1)[0] === '/api/assets/logos/brand/aion.svg') return builderLogo;
   if (isAbsoluteAssetUrl(url) || /^data:/i.test(url)) return url;
   if (url.startsWith('/')) {
     return isElectronDesktop() ? `${getBaseUrl()}${url}` : url;

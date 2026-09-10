@@ -3,6 +3,7 @@ import type { PresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssist
 import { resolveAssistantAvatar } from '@/renderer/utils/model/assistantAvatar';
 import { resolveAgentLogo } from '@/renderer/utils/model/agentLogo';
 import type { AgentLogoMap } from '@/renderer/utils/model/agentLogo';
+import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 
 /**
  * Resolve the effective runtime backend for a conversation.
@@ -88,7 +89,7 @@ export function resolveConversationLeadingMark(
   }
 
   if (conversation.assistant) {
-    const assistantLabel = conversation.assistant.name.trim() || conversation.assistant.id;
+    const assistantLabel = resolveAssistantName(conversation.assistant, 'en-US');
     const assistantAvatar = resolveAssistantAvatar(conversation.assistant.avatar);
     if (assistantAvatar.kind === 'emoji') {
       return {
