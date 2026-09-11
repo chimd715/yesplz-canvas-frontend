@@ -13,7 +13,7 @@ let mockLanguage = 'en-US';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => (mockLanguage === 'zh-CN' ? `zh:${key}` : key === 'login.brand' ? 'YesPlz AI Builder' : key),
+    t: (key: string) => (mockLanguage === 'zh-CN' ? `zh:${key}` : key === 'login.brand' ? 'Build Your Own' : key),
     i18n: { language: mockLanguage },
   }),
 }));
@@ -21,13 +21,13 @@ vi.mock('react-i18next', () => ({
 import DocumentTitle, { titleForPath } from '@/renderer/components/layout/DocumentTitle';
 
 describe('titleForPath', () => {
-  const t = (key: string) => (key === 'login.brand' ? 'YesPlz AI Builder' : `t(${key})`);
+  const t = (key: string) => (key === 'login.brand' ? 'Build Your Own' : `t(${key})`);
 
   it('uses the login title on the login route only', () => {
     expect(titleForPath('/login', t)).toBe('t(login.pageTitle)');
-    expect(titleForPath('/guid', t)).toBe('YesPlz AI Builder');
-    expect(titleForPath('/conversation/abc', t)).toBe('YesPlz AI Builder');
-    expect(titleForPath('/settings/agent', t)).toBe('YesPlz AI Builder');
+    expect(titleForPath('/guid', t)).toBe('Build Your Own');
+    expect(titleForPath('/conversation/abc', t)).toBe('Build Your Own');
+    expect(titleForPath('/settings/agent', t)).toBe('Build Your Own');
   });
 });
 
@@ -41,7 +41,7 @@ describe('DocumentTitle', () => {
         <DocumentTitle />
       </MemoryRouter>
     );
-    expect(document.title).toBe('YesPlz AI Builder');
+    expect(document.title).toBe('Build Your Own');
   });
 
   it('sets the localised login title on the login route', () => {

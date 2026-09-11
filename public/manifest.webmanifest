@@ -1,7 +1,7 @@
 {
-  "name": "YesPlz AI Builder",
-  "short_name": "YesPlz AI Builder",
-  "description": "YesPlz AI Builder for mobile and desktop browsers.",
+  "name": "Build Your Own",
+  "short_name": "Build Your Own",
+  "description": "Build Your Own for mobile and desktop browsers.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

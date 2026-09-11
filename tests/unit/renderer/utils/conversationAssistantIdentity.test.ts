@@ -31,7 +31,7 @@ describe('resolveConversationLeadingMark', () => {
       TEST_LOGOS
     );
 
-    expect(result).toEqual({ kind: 'image', value: builderLogo, label: 'YesPlz AI Builder' });
+    expect(result).toEqual({ kind: 'image', value: builderLogo, label: 'Build Your Own' });
   });
 
   it('preserves custom assistant names and external avatars that share the native asset pathname', () => {

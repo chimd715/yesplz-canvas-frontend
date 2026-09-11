@@ -11,7 +11,7 @@ import React from 'react';
 // Mirror the project convention: t() echoes the key so labels/tooltips are assertable.
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (k: string) => (k === 'login.brand' ? 'YesPlz AI Builder' : k),
+    t: (k: string) => (k === 'login.brand' ? 'Build Your Own' : k),
     i18n: { language: 'en' },
   }),
 }));
@@ -162,7 +162,7 @@ describe('Layout sider brand Home button', () => {
 
     // No actionable role/label in chat routes.
     expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
-    const wordmark = screen.getByText('YesPlz AI Builder');
+    const wordmark = screen.getByText('Build Your Own');
     fireEvent.click(wordmark);
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -171,7 +171,7 @@ describe('Layout sider brand Home button', () => {
     currentPathname = '/conversation/xyz';
     renderLayout();
 
-    fireEvent.click(screen.getByText('YesPlz AI Builder'));
+    fireEvent.click(screen.getByText('Build Your Own'));
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -205,7 +205,7 @@ describe('Layout sider brand Home button', () => {
     renderLayout();
 
     // The supplied brand image retains the existing independent icon action.
-    const icon = screen.getByRole('img', { name: 'YesPlz AI Builder' }).parentElement as HTMLElement;
+    const icon = screen.getByRole('img', { name: 'Build Your Own' }).parentElement as HTMLElement;
     expect(icon).toBeTruthy();
     for (let i = 0; i < 4; i++) fireEvent.click(icon);
     expect(openDevTools).toHaveBeenCalled();
