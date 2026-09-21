@@ -16,6 +16,7 @@ import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
+import shopWidgetSkill from '../utils/shop-widget.md?raw';
 
 export type GuidSendDeps = {
   // Input state
@@ -106,7 +107,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       return;
     }
 
-    const initialInput = shopWidgetSelected ? `${t('guid.shopWidget.request')}\n\n${input}` : input;
+    const initialInput = shopWidgetSelected ? `${shopWidgetSkill.trim()}\n\n## User request\n\n${input}` : input;
 
     const isCustomWorkspace = !!dir;
     const finalWorkspace = dir || '';

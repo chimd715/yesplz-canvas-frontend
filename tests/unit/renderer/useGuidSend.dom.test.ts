@@ -8,7 +8,6 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
-import guidMessages from '@/renderer/services/i18n/locales/en-US/guid.json';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -77,17 +76,15 @@ const createDeps = (): GuidSendDeps => ({
 
 describe('useGuidSend', () => {
   it.each(['aionrs', 'claude'])(
-    'carries widget intent through %s without changing the request title',
+    'adds widget engineering instructions to a plain feature request through %s without changing its title',
     async (backend) => {
       const deps = createDeps();
       deps.shopWidgetSelected = true;
       deps.selectedAssistantBackend = backend;
-      deps.input = 'Add a product sizing guide';
+      deps.input = '상품 상세 페이지에 배송·반품 FAQ 위젯 만들어줘';
       deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<
         GuidSendDeps['current_model']
       >;
-      deps.t = ((key: string) =>
-        key === 'guid.shopWidget.request' ? guidMessages.shopWidget.request : key) as GuidSendDeps['t'];
       createConversationInvokeMock.mockResolvedValue({ id: 'widget-handoff' });
       const { result } = renderHook(() => useGuidSend(deps));
 
@@ -99,9 +96,26 @@ describe('useGuidSend', () => {
       const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
       const message = JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_widget-handoff`)!);
       expect(message.input).toContain('installation code');
-      expect(message.input).toContain(deps.input);
+      expect(message.input).toContain('Shadow DOM');
+      expect(message.input).toContain('Choose implementation details yourself');
+      expect(message.input).toContain('Do not invent a deployment URL');
+      expect(message.input).toMatch(new RegExp(`${deps.input}$`));
     }
   );
+
+  it.each(['aionrs', 'claude'])('keeps ordinary %s requests free of widget instructions', async (backend) => {
+    const deps = createDeps();
+    deps.selectedAssistantBackend = backend;
+    deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<GuidSendDeps['current_model']>;
+    createConversationInvokeMock.mockResolvedValue({ id: 'ordinary-handoff' });
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
+    const message = JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_ordinary-handoff`)!);
+    expect(message.input).toBe(deps.input);
+  });
 
   it('waits for a widget description while retaining ordinary empty-chat behavior', async () => {
     const deps = createDeps();

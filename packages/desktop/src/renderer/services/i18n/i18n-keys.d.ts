@@ -1103,7 +1103,6 @@ export type I18nKey =
   | 'guid.shopWidget.label'
   | 'guid.shopWidget.output'
   | 'guid.shopWidget.placeholder'
-  | 'guid.shopWidget.request'
   | 'guid.workspace.clearWorkspace'
   | 'guid.workspace.noProject'
   | 'guid.workspace.optional'
