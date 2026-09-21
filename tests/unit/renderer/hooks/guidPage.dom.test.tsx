@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
@@ -301,6 +301,20 @@ const guidInputCardProps = {
 };
 
 describe('GuidPage', () => {
+  it('selects and clears Shop Widget without overwriting a draft or starting a conversation', () => {
+    render(<GuidPage />);
+    guidInputMock.setInput.mockClear();
+    sendMock.sendMessageHandler.mockClear();
+    const button = screen.getByRole('button', { name: 'guid.shopWidget.label' });
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(true);
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(guidInputMock.setInput).not.toHaveBeenCalled();
+    expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     locationMock.state = null;
     locationMock.key = 'guid-location';

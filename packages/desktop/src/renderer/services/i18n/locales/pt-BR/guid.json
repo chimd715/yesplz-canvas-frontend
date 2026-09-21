@@ -13,5 +13,12 @@
     "specifyWorkspace": "Selecionar pasta do projeto",
     "searchPlaceholder": "Procurar projetos…",
     "noProject": "Nenhum Projeto"
+  },
+  "shopWidget": {
+    "label": "Shop Widget",
+    "clear": "Clear Shop Widget selection",
+    "placeholder": "Describe the widget you want to add to your store",
+    "output": "Embeddable widget, live preview, and installation code.",
+    "request": "Build an embeddable shop widget with a working preview and installation code. Deliver a web component with isolated styles, its JavaScript and any CSS, and a script plus custom-element snippet. Add backend APIs only if the feature needs them. Understand the requested feature first; ask about store data only when needed. Clearly distinguish local preview from publication and do not invent a deployed URL."
   }
 }

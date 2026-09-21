@@ -31,5 +31,12 @@
     "understand": "Familiarízate con este proyecto y explícame con palabras sencillas qué hace y por dónde empezar",
     "cleanup": "Encuentra archivos duplicados e inútiles en esta carpeta y lístalos para que los confirme",
     "create": "Créame una página personal bonita y ábrela cuando esté lista"
+  },
+  "shopWidget": {
+    "label": "Shop Widget",
+    "clear": "Clear Shop Widget selection",
+    "placeholder": "Describe the widget you want to add to your store",
+    "output": "Embeddable widget, live preview, and installation code.",
+    "request": "Build an embeddable shop widget with a working preview and installation code. Deliver a web component with isolated styles, its JavaScript and any CSS, and a script plus custom-element snippet. Add backend APIs only if the feature needs them. Understand the requested feature first; ask about store data only when needed. Clearly distinguish local preview from publication and do not invent a deployed URL."
   }
 }

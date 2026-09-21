@@ -34,7 +34,7 @@ import { chatFileRefPath, uploadFileRef } from '@/common/types/chatFile';
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
-import { ArrowRightUp } from '@icon-park/react';
+import { ArrowRightUp, Close, Shop } from '@icon-park/react';
 import { Button, ConfigProvider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -62,6 +62,7 @@ const GuidPage: React.FC = () => {
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [shopWidgetSelected, setShopWidgetSelected] = useState(false);
 
   // Open external link
   const openLink = useCallback(async (url: string) => {
@@ -248,6 +249,7 @@ const GuidPage: React.FC = () => {
   const send = useGuidSend({
     // Input state
     input: guidInput.input,
+    shopWidgetSelected,
     setInput: guidInput.setInput,
     files: guidInput.files,
     setFiles: guidInput.setFiles,
@@ -543,6 +545,7 @@ const GuidPage: React.FC = () => {
     } else {
       guidInput.setInput('');
       guidInput.setFiles([]);
+      setShopWidgetSelected(false);
     }
     guidInput.setLoading(false);
     if (!preserveCurrentDraft && !(location.state as { workspace?: string } | null)?.workspace) {
@@ -614,6 +617,21 @@ const GuidPage: React.FC = () => {
   // Build the action row
   const actionRowNode = (
     <GuidActionRow
+      creationModeNode={
+        shopWidgetSelected ? (
+          <Button
+            type='text'
+            className={styles.widgetChip}
+            aria-label={t('guid.shopWidget.clear')}
+            disabled={guidInput.loading}
+            onClick={() => setShopWidgetSelected(false)}
+          >
+            <Shop theme='outline' size='16' fill='currentColor' aria-hidden='true' />
+            <span>{t('guid.shopWidget.label')}</span>
+            <Close theme='outline' size='12' fill='currentColor' aria-hidden='true' />
+          </Button>
+        ) : undefined
+      }
       files={displayFilePaths}
       onFilesUploaded={guidInput.handleFilesUploaded}
       onFilesPicked={guidInput.handleFilesPicked}
@@ -687,7 +705,11 @@ const GuidPage: React.FC = () => {
             onPaste={guidInput.onPaste}
             onFocus={guidInput.handleTextareaFocus}
             onBlur={guidInput.handleTextareaBlur}
-            placeholder={typewriterPlaceholder || t('conversation.welcome.placeholder')}
+            placeholder={
+              shopWidgetSelected
+                ? t('guid.shopWidget.placeholder')
+                : typewriterPlaceholder || t('conversation.welcome.placeholder')
+            }
             isInputActive={guidInput.isInputFocused}
             isFileDragging={guidInput.isFileDragging}
             activeBorderColor={activeBorderColor}
@@ -703,7 +725,26 @@ const GuidPage: React.FC = () => {
             onClearWorkspace={() => guidInput.setDir('')}
           />
 
-          {selectedAssistantPrompts.length > 0 ? (
+          <div className={styles.widgetEntry}>
+            <Button
+              type='text'
+              className={styles.widgetTile}
+              aria-pressed={shopWidgetSelected}
+              aria-describedby='shop-widget-output'
+              disabled={guidInput.loading}
+              onClick={() => setShopWidgetSelected((selected) => !selected)}
+            >
+              <span className={styles.widgetTileIcon}>
+                <Shop theme='outline' size='28' strokeWidth={1.6} fill='currentColor' aria-hidden='true' />
+              </span>
+              <span>{t('guid.shopWidget.label')}</span>
+            </Button>
+            <p id='shop-widget-output' className={styles.widgetOutput}>
+              {t('guid.shopWidget.output')}
+            </p>
+          </div>
+
+          {!shopWidgetSelected && selectedAssistantPrompts.length > 0 ? (
             <div className='mt-18px w-full animate-fade-in ps-20px'>
               <div className={`${styles.assistantPromptHint} mb-10px text-start`}>
                 {t('guid.promptExamplesHint', { defaultValue: 'Try these example prompts:' })}

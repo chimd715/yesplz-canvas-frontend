@@ -20,6 +20,7 @@ import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation
 export type GuidSendDeps = {
   // Input state
   input: string;
+  shopWidgetSelected?: boolean;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   files: ChatFileRef[];
   setFiles: React.Dispatch<React.SetStateAction<ChatFileRef[]>>;
@@ -69,6 +70,7 @@ export type GuidSendResult = {
 export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const {
     input,
+    shopWidgetSelected = false,
     setInput,
     files,
     setFiles,
@@ -100,9 +102,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const sendingRef = useRef(false);
 
   const handleSend = useCallback(async () => {
-    if (!selectedAssistantId) {
+    if (!selectedAssistantId || (shopWidgetSelected && !input.trim())) {
       return;
     }
+
+    const initialInput = shopWidgetSelected ? `${t('guid.shopWidget.request')}\n\n${input}` : input;
 
     const isCustomWorkspace = !!dir;
     const finalWorkspace = dir || '';
@@ -216,7 +220,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         // auto-sending a blank first turn.
         if (input.trim()) {
           const initialMessage = {
-            input,
+            input: initialInput,
             files: files.length > 0 ? files : undefined,
           };
           sessionStorage.setItem(`aionrs_initial_message_${conversation.id}`, JSON.stringify(initialMessage));
@@ -270,7 +274,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       // auto-sending a blank first turn.
       if (input.trim()) {
         const initialMessage = {
-          input,
+          input: initialInput,
           files: files.length > 0 ? files : undefined,
         };
         sessionStorage.setItem(`acp_initial_message_${conversation.id}`, JSON.stringify(initialMessage));
@@ -283,6 +287,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     }
   }, [
     input,
+    shopWidgetSelected,
     files,
     dir,
     selectedAssistantId,
@@ -339,11 +344,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     t,
   ]);
 
-  // Calculate button disabled state
-  // Calculate button disabled state. Empty input is allowed once an assistant is
-  // picked — that path creates an empty conversation ("start chat") rather than
-  // sending a message, so the gate only blocks while loading or with no assistant.
-  const isButtonDisabled = loading || !selectedAssistantId;
+  // Ordinary chat can start empty; widget mode needs a feature description.
+  const isButtonDisabled = loading || !selectedAssistantId || (shopWidgetSelected && !input.trim());
 
   return {
     handleSend,

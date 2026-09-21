@@ -72,6 +72,7 @@ const SubmenuSearchList: React.FC<{
 );
 
 type GuidActionRowProps = {
+  creationModeNode?: React.ReactNode;
   // File handling
   files: string[];
   /** Device uploads (browser input → managed dir): sent as `upload` refs. */
@@ -118,6 +119,7 @@ type GuidActionRowProps = {
 };
 
 const GuidActionRow: React.FC<GuidActionRowProps> = ({
+  creationModeNode,
   files,
   onFilesPicked,
   onFilesUploaded,
@@ -620,6 +622,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
             />
           )}
         </div>
+        {creationModeNode}
       </div>
       {isMobile && (
         <MobileActionSheet
