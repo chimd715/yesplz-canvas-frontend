@@ -36,6 +36,8 @@ import {
   buildSpawnArgs,
   buildSpawnEnv,
   findAvailablePort,
+  resolveHostedIdentity,
+  startBackend,
   BackendLifecycleManager,
   BackendStartupError,
 } from './backend-launcher.js';
@@ -1440,5 +1442,71 @@ describe('BackendLifecycleManager.start peer retry', () => {
 
     await expect(mgr.start('/data/aionui-backend.db')).rejects.toBe(nonPeerError);
     expect(attemptStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('hosted identity launch', () => {
+  const identity = { mode: 'aionpro' as const, bootstrapSecret: 'test-bootstrap-secret' };
+
+  it('requires an explicit mode and a nonempty bootstrap secret in the trusted startup environment', () => {
+    expect(resolveHostedIdentity({ AIONCORE_BOOTSTRAP_SECRET: identity.bootstrapSecret })).toBeUndefined();
+    expect(resolveHostedIdentity({ AIONUI_WEBUI_IDENTITY_MODE: 'local' })).toBeUndefined();
+    expect(
+      resolveHostedIdentity({
+        AIONUI_WEBUI_IDENTITY_MODE: 'aionpro',
+        AIONCORE_BOOTSTRAP_SECRET: identity.bootstrapSecret,
+      })
+    ).toEqual(identity);
+    expect(() => resolveHostedIdentity({ AIONUI_WEBUI_IDENTITY_MODE: 'aionpro' })).toThrow(
+      'Hosted identity requires AIONCORE_BOOTSTRAP_SECRET'
+    );
+    expect(() =>
+      resolveHostedIdentity({ AIONUI_WEBUI_IDENTITY_MODE: 'aionpro', AIONCORE_BOOTSTRAP_SECRET: '  ' })
+    ).toThrow('Hosted identity requires AIONCORE_BOOTSTRAP_SECRET');
+    expect(() => resolveHostedIdentity({ AIONUI_WEBUI_IDENTITY_MODE: 'invalid' })).toThrow(
+      'Unsupported AIONUI_WEBUI_IDENTITY_MODE'
+    );
+  });
+
+  it('never combines external identity with the local authentication bypass', () => {
+    expect(() =>
+      buildSpawnArgs({
+        port: 1,
+        dbPath: '/data',
+        local: true,
+        identityMode: 'aionpro',
+        appVersion: '1',
+        isPackaged: false,
+      })
+    ).toThrow('External identity cannot be combined with local authentication bypass');
+  });
+
+  it('rejects an incomplete programmatic identity before launching any process', () => {
+    expect(
+      () => new BackendLifecycleManager(APP_META, () => '/binary', { mode: 'aionpro', bootstrapSecret: '' })
+    ).toThrow('Hosted identity requires aionpro mode and a bootstrap secret');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('starts aionpro without --local and carries its secret only in the subprocess environment', async () => {
+    const child = makeFakeChild();
+    vi.mocked(spawn).mockReturnValue(child);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const starting = startBackend({ app: APP_META, resolveBackend: () => '/binary', dataDir: '/data', identity });
+      await Promise.resolve();
+      emitListening(child, 55555);
+      expect((await starting).port).toBe(55555);
+      const [, args, options] = vi.mocked(spawn).mock.calls[0];
+      expect(args).toEqual(expect.arrayContaining(['--identity-mode', 'aionpro']));
+      expect(args).not.toContain('--local');
+      expect(args).not.toContain(identity.bootstrapSecret);
+      expect(options?.env?.AIONCORE_BOOTSTRAP_SECRET).toBe(identity.bootstrapSecret);
+      expect(JSON.stringify(logSpy.mock.calls)).not.toContain(identity.bootstrapSecret);
+    } finally {
+      fetchSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 });

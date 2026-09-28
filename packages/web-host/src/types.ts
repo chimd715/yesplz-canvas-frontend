@@ -27,6 +27,12 @@ export type BackendSystemDirs = {
   logDir: string;
 };
 
+/** Server-only external-session bootstrap. Never pass this through renderer IPC. */
+export type BackendIdentityConfig = {
+  mode: 'aionpro';
+  bootstrapSecret: string;
+};
+
 /**
  * Options for starting WebHost
  */
@@ -38,7 +44,9 @@ export type WebHostOptions = {
   dataDir?: string;
   logDir?: string;
   dirs?: BackendSystemDirs;
-  backend: { kind: 'ownBackend'; resolveBackend: BackendBinaryResolver } | { kind: 'useExistingBackend'; port: number };
+  backend:
+    | { kind: 'ownBackend'; resolveBackend: BackendBinaryResolver; identity?: BackendIdentityConfig }
+    | { kind: 'useExistingBackend'; port: number };
 };
 
 /**

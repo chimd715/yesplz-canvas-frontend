@@ -12,7 +12,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdirSync, statSync } from 'node:fs';
 import { connect, createServer, type Socket } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
-import type { AppMetadata, BackendBinaryResolver } from './types.js';
+import type { AppMetadata, BackendBinaryResolver, BackendIdentityConfig } from './types.js';
 
 type BackendStatus = 'stopped' | 'starting' | 'running' | 'error';
 type BackendStartupStage =
@@ -65,6 +65,7 @@ type SpawnConfig = {
   port: number;
   dbPath: string;
   local: boolean;
+  identityMode?: BackendIdentityConfig['mode'];
   parentPid?: number;
   logDir?: string;
   workDir?: string;
@@ -84,6 +85,8 @@ export type BackendDirConfig = {
 };
 
 export type BackendLaunchOptions = {
+  /** Explicit server-only opt-in; omitted means the existing local identity mode. */
+  identity?: BackendIdentityConfig;
   app: AppMetadata;
   resolveBackend: BackendBinaryResolver;
   port?: number;
@@ -210,7 +213,10 @@ export function buildSpawnArgs(config: SpawnConfig): string[] {
   if (!config.isPackaged && process.env.AIONUI_DUMP_PROMPTS === '1') args.push('--dump-prompts');
   if (config.logDir) args.push('--log-dir', config.logDir);
   if (config.workDir) args.push('--work-dir', config.workDir);
-  if (config.local) args.push('--local');
+  if (config.identityMode) {
+    if (config.local) throw new Error('External identity cannot be combined with local authentication bypass');
+    args.push('--identity-mode', config.identityMode);
+  } else if (config.local) args.push('--local');
   if (config.recoverCorruptedDatabase) args.push('--recover-corrupted-database');
   return args;
 }
@@ -221,13 +227,14 @@ export function buildSpawnArgs(config: SpawnConfig): string[] {
  * backend's `/api/system/info` matches what Electron main persists in
  * ProcessEnv('aionui.dir').
  */
-export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
+export function buildSpawnEnv(dirs?: BackendDirConfig, identity?: BackendIdentityConfig): NodeJS.ProcessEnv {
   // PREBUILDS_ONLY protects the packaged Electron process's own node-gyp-build
   // natives (see desktop process/index.ts) and must stay scoped to it. Agent
   // CLIs spawned under aioncore (e.g. cursor-agent) ship natives under
   // build/Release only, and node-gyp-build skips that directory for any
   // non-empty value, aborting the agent before the ACP handshake (#4070).
   const { PREBUILDS_ONLY: _prebuildsOnly, ...parentEnv } = process.env;
+  if (identity) parentEnv.AIONCORE_BOOTSTRAP_SECRET = identity.bootstrapSecret;
   if (!dirs) return parentEnv;
   return {
     ...parentEnv,
@@ -235,6 +242,16 @@ export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
     AIONUI_WORK_DIR: dirs.workDir,
     AIONUI_LOG_DIR: dirs.logDir,
   };
+}
+
+/** Resolve only in trusted Node WebUI startup, never from request/browser input. */
+export function resolveHostedIdentity(env: NodeJS.ProcessEnv = process.env): BackendIdentityConfig | undefined {
+  const mode = env.AIONUI_WEBUI_IDENTITY_MODE?.trim();
+  if (!mode || mode === 'local') return;
+  if (mode !== 'aionpro') throw new Error('Unsupported AIONUI_WEBUI_IDENTITY_MODE');
+  const bootstrapSecret = env.AIONCORE_BOOTSTRAP_SECRET;
+  if (!bootstrapSecret?.trim()) throw new Error('Hosted identity requires AIONCORE_BOOTSTRAP_SECRET');
+  return { mode, bootstrapSecret };
 }
 
 const FETCH_FORBIDDEN_PORTS = new Set([
@@ -527,8 +544,13 @@ export class BackendLifecycleManager {
 
   constructor(
     private readonly appMeta: AppMetadata,
-    private readonly resolveBackend: BackendBinaryResolver
-  ) {}
+    private readonly resolveBackend: BackendBinaryResolver,
+    private readonly identity?: BackendIdentityConfig
+  ) {
+    if (identity && (identity.mode !== 'aionpro' || !identity.bootstrapSecret?.trim())) {
+      throw new Error('Hosted identity requires aionpro mode and a bootstrap secret');
+    }
+  }
 
   get port(): number {
     return this._port;
@@ -665,7 +687,8 @@ export class BackendLifecycleManager {
     const args = buildSpawnArgs({
       port: this._port,
       dbPath,
-      local: true,
+      local: !this.identity,
+      identityMode: this.identity?.mode,
       parentPid: process.pid,
       logDir,
       workDir: dirs?.workDir,
@@ -689,7 +712,7 @@ export class BackendLifecycleManager {
     try {
       this.childProcess = spawn(binaryPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: buildSpawnEnv(dirs),
+        env: buildSpawnEnv(dirs, this.identity),
         cwd: dirs?.workDir ?? dbPath,
         detached: process.platform !== 'win32',
       });
@@ -1076,7 +1099,7 @@ export class BackendLifecycleManager {
  * directly to preserve current stop/port getter semantics).
  */
 export async function startBackend(opts: BackendLaunchOptions): Promise<BackendHandle> {
-  const manager = new BackendLifecycleManager(opts.app, opts.resolveBackend);
+  const manager = new BackendLifecycleManager(opts.app, opts.resolveBackend, opts.identity);
   const dataDir = opts.dataDir ?? '';
   if (!dataDir) {
     throw new Error('startBackend: dataDir is required');

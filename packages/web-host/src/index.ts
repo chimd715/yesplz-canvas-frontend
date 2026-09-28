@@ -1,6 +1,12 @@
 import type { WebHostOptions, WebHostHandle } from './types.js';
 
-export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle } from './types.js';
+export type {
+  AppMetadata,
+  BackendBinaryResolver,
+  BackendIdentityConfig,
+  WebHostOptions,
+  WebHostHandle,
+} from './types.js';
 export { startStaticServer, stopStaticServer } from './static-server.js';
 export type { StaticServerOptions, StaticServerHandle } from './static-server.js';
 
@@ -11,6 +17,7 @@ export {
   buildSpawnArgs,
   buildSpawnEnv,
   findAvailablePort,
+  resolveHostedIdentity,
   startBackend,
   stopBackend,
 } from './backend-launcher.js';
@@ -37,6 +44,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
       dataDir: opts.dataDir,
       logDir: opts.logDir,
       dirs: opts.dirs,
+      identity: opts.backend.identity,
     });
   } else {
     // useExistingBackend: create a fake handle
