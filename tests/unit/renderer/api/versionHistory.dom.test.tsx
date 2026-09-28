@@ -12,7 +12,7 @@ vi.mock('@/renderer/pages/conversation/Preview', () => ({
 vi.mock('@/renderer/components/Markdown', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('@/renderer/utils/platform', () => ({ isElectronDesktop: () => false }));
+vi.mock('@/common/adapter/httpBridge', () => ({ getBaseUrl: () => '' }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: { number?: number }) => (values?.number ? `${key} ${values.number}` : key),
@@ -276,6 +276,17 @@ describe('saved conversation versions', () => {
 });
 
 describe('version response validation', () => {
+  it('accepts only the matching revision at the trusted same-origin preview handoff', () => {
+    const id = '22222222-2222-4222-8222-222222222222';
+    const path = `/platform/projects/11111111-1111-4111-8111-111111111111/revisions/logical/${id}/preview?embed=1`;
+    expect(versionPreviewUrl({ ...saved(id), previewUrl: path })).toBe(window.location.origin + path);
+    expect(versionPreviewUrl({ ...saved(id), previewUrl: window.location.origin + path })).toBe(
+      window.location.origin + path
+    );
+    expect(versionPreviewUrl({ ...saved('another'), previewUrl: path })).toBeUndefined();
+    expect(versionPreviewUrl({ ...saved(id), previewUrl: path + '&redirect=/live' })).toBeUndefined();
+  });
+
   it('rejects a restore response that did not commit the requested generation and revision', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(initial())));
     await expect(restoreVersion('logical', 'first', 1, new AbortController().signal)).rejects.toMatchObject({

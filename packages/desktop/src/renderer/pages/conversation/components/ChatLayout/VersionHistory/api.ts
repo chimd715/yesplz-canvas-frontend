@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isHistoricalPreviewUrl } from '@/renderer/utils/platform';
 
 const id = z.string().min(1).max(200);
 const versionSchema = z.object({
@@ -103,9 +104,11 @@ export async function fetchRevertedMessages(path: string): Promise<HistoryPage> 
   return historyPageSchema.parse(await response.json());
 }
 
-/** Historical previews must be explicit, isolated URLs, never live loopback links. */
+/** Historical previews use a trusted handoff or an explicit isolated URL, never the live app. */
 export function versionPreviewUrl(version: SavedVersion): string | undefined {
   if (version.status !== 'ready' || !version.previewUrl) return;
+  if (isHistoricalPreviewUrl(version.previewUrl, version.id))
+    return new URL(version.previewUrl, window.location.origin).href;
   try {
     const url = new URL(version.previewUrl);
     const local = url.hostname.endsWith('.localhost');

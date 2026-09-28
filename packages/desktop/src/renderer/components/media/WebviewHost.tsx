@@ -9,7 +9,12 @@ import { useTranslation } from 'react-i18next';
 import { Left, Right, Refresh, Loading } from '@icon-park/react';
 import { ipcBridge } from '@/common';
 import { Button, Input } from '@arco-design/web-react';
-import { isElectronDesktop, isHostedPreviewUrl, openWebBrowserUrl } from '@/renderer/utils/platform';
+import {
+  isElectronDesktop,
+  isHistoricalPreviewUrl,
+  isHostedPreviewUrl,
+  openWebBrowserUrl,
+} from '@/renderer/utils/platform';
 import { InternalNavTracker, shouldResetHistoryForUrlProp } from './webviewHistory';
 
 export interface WebviewHostProps {
@@ -77,15 +82,16 @@ const WebBrowserHost: React.FC<WebviewHostProps> = ({
   } catch {
     /* A new tab has no address yet. */
   }
-  const hosted = Boolean(frameUrl && isHostedPreviewUrl(frameUrl));
+  const historical = Boolean(frameUrl && isHistoricalPreviewUrl(frameUrl));
+  const hosted = historical || Boolean(frameUrl && isHostedPreviewUrl(frameUrl));
   useEffect(() => {
     setFailed(false);
     setLoading(hosted);
-    if (hosted && frameUrl && !openWebBrowserUrl(frameUrl, frameName)) {
+    if (hosted && !historical && frameUrl && !openWebBrowserUrl(frameUrl, frameName)) {
       setFailed(true);
       setLoading(false);
     }
-  }, [frameUrl, hosted, frameName, reload]);
+  }, [frameUrl, hosted, historical, frameName, reload]);
   const raw = inputUrl.trim();
   const target = raw
     ? resolveUrlInput
@@ -148,6 +154,7 @@ const WebBrowserHost: React.FC<WebviewHostProps> = ({
         <iframe
           key={`${displayUrl}:${reload}`}
           name={frameName}
+          src={historical ? frameUrl : undefined}
           title={t('preview.preview')}
           sandbox='allow-scripts allow-same-origin allow-forms'
           referrerPolicy='no-referrer'

@@ -112,6 +112,30 @@ export const isHostedPreviewUrl = (value: string): boolean => {
   }
 };
 
+/** Only the platform's fixed, owner-checked revision handoff may load on the Builder origin. */
+export const isHistoricalPreviewUrl = (value: string, revisionId?: string): boolean => {
+  if (!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]')) return false;
+  try {
+    const url = new URL(value, window.location.origin);
+    const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
+    const match = new RegExp(`^/platform/projects/${uuid}/revisions/[A-Za-z0-9_-]{1,100}/(${uuid})/preview$`).exec(
+      url.pathname
+    );
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      url.origin === window.location.origin &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      (url.search === '' || url.search === '?embed=1') &&
+      !!match &&
+      (revisionId === undefined || match[1] === revisionId)
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** Open a WebUI link, or load an owned app into an existing named preview frame. */
 export const openWebBrowserUrl = (value: string, frameName?: string): boolean => {
   if (isElectronDesktop()) return false;
