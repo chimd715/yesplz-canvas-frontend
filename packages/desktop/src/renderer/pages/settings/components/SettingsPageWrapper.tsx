@@ -53,6 +53,12 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
       icon: <Robot theme='outline' size='16' />,
       path: 'agent',
     },
+    plugins: {
+      id: 'plugins',
+      label: t('settings.plugins.catalog'),
+      icon: <Puzzle theme='outline' size='16' />,
+      path: 'plugins',
+    },
     skills: {
       id: 'skills',
       label: t('settings.skills', { defaultValue: 'Skills' }),

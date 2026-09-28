@@ -28,6 +28,7 @@ import { getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
 export const BUILTIN_TAB_IDS = [
   'agent',
   'model',
+  'plugins',
   'skills',
   'tools',
   'appearance',
@@ -92,6 +93,7 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         icon: <Speed />,
         path: 'agent',
       },
+      plugins: { id: 'plugins', label: t('settings.plugins.catalog'), icon: <Puzzle />, path: 'plugins' },
       skills: {
         id: 'skills',
         label: t('settings.skills', { defaultValue: 'Skills' }),

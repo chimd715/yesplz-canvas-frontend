@@ -1417,5 +1417,23 @@
   "crossSessionMessageDesc": "エージェントが他の会話にメッセージを送れるようにします。オフにすると入力欄の @@ 会話メンションも無効になります。",
   "crossSessionMessageDisabledBanner": "会話間メッセージはオフです。入力欄の @@ 会話メンションは使用できません。",
   "crossSessionMessageResume": "再度オンにする",
-  "crossSessionMessageUpdateFailed": "会話間メッセージ設定の更新に失敗しました"
+  "crossSessionMessageUpdateFailed": "会話間メッセージ設定の更新に失敗しました",
+  "plugins": {
+    "catalog": "Plugins",
+    "back": "Back to plugins",
+    "details": "View details",
+    "shopify": {
+      "name": "Shopify",
+      "description": "Use products from your existing Shopify store to build widgets and apps.",
+      "connection": "Connect an existing store",
+      "flow": "Enter your shop address, authorize access in Shopify, and return to this workspace.",
+      "capabilities": "Available after connection",
+      "products": "Read product details, variants, prices, and images.",
+      "collections": "Read collections to organize products in your widget.",
+      "pending": "Connection setup required",
+      "setup": "Shopify authentication is not connected to this workspace yet. Store connection and product access are not available.",
+      "connect": "Connect Shopify"
+    },
+    "description": "Plugins bring together tools, skills, and service connections."
+  }
 }

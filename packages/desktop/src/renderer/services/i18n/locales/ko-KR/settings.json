@@ -1417,5 +1417,23 @@
   "crossSessionMessageDesc": "에이전트가 다른 대화로 메시지를 보낼 수 있게 합니다. 끄면 입력창의 @@ 대화 멘션도 비활성화됩니다.",
   "crossSessionMessageDisabledBanner": "대화 간 메시지가 꺼져 있어 입력창의 @@ 대화 멘션을 사용할 수 없습니다.",
   "crossSessionMessageResume": "다시 켜기",
-  "crossSessionMessageUpdateFailed": "대화 간 메시지 설정 업데이트에 실패했습니다"
+  "crossSessionMessageUpdateFailed": "대화 간 메시지 설정 업데이트에 실패했습니다",
+  "plugins": {
+    "catalog": "Plugins",
+    "back": "Back to plugins",
+    "details": "View details",
+    "shopify": {
+      "name": "Shopify",
+      "description": "Use products from your existing Shopify store to build widgets and apps.",
+      "connection": "Connect an existing store",
+      "flow": "Enter your shop address, authorize access in Shopify, and return to this workspace.",
+      "capabilities": "Available after connection",
+      "products": "Read product details, variants, prices, and images.",
+      "collections": "Read collections to organize products in your widget.",
+      "pending": "Connection setup required",
+      "setup": "Shopify authentication is not connected to this workspace yet. Store connection and product access are not available.",
+      "connect": "Connect Shopify"
+    },
+    "description": "Plugins bring together tools, skills, and service connections."
+  }
 }

@@ -1429,5 +1429,23 @@
   "crossSessionMessageDesc": "Разрешить агентам отправлять сообщения в ваши другие беседы. При отключении также отключается упоминание @@ в поле ввода.",
   "crossSessionMessageDisabledBanner": "Сообщения между беседами отключены, упоминание @@ недоступно.",
   "crossSessionMessageResume": "Включить снова",
-  "crossSessionMessageUpdateFailed": "Не удалось обновить настройку сообщений между беседами"
+  "crossSessionMessageUpdateFailed": "Не удалось обновить настройку сообщений между беседами",
+  "plugins": {
+    "catalog": "Plugins",
+    "back": "Back to plugins",
+    "details": "View details",
+    "shopify": {
+      "name": "Shopify",
+      "description": "Use products from your existing Shopify store to build widgets and apps.",
+      "connection": "Connect an existing store",
+      "flow": "Enter your shop address, authorize access in Shopify, and return to this workspace.",
+      "capabilities": "Available after connection",
+      "products": "Read product details, variants, prices, and images.",
+      "collections": "Read collections to organize products in your widget.",
+      "pending": "Connection setup required",
+      "setup": "Shopify authentication is not connected to this workspace yet. Store connection and product access are not available.",
+      "connect": "Connect Shopify"
+    },
+    "description": "Plugins bring together tools, skills, and service connections."
+  }
 }

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, renderHook, waitFor } from '@testing-library/react';
+import React from 'react';
+import { act, render, fireEvent, screen, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const onStateChangedHandlers: Array<(payload: { name: string; status: string; error?: string }) => void> = [];
@@ -40,6 +41,16 @@ vi.mock('@/common', () => ({
   },
 }));
 
+vi.mock('@/renderer/utils/model/agentLogo', () => ({
+  useAgentLogos: () => ({}),
+  resolveAgentAvatar: () => ({ kind: 'fallback' }),
+}));
+vi.mock('@/renderer/pages/settings/components/SettingsPageWrapper', () => ({
+  default: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children),
+}));
+import PluginsSettings from '@/renderer/pages/settings/ToolsSettings/PluginsSettings';
+import { ipcBridge } from '@/common';
+
 import { mutate } from 'swr';
 import { useHubAgents } from '@/renderer/hooks/agent/useHubAgents';
 
@@ -63,4 +74,16 @@ describe('useHubAgents', () => {
     expect(mutate).toHaveBeenCalledWith('agents.managed');
     expect(mutate).toHaveBeenCalledWith('assistants.list');
   });
+});
+
+it('shows Shopify independently of an empty agent catalog without starting authentication or installation', async () => {
+  vi.clearAllMocks();
+  render(React.createElement(PluginsSettings));
+  fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.details' }));
+  expect(screen.getByRole('button', { name: 'settings.plugins.shopify.connect' })).toBeDisabled();
+  expect(screen.getByText('settings.plugins.shopify.setup')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.back' }));
+  expect(screen.getByRole('button', { name: 'settings.plugins.details' })).toBeVisible();
+  expect(ipcBridge.hub.getExtensionList.invoke).not.toHaveBeenCalled();
+  expect(ipcBridge.hub.install.invoke).not.toHaveBeenCalled();
 });

@@ -1415,5 +1415,23 @@
   "crossSessionMessageDesc": "به عامل‌ها اجازه می‌دهد به گفتگوهای دیگر شما پیام بفرستند. با خاموش کردن، منشن @@ در کادر ورودی نیز غیرفعال می‌شود.",
   "crossSessionMessageDisabledBanner": "پیام‌های بین گفتگوها خاموش است، منشن @@ در دسترس نیست.",
   "crossSessionMessageResume": "روشن کردن دوباره",
-  "crossSessionMessageUpdateFailed": "به‌روزرسانی تنظیم پیام‌های بین گفتگوها ناموفق بود"
+  "crossSessionMessageUpdateFailed": "به‌روزرسانی تنظیم پیام‌های بین گفتگوها ناموفق بود",
+  "plugins": {
+    "catalog": "Plugins",
+    "back": "Back to plugins",
+    "details": "View details",
+    "shopify": {
+      "name": "Shopify",
+      "description": "Use products from your existing Shopify store to build widgets and apps.",
+      "connection": "Connect an existing store",
+      "flow": "Enter your shop address, authorize access in Shopify, and return to this workspace.",
+      "capabilities": "Available after connection",
+      "products": "Read product details, variants, prices, and images.",
+      "collections": "Read collections to organize products in your widget.",
+      "pending": "Connection setup required",
+      "setup": "Shopify authentication is not connected to this workspace yet. Store connection and product access are not available.",
+      "connect": "Connect Shopify"
+    },
+    "description": "Plugins bring together tools, skills, and service connections."
+  }
 }

@@ -1430,5 +1430,23 @@
   "crossSessionMessageDesc": "Дозволяє агентам надсилати повідомлення до ваших інших розмов. Вимкнення також відключає згадку @@ у полі введення.",
   "crossSessionMessageDisabledBanner": "Повідомлення між розмовами вимкнено, згадка @@ недоступна.",
   "crossSessionMessageResume": "Увімкнути знову",
-  "crossSessionMessageUpdateFailed": "Не вдалося оновити налаштування повідомлень між розмовами"
+  "crossSessionMessageUpdateFailed": "Не вдалося оновити налаштування повідомлень між розмовами",
+  "plugins": {
+    "catalog": "Plugins",
+    "back": "Back to plugins",
+    "details": "View details",
+    "shopify": {
+      "name": "Shopify",
+      "description": "Use products from your existing Shopify store to build widgets and apps.",
+      "connection": "Connect an existing store",
+      "flow": "Enter your shop address, authorize access in Shopify, and return to this workspace.",
+      "capabilities": "Available after connection",
+      "products": "Read product details, variants, prices, and images.",
+      "collections": "Read collections to organize products in your widget.",
+      "pending": "Connection setup required",
+      "setup": "Shopify authentication is not connected to this workspace yet. Store connection and product access are not available.",
+      "connect": "Connect Shopify"
+    },
+    "description": "Plugins bring together tools, skills, and service connections."
+  }
 }
