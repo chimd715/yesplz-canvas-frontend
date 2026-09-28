@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { act, render, fireEvent, screen, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -81,7 +82,7 @@ it('shows Shopify independently of an empty agent catalog without starting authe
   const fetchMock = vi
     .spyOn(globalThis, 'fetch')
     .mockResolvedValue(Response.json({ available: false, connected: false }));
-  render(React.createElement(PluginsSettings));
+  render(React.createElement(MemoryRouter, null, React.createElement(PluginsSettings)));
   fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.details' }));
   await waitFor(() => expect(screen.getByText('settings.plugins.shopify.pending')).toBeVisible());
   expect(screen.getByRole('button', { name: 'settings.plugins.shopify.connect' })).toBeDisabled();

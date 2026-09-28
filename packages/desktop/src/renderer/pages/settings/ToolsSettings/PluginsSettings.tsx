@@ -1,14 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Button } from '@arco-design/web-react';
+import { Button, Select } from '@arco-design/web-react';
 import { Shop, ArrowLeft, Right } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import SettingsPageWrapper from '../components/SettingsPageWrapper';
 import SettingsPageHeader from '../components/SettingsPageHeader';
 
-export const ConnectorCatalog: React.FC = () => {
+type StoreStatus = {
+  available: boolean;
+  connected: boolean;
+  shop?: string;
+  stores?: { shop: string; connected: boolean }[];
+};
+
+const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ conversationId }) => {
   const { t } = useTranslation();
   const [showShopify, setShowShopify] = useState(false);
-  const [connection, setConnection] = useState<{ available: boolean; connected: boolean; shop?: string }>({
+  const [connection, setConnection] = useState<StoreStatus>({
     available: false,
     connected: false,
   });
@@ -17,7 +25,11 @@ export const ConnectorCatalog: React.FC = () => {
   const [error, setError] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch('/api/platform/connectors/shopify', { signal: controller.signal, credentials: 'same-origin' })
+    void fetch(
+      '/api/platform/connectors/shopify' +
+        (conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : ''),
+      { signal: controller.signal, credentials: 'same-origin' }
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error('Connection status unavailable');
         const data = await response.json();
@@ -25,6 +37,12 @@ export const ConnectorCatalog: React.FC = () => {
           available: data.available === true,
           connected: data.connected === true,
           shop: typeof data.shop === 'string' ? data.shop : undefined,
+          stores: Array.isArray(data.stores)
+            ? data.stores.filter(
+                (store: { shop?: unknown; connected?: unknown }) =>
+                  typeof store.shop === 'string' && typeof store.connected === 'boolean'
+              )
+            : [],
         });
       })
       .catch(() => {
@@ -34,7 +52,26 @@ export const ConnectorCatalog: React.FC = () => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [conversationId]);
+  const selectStore = async (shop: string) => {
+    if (!conversationId) return;
+    setConnecting(true);
+    setError(false);
+    try {
+      const response = await fetch('/api/platform/connectors/shopify', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, shop }),
+      });
+      if (!response.ok) throw new Error('Store selection failed');
+      setConnection(await response.json());
+    } catch {
+      setError(true);
+    } finally {
+      setConnecting(false);
+    }
+  };
   const connect = async () => {
     setConnecting(true);
     setError(false);
@@ -109,15 +146,44 @@ export const ConnectorCatalog: React.FC = () => {
             <p id='shopify-connection-status' className='m-0 text-13px text-t-secondary'>
               {connection.available ? t('settings.plugins.shopify.flow') : t('settings.plugins.shopify.setup')}
             </p>
+            {conversationId ? (
+              <div className='flex flex-col gap-8px'>
+                <label htmlFor='shopify-store-selection' className='text-13px text-t-secondary'>
+                  {t('settings.plugins.shopify.selection')}
+                </label>
+                <Select
+                  id='shopify-store-selection'
+                  aria-label={t('settings.plugins.shopify.selection')}
+                  placeholder={t('settings.plugins.shopify.choose')}
+                  value={connection.shop}
+                  disabled={loading || connecting || !connection.available}
+                  onChange={(value: string) => void selectStore(value)}
+                  options={(connection.stores ?? []).map((store) => ({
+                    value: store.shop,
+                    label: store.shop,
+                    disabled: !store.connected,
+                  }))}
+                />
+              </div>
+            ) : (
+              <p className='m-0 text-13px text-t-secondary'>{t('settings.plugins.shopify.workspaceHint')}</p>
+            )}
+            {!conversationId && (connection.stores ?? []).length > 0 && (
+              <ul className='m-0 pl-20px text-13px text-t-secondary'>
+                {connection.stores?.map((store) => (
+                  <li key={store.shop}>{store.shop}</li>
+                ))}
+              </ul>
+            )}
             <Button
               type='primary'
               className='self-start mt-4px'
-              disabled={loading || !connection.available || connection.connected}
+              disabled={loading || !connection.available}
               loading={connecting}
               onClick={() => void connect()}
               aria-describedby='shopify-connection-status'
             >
-              {t('settings.plugins.shopify.connect')}
+              {t(connection.stores?.length ? 'settings.plugins.shopify.addStore' : 'settings.plugins.shopify.connect')}
             </Button>
           </div>
         </div>
@@ -138,6 +204,12 @@ export const ConnectorCatalog: React.FC = () => {
       )}
     </div>
   );
+};
+
+export const ConnectorCatalog: React.FC = () => {
+  const { pathname } = useLocation();
+  const conversationId = pathname.match(/^\/conversation\/([A-Za-z0-9_-]{1,100})$/)?.[1];
+  return <ConversationConnectors key={conversationId ?? 'workspace'} conversationId={conversationId} />;
 };
 
 const PluginsSettings: React.FC = () => {
