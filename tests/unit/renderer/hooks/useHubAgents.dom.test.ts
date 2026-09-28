@@ -78,12 +78,17 @@ describe('useHubAgents', () => {
 
 it('shows Shopify independently of an empty agent catalog without starting authentication or installation', async () => {
   vi.clearAllMocks();
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(Response.json({ available: false, connected: false }));
   render(React.createElement(PluginsSettings));
   fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.details' }));
+  await waitFor(() => expect(screen.getByText('settings.plugins.shopify.pending')).toBeVisible());
   expect(screen.getByRole('button', { name: 'settings.plugins.shopify.connect' })).toBeDisabled();
   expect(screen.getByText('settings.plugins.shopify.setup')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.back' }));
   expect(screen.getByRole('button', { name: 'settings.plugins.details' })).toBeVisible();
   expect(ipcBridge.hub.getExtensionList.invoke).not.toHaveBeenCalled();
   expect(ipcBridge.hub.install.invoke).not.toHaveBeenCalled();
+  fetchMock.mockRestore();
 });
