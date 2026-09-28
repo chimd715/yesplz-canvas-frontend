@@ -14,7 +14,7 @@
  */
 
 import React from 'react';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, cleanup, screen } from '@testing-library/react';
 import { act } from 'react';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +28,7 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 vi.mock('@/renderer/pages/conversation/components/ChatConversation', () => ({
-  default: () => <div data-testid='chat' />,
+  default: ({ conversation }: { conversation?: TChatConversation }) => <div data-testid='chat'>{conversation?.id}</div>,
 }));
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({ closePreviewIfScopeChanged: vi.fn() }),
@@ -79,7 +79,11 @@ beforeEach(() => {
   getConversationOrNull.mockReset();
   listChangedCb = null;
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  document.querySelector('meta[name="ai-builder-preview"]')?.remove();
+  vi.unstubAllGlobals();
+});
 
 describe('conversation project_id backfill — responsive refetch on listChanged', () => {
   it('refetches on the backfill event and publishes the populated project_id (no poll)', async () => {
@@ -113,5 +117,61 @@ describe('conversation project_id backfill — responsive refetch on listChanged
     await new Promise((r) => setTimeout(r, 50));
     expect(getConversationOrNull).toHaveBeenCalledTimes(1);
     expect(getCurrentProject()).toBeNull();
+  });
+});
+
+describe('logical conversation routing', () => {
+  const enableVersions = () => {
+    vi.stubGlobal('electronAPI', undefined);
+    const meta = document.createElement('meta');
+    meta.name = 'ai-builder-preview';
+    meta.content = 'enabled';
+    document.head.append(meta);
+  };
+  it('resolves the logical id before mounting its active Core continuation', async () => {
+    enableVersions();
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((done) => {
+            resolve = done;
+          })
+      )
+    );
+    getConversationOrNull.mockResolvedValue({ ...conv('p1'), id: 'continued-core' });
+    renderIndex();
+    expect(getConversationOrNull).not.toHaveBeenCalled();
+    await act(async () =>
+      resolve(
+        Response.json({
+          activeCoreConversationId: 'continued-core',
+          activeRevisionId: null,
+          headGeneration: 2,
+          versions: [],
+          reverted: [],
+        })
+      )
+    );
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('continued-core'));
+    expect(getConversationOrNull).toHaveBeenCalledWith('continued-core');
+    expect(getConversationOrNull).not.toHaveBeenCalledWith('c1');
+  });
+  it('retains the original route behavior when the capability is absent', async () => {
+    enableVersions();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
+    getConversationOrNull.mockResolvedValue(conv('p1'));
+    renderIndex();
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
+    expect(getConversationOrNull).toHaveBeenCalledWith('c1');
+  });
+  it('does not resume the original Core conversation when resolution fails', async () => {
+    enableVersions();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    renderIndex();
+    await screen.findByRole('alert');
+    expect(getConversationOrNull).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
   });
 });

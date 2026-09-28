@@ -29,6 +29,8 @@ import HOC from '@renderer/utils/ui/HOC';
 import type { FileChangeInfo } from './MessageFileChanges';
 import MessageFileChanges, { parseDiff } from './MessageFileChanges';
 import { useConversationArtifacts } from './artifacts';
+import { VersionTimelineItems } from '../components/ChatLayout/VersionHistory/VersionCard';
+import { useVersionHistory } from '../components/ChatLayout/VersionHistory/context';
 import { MessageAnchorRail } from './anchorRail';
 import {
   useLoadAnchorMessageWindow,
@@ -332,6 +334,7 @@ const MessageItem: React.FC<{
 );
 
 const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }> = ({ emptySlot }) => {
+  const versions = useVersionHistory();
   const list = useMessageList();
   const isMessageListLoading = useMessageListLoading();
   const pagination = useMessagePaginationState();
@@ -729,7 +732,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     return <MessageListSkeleton rowWidthClass={rowWidthClass} />;
   }
 
-  if (processedList.length === 0 && emptySlot) {
+  if (processedList.length === 0 && emptySlot && !versions?.data?.versions.length && !versions?.data?.reverted.length) {
     return <div className='relative flex-1 h-full flex items-center justify-center'>{emptySlot}</div>;
   }
 
@@ -760,8 +763,12 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
             >
               <div className='h-10px' />
               {processedList.map((item, index) => (
-                <React.Fragment key={getProcessedItemAnchorId(item) || index}>{renderItem(index, item)}</React.Fragment>
+                <React.Fragment key={getProcessedItemAnchorId(item) || index}>
+                  {renderItem(index, item)}
+                  <VersionTimelineItems messageIds={getProcessedItemSourceMessageIds(item)} />
+                </React.Fragment>
               ))}
+              <VersionTimelineItems visibleMessageIds={processedList.flatMap(getProcessedItemSourceMessageIds)} />
               <div className='h-20px' />
             </div>
           </div>

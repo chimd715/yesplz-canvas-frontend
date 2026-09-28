@@ -829,5 +829,30 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "versions": {
+    "version": "Version {{number}}",
+    "status": {
+      "saved": "Saved",
+      "building": "Building",
+      "ready": "Ready",
+      "failed": "Build failed"
+    },
+    "current": "Current",
+    "published": "Published",
+    "details": "Details",
+    "previewUnavailable": "Preview is not available for this version.",
+    "restoreDescription": "Revert restores code and chat context. Later messages stay available. Published apps and app data are unchanged.",
+    "revert": "Revert to this version",
+    "revertedMessages": "Reverted messages",
+    "hide": "Hide",
+    "show": "Show",
+    "historyUnavailable": "Could not load reverted messages.",
+    "loadEarlier": "Load earlier messages",
+    "selectedVersion": "Version to publish",
+    "restoring": "Restoring version…",
+    "restoreConflict": "This conversation changed. Refresh and try again.",
+    "restoreUnavailable": "Could not restore this version. Your current work remains available.",
+    "unavailable": "Could not load this conversation. Try again."
   }
 }

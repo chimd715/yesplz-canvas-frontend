@@ -1,10 +1,11 @@
 import { ipcBridge } from '@/common';
-import { Message, Spin } from '@arco-design/web-react';
+import { Button, Message, Spin } from '@arco-design/web-react';
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import useSWR from 'swr';
 import ChatConversation from './components/ChatConversation';
+import { useVersionHistoryState, VersionHistoryProvider } from './components/ChatLayout/VersionHistory';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import { previewScopeKey } from '@/renderer/pages/conversation/Preview/context/previewScope';
 import { setCurrentProject } from '@/renderer/pages/conversation/explorer/currentProjectStore';
@@ -22,8 +23,15 @@ const ChatConversationIndex: React.FC = () => {
   const notFoundHandledIdRef = useRef<string | undefined>(undefined);
   const defaultConversationTitle = t('conversation.welcome.newConversation');
 
-  const { data, isLoading, mutate } = useSWR(id ? `conversation/${id}` : null, () => {
-    return getConversationOrNull(id!);
+  const versions = useVersionHistoryState(id);
+  // Public links retain the logical id. Native chat, websocket and send-box code
+  // receive the active continuation only after the platform resolves it.
+  const activeId =
+    versions.isLoading || (!versions.data && versions.error)
+      ? undefined
+      : (versions.data?.activeCoreConversationId ?? id);
+  const { data, error, isLoading, mutate } = useSWR(activeId ? `conversation/${activeId}` : null, () => {
+    return getConversationOrNull(activeId!);
   });
 
   // Close preview only when the isolation scope changes, not on every
@@ -75,16 +83,16 @@ const ChatConversationIndex: React.FC = () => {
   // this listener refetches → the now-populated project_id flows to
   // `setCurrentProject` above → the Explorer host appears. Responsive, no poll.
   useEffect(() => {
-    if (!id) return;
+    if (!activeId) return;
 
     return ipcBridge.conversation.listChanged.on((event) => {
-      if (event.conversation_id !== id || (event.action !== 'updated' && event.action !== 'created')) {
+      if (event.conversation_id !== activeId || (event.action !== 'updated' && event.action !== 'created')) {
         return;
       }
 
       void mutate();
     });
-  }, [id, mutate]);
+  }, [activeId, mutate]);
 
   useEffect(() => {
     if (!data || data.name !== defaultConversationTitle) {
@@ -100,14 +108,58 @@ const ChatConversationIndex: React.FC = () => {
   // browser history): show a toast and replace the route with home, so we
   // don't render an empty skeleton. Fire at most once per id.
   useEffect(() => {
-    if (!id || isLoading || data || notFoundHandledIdRef.current === id) return;
-    notFoundHandledIdRef.current = id;
+    if (!activeId || isLoading || error || data !== null || notFoundHandledIdRef.current === activeId) return;
+    notFoundHandledIdRef.current = activeId;
     Message.warning(t('conversation.notFound'));
     navigate('/', { replace: true });
-  }, [id, isLoading, data, navigate, t]);
+  }, [activeId, isLoading, error, data, navigate, t]);
 
-  if (isLoading) return <Spin loading></Spin>;
-  return <ChatConversation conversation={data ?? undefined}></ChatConversation>;
+  if (versions.isLoading || isLoading) return <Spin loading />;
+  if ((!versions.data && versions.error) || error)
+    return (
+      <div role='alert' className='flex items-center gap-12px p-20px text-t-secondary'>
+        <span>{t('conversation.versions.unavailable')}</span>
+        <Button
+          size='small'
+          onClick={() => {
+            void versions.refresh();
+            void mutate();
+          }}
+        >
+          {t('common.retry')}
+        </Button>
+      </div>
+    );
+  return (
+    <VersionHistoryProvider value={versions}>
+      <div className='flex flex-col h-full min-h-0'>
+        {(versions.restoreError || versions.error) && (
+          <div role='alert' className='flex items-center gap-12px px-20px py-8px text-13px text-danger'>
+            <span>
+              {t(
+                versions.restoreError === 'conflict'
+                  ? 'conversation.versions.restoreConflict'
+                  : versions.restoreError
+                    ? 'conversation.versions.restoreUnavailable'
+                    : 'conversation.versions.unavailable'
+              )}
+            </span>
+            <Button size='mini' loading={versions.isValidating} onClick={() => void versions.refresh()}>
+              {t('common.retry')}
+            </Button>
+          </div>
+        )}
+        {versions.restoring && (
+          <div role='status' className='px-20px py-8px text-13px text-t-secondary'>
+            {t('conversation.versions.restoring')}
+          </div>
+        )}
+        <div className='flex-1 min-h-0' inert={versions.restoring || undefined} aria-busy={versions.restoring}>
+          <ChatConversation key={activeId} conversation={data ?? undefined} />
+        </div>
+      </div>
+    </VersionHistoryProvider>
+  );
 };
 
 export default ChatConversationIndex;

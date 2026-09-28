@@ -1,11 +1,13 @@
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { copyText } from '@/renderer/utils/ui/clipboard';
-import { Button, Input, Link, Message, Popover } from '@arco-design/web-react';
+import { Button, Input, Link, Message, Popover, Select } from '@arco-design/web-react';
 import { Code, Copy, Rocket } from '@icon-park/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import styles from './PublishButton.module.css';
+import { useVersionHistory } from '../VersionHistory/context';
+import { versionPreviewUrl } from '../VersionHistory/api';
 import EmbedGuide, { type EmbedNotice } from './EmbedGuide';
 
 type Phase = 'unconfigured' | 'provisioning' | 'ready' | 'publishing' | 'failed' | 'interrupted';
@@ -15,7 +17,7 @@ type PublishingStatus = {
   connected: boolean;
   workspaceMatches: boolean;
   conversationId?: string;
-  history: { url?: string; conversationId?: string; embedCode?: string }[];
+  history: { url?: string; conversationId?: string; revisionId?: string; embedCode?: string }[];
 };
 const phases: Phase[] = ['unconfigured', 'provisioning', 'ready', 'publishing', 'failed', 'interrupted'];
 const pending = (phase?: Phase) => phase === 'provisioning' || phase === 'publishing';
@@ -56,6 +58,7 @@ async function readStatus(response: Response): Promise<PublishingStatus> {
       return {
         url,
         conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : undefined,
+        revisionId: typeof entry.revisionId === 'string' ? entry.revisionId : undefined,
         embedCode:
           url && typeof entry.embedCode === 'string' && entry.embedCode.length <= 16384 ? entry.embedCode : undefined,
       };
@@ -76,10 +79,16 @@ const fetchStatus = async (url: string): Promise<PublishingStatus> =>
 /** Publishing is available only when the project gateway confirms this conversation's source. */
 const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = ({ conversationId, isWidget }) => {
   const { t } = useTranslation();
+  const versions = useVersionHistory();
+  const revisionId = versions?.selectedVersion?.id;
+  const logicalConversationId = versions?.data ? versions.logicalConversationId : undefined;
+  const versionQuery = logicalConversationId
+    ? `&logicalConversationId=${encodeURIComponent(logicalConversationId)}${revisionId ? `&revisionId=${encodeURIComponent(revisionId)}` : ''}`
+    : '';
   const enabled = !isElectronDesktop() && /^https?:$/.test(window.location.protocol);
   const [embedVisible, setEmbedVisible] = useState(false);
   const { data, error, isValidating, mutate } = useSWR<PublishingStatus>(
-    enabled ? `/api/platform/publishing?conversationId=${encodeURIComponent(conversationId)}` : null,
+    enabled ? `/api/platform/publishing?conversationId=${encodeURIComponent(conversationId)}${versionQuery}` : null,
     fetchStatus,
     {
       shouldRetryOnError: false,
@@ -94,7 +103,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
     mutate: refreshEmbed,
   } = useSWR<PublishingStatus>(
     enabled && embedVisible
-      ? `/api/platform/publishing/embed?conversationId=${encodeURIComponent(conversationId)}`
+      ? `/api/platform/publishing/embed?conversationId=${encodeURIComponent(conversationId)}${versionQuery}`
       : null,
     fetchStatus,
     { shouldRetryOnError: false, keepPreviousData: false }
@@ -117,22 +126,50 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
   }, [conversationId]);
 
   useEffect(() => {
+    setEmbedVisible(false);
+    setSubmitting(false);
+    setPublishFailed(false);
+    setOpenEmbedAfterPublish(false);
+    return () => {
+      request.current?.abort();
+      request.current = null;
+    };
+  }, [revisionId]);
+
+  useEffect(() => {
     if (!openEmbedAfterPublish || submitting || !data || pending(data.phase)) return;
     setOpenEmbedAfterPublish(false);
-    if (!error && data.phase === 'ready' && data.history.at(-1)?.conversationId === conversationId) {
+    if (
+      !error &&
+      data.phase === 'ready' &&
+      data.history.at(-1)?.conversationId === conversationId &&
+      (!revisionId || data.history.at(-1)?.revisionId === revisionId)
+    ) {
       setVisible(false);
       setEmbedVisible(true);
     }
-  }, [openEmbedAfterPublish, submitting, data, error, conversationId]);
+  }, [openEmbedAfterPublish, submitting, data, error, conversationId, revisionId]);
 
   // Plain Aion and Electron have no publishing capability; do not add an irrelevant control.
   if (!enabled || !data) return null;
   const busy = submitting || pending(data.phase);
   const url = data.history
-    .filter((entry) => (entry.conversationId ?? data.conversationId) === conversationId)
+    .filter(
+      (entry) =>
+        (entry.conversationId ?? data.conversationId) === conversationId &&
+        (!revisionId || (entry === data.history.at(-1) && entry.revisionId === revisionId))
+    )
     .at(-1)?.url;
   const unavailable = !data.connected || data.phase === 'unconfigured';
-  const canPublish = data.workspaceMatches && !unavailable && !busy && !error && !isValidating;
+  const canPublish =
+    data.workspaceMatches &&
+    !unavailable &&
+    !busy &&
+    !error &&
+    !isValidating &&
+    (!versions?.data ||
+      (!!revisionId && versions.selectedVersion?.status === 'ready' && !versions.restoring && !versions.error));
+  const previewUrl = versions?.selectedVersion ? versionPreviewUrl(versions.selectedVersion) : undefined;
   // The canonical URL is shared: an older conversation's revision may no longer be served there.
   const latest = embedData?.history.at(-1);
   const embedNotice: EmbedNotice | undefined =
@@ -144,7 +181,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
           ? 'checking'
           : !latest
             ? 'publishFirst'
-            : latest.conversationId !== conversationId
+            : latest.conversationId !== conversationId || (!!revisionId && latest.revisionId !== revisionId)
               ? 'replaced'
               : !latest.embedCode
                 ? 'publishAgain'
@@ -163,7 +200,10 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
           credentials: 'same-origin',
           redirect: 'error',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId }),
+          body: JSON.stringify({
+            conversationId,
+            ...(logicalConversationId ? { logicalConversationId, revisionId } : {}),
+          }),
           // Allow the streamed job's 780-second deadline plus its final response.
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(795000)]),
         })
@@ -191,6 +231,24 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
         <span className='text-t-secondary'>{t('common.status')}</span>
         <span className='text-t-primary'>{t(`conversation.publishing.phase.${data.phase}`)}</span>
       </div>
+      {versions?.data && (
+        <div className='flex flex-col gap-8px'>
+          <label className='text-12px text-t-secondary' htmlFor='publish-revision'>
+            {t('conversation.versions.selectedVersion')}
+          </label>
+          <Select
+            id='publish-revision'
+            aria-label={t('conversation.versions.selectedVersion')}
+            value={revisionId}
+            disabled={busy || versions.restoring}
+            onChange={versions.selectVersion}
+            options={versions.data.versions.map((version, index) => ({
+              value: version.id,
+              label: `${t('conversation.versions.version', { number: index + 1 })} · ${version.label}`,
+            }))}
+          />
+        </div>
+      )}
       {!data.workspaceMatches && <div className='text-13px text-t-secondary'>{t('conversation.publishing.noApp')}</div>}
       {unavailable && <div className='text-13px text-t-secondary'>{t('conversation.publishing.notReady')}</div>}
       {data.phase === 'failed' && (
@@ -233,12 +291,24 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
           </div>
         </div>
       )}
-      <form action='/api/platform/preview' method='post' target='_blank' rel='noopener'>
-        <Input type='hidden' name='conversationId' value={conversationId} readOnly />
-        <Button htmlType='submit' long disabled={!data.connected || !data.workspaceMatches}>
-          {t('preview.preview')}
-        </Button>
-      </form>
+      {versions?.data ? (
+        previewUrl ? (
+          <Link href={previewUrl} target='_blank' rel='noopener noreferrer'>
+            {t('preview.preview')}
+          </Link>
+        ) : (
+          <Button long disabled>
+            {t('preview.preview')}
+          </Button>
+        )
+      ) : (
+        <form action='/api/platform/preview' method='post' target='_blank' rel='noopener'>
+          <Input type='hidden' name='conversationId' value={conversationId} readOnly />
+          <Button htmlType='submit' long disabled={!data.connected || !data.workspaceMatches}>
+            {t('preview.preview')}
+          </Button>
+        </form>
+      )}
       <Button className={styles.primary} long disabled={!canPublish} loading={busy} onClick={() => void publish()}>
         {t(
           busy

@@ -10,6 +10,7 @@
  */
 
 import { getBaseUrl } from '@/common/adapter/httpBridge';
+import { getCurrentConversation } from '@/renderer/pages/conversation/explorer/currentConversationStore';
 import builderLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 
 /**
@@ -125,7 +126,8 @@ export const openWebBrowserUrl = (value: string, frameName?: string): boolean =>
     void openExternalUrl(url.href);
     return true;
   }
-  const conversationId = /^#\/conversation\/([A-Za-z0-9_-]{1,100})$/.exec(window.location.hash.split('?')[0])?.[1];
+  const routeId = /^#\/conversation\/([A-Za-z0-9_-]{1,100})$/.exec(window.location.hash.split('?')[0])?.[1];
+  const conversationId = routeId ? (getCurrentConversation() ?? routeId) : undefined;
   if (!conversationId) return false;
   // The gateway resolves the listener from owned metadata. Never send the link's host, port or path.
   const form = document.createElement('form'),
