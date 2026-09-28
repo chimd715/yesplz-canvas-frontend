@@ -15,13 +15,13 @@ export const buildVisibleConversationIds = ({
   const visibleConversationIds: string[] = [];
 
   pinnedConversations.forEach((conversation) => {
-    visibleConversationIds.push(conversation.id);
+    visibleConversationIds.push(conversation.logical_conversation_id ?? conversation.id);
   });
 
   timelineSections.forEach((section) => {
     section.items.forEach((item) => {
       if (item.type === 'conversation' && item.conversation) {
-        visibleConversationIds.push(item.conversation.id);
+        visibleConversationIds.push(item.conversation.logical_conversation_id ?? item.conversation.id);
         return;
       }
 
@@ -31,7 +31,7 @@ export const buildVisibleConversationIds = ({
         }
 
         item.workspaceGroup.conversations.forEach((conversation) => {
-          visibleConversationIds.push(conversation.id);
+          visibleConversationIds.push(conversation.logical_conversation_id ?? conversation.id);
         });
       }
     });

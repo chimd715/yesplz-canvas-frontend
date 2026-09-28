@@ -71,7 +71,7 @@ export const useConversationActions = ({
 
       markAsRead(conversation.id);
 
-      void navigate(`/conversation/${conversation.id}`);
+      void navigate(`/conversation/${conversation.logical_conversation_id ?? conversation.id}`);
       if (onSessionClick) {
         onSessionClick();
       }
@@ -80,14 +80,14 @@ export const useConversationActions = ({
   );
 
   const removeConversation = useCallback(
-    async (conversation_id: string) => {
-      const success = await ipcBridge.conversation.remove.invoke({ id: conversation_id });
+    async (conversation: TChatConversation) => {
+      const success = await ipcBridge.conversation.remove.invoke({ id: conversation.id });
       if (!success) {
         return false;
       }
 
-      emitter.emit('conversation.deleted', conversation_id);
-      if (id === conversation_id) {
+      emitter.emit('conversation.deleted', conversation.id);
+      if (id === (conversation.logical_conversation_id ?? conversation.id)) {
         void navigate('/');
       }
       return true;
@@ -239,8 +239,9 @@ export const useConversationActions = ({
         });
       } else {
         requestConversationSendBoxPrefill(conversation.id, prefillPrompt);
-        if (id !== conversation.id) {
-          void navigate(`/conversation/${conversation.id}`);
+        const routeId = conversation.logical_conversation_id ?? conversation.id;
+        if (id !== routeId) {
+          void navigate(`/conversation/${routeId}`);
         }
       }
 

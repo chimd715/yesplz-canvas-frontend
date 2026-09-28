@@ -54,6 +54,7 @@ const conversation = {
 const makeProps = (overrides: Partial<ConversationRowProps> = {}): ConversationRowProps => ({
   conversation,
   isGenerating: false,
+  isWaitingConfirmation: false,
   hasUnread: false,
   isManualUnread: false,
   collapsed: false,
@@ -68,7 +69,7 @@ const makeProps = (overrides: Partial<ConversationRowProps> = {}): ConversationR
   onMenuVisibleChange: vi.fn(),
   onEditStart: vi.fn(),
   onCreateCronTask: vi.fn(),
-  onDelete: vi.fn(),
+  onArchive: vi.fn(),
   onTogglePin: vi.fn(),
   onToggleManualUnread: vi.fn(),
   getJobStatus: () => 'none',
@@ -106,5 +107,22 @@ describe('conversation mark-as-unread menu item', () => {
 
     expect(screen.queryByText('conversation.history.markAsUnread')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.history.markAsRead')).not.toBeInTheDocument();
+  });
+
+  it('exposes the logical scroll target while reading cron activity with the Core ID', () => {
+    const getJobStatus = vi.fn(() => 'none' as const);
+    render(
+      <ConversationRow
+        {...makeProps({
+          conversation: { ...conversation, logical_conversation_id: 'logical-chat' },
+          menuVisible: false,
+          getJobStatus,
+        })}
+      />
+    );
+
+    expect(document.getElementById('c-logical-chat')).not.toBeNull();
+    expect(document.getElementById(`c-${conversation.id}`)).toBeNull();
+    expect(getJobStatus).toHaveBeenCalledWith(conversation.id);
   });
 });

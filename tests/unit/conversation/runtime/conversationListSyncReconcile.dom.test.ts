@@ -12,13 +12,19 @@
  * frames / turn.completed.
  */
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/common', () => ({
   ipcBridge: {
     database: {
-      getUserConversations: { invoke: vi.fn(() => new Promise(() => {})) },
+      getUserConversations: {
+        invoke: vi
+          .fn()
+          .mockResolvedValue({
+            items: [{ id: 'active-core', logical_conversation_id: 'logical-chat', project_id: 'project-1' }],
+          }),
+      },
     },
     conversation: {
       listChanged: { on: () => () => {} },
@@ -36,6 +42,7 @@ vi.mock('@/renderer/utils/emitter', () => ({ addEventListener: () => () => {} })
 
 import {
   reconcileGeneratingFromRuntime,
+  getSnapshotConversationProjectId,
   useConversationListSync,
 } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 
@@ -72,5 +79,13 @@ describe('reconcileGeneratingFromRuntime', () => {
     });
 
     expect(result.current.isConversationGenerating('conv-d')).toBe(false);
+  });
+
+  it('resolves the project under both logical and active Core IDs without inventing unknown entries', async () => {
+    renderHook(() => useConversationListSync());
+
+    await waitFor(() => expect(getSnapshotConversationProjectId('logical-chat')).toBe('project-1'));
+    expect(getSnapshotConversationProjectId('active-core')).toBe('project-1');
+    expect(getSnapshotConversationProjectId('unknown')).toBeUndefined();
   });
 });

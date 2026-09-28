@@ -35,6 +35,7 @@ vi.mock('@/common', () => ({
       remove: { invoke: vi.fn() },
       update: { invoke: vi.fn() },
     },
+    sidebar: { archive: { invoke: vi.fn() } },
   },
 }));
 
@@ -56,6 +57,7 @@ vi.mock('@/renderer/utils/ui/focus', () => ({
 }));
 
 import { useConversationActions } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationActions';
+import { ipcBridge } from '@/common';
 
 const makeConversation = (id: string, type: TChatConversation['type']): TChatConversation =>
   ({
@@ -77,6 +79,9 @@ const renderActions = (onSessionClick?: () => void) =>
       setSelectedConversationIds: vi.fn(),
       toggleSelectedConversation: vi.fn(),
       markAsRead: vi.fn(),
+      markManualUnread: vi.fn(),
+      clearManualUnread: vi.fn(),
+      isManualUnread: () => false,
     })
   );
 
@@ -105,6 +110,64 @@ describe('create scheduled task conversation action', () => {
     expect(navigateMock).toHaveBeenCalledWith('/conversation/background-conversation');
     expect(requestPrefillMock.mock.invocationCallOrder[0]).toBeLessThan(navigateMock.mock.invocationCallOrder[0]);
     expect(onSessionClick).toHaveBeenCalledOnce();
+  });
+
+  it('opens a central sidebar row through its logical conversation URL', () => {
+    const { result } = renderActions();
+    const conversation = { ...makeConversation('active-core', 'aionrs'), logical_conversation_id: 'logical-chat' };
+
+    act(() => result.current.handleConversationClick(conversation));
+
+    expect(navigateMock).toHaveBeenCalledWith('/conversation/logical-chat');
+  });
+
+  it('keeps the cron draft scoped to Core while retaining the current logical URL', () => {
+    routeState.id = 'logical-chat';
+    const { result } = renderActions();
+    const conversation = { ...makeConversation('active-core', 'aionrs'), logical_conversation_id: 'logical-chat' };
+
+    act(() => result.current.handleCreateCronTask(conversation));
+
+    expect(requestPrefillMock).toHaveBeenCalledWith('active-core', 'Create with /cron in AionUi');
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('renames the active Core conversation for a logical sidebar row', async () => {
+    const { result } = renderActions();
+    const conversation = { ...makeConversation('active-core', 'aionrs'), logical_conversation_id: 'logical-chat' };
+    vi.mocked(ipcBridge.conversation.update.invoke).mockResolvedValue(true);
+
+    act(() => result.current.handleEditStart(conversation));
+    act(() => result.current.setRenameModalName('Renamed'));
+    await act(() => result.current.handleRenameConfirm());
+
+    expect(ipcBridge.conversation.update.invoke).toHaveBeenCalledWith({
+      id: 'active-core',
+      updates: { name: 'Renamed' },
+    });
+  });
+
+  it('archives the active Core conversation for a logical sidebar row', async () => {
+    const { result } = renderActions();
+    const conversation = { ...makeConversation('active-core', 'aionrs'), logical_conversation_id: 'logical-chat' };
+
+    await act(() => result.current.handleArchive(conversation));
+
+    expect(ipcBridge.sidebar.archive.invoke).toHaveBeenCalledWith({
+      item_type: 'conversation',
+      item_id: 'active-core',
+    });
+  });
+
+  it('pins the active Core conversation for a logical sidebar row', async () => {
+    const { result } = renderActions();
+    const conversation = { ...makeConversation('active-core', 'aionrs'), logical_conversation_id: 'logical-chat' };
+
+    await act(() => result.current.handleTogglePin(conversation));
+
+    expect(ipcBridge.conversation.update.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'active-core', merge_extra: true })
+    );
   });
 
   it.each(['openclaw-gateway', 'nanobot', 'remote', 'gemini', 'codex'])(

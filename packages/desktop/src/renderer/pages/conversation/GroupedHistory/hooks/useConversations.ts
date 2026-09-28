@@ -38,14 +38,17 @@ const locateConversation = (
   pinned: TChatConversation[],
   sections: TimelineSection[]
 ): ConversationLocation | null => {
-  if (pinned.some((c) => c.id === id)) return { section: 'pinned' };
+  if (pinned.some((c) => (c.logical_conversation_id ?? c.id) === id)) return { section: 'pinned' };
   for (const section of sections) {
     for (const item of section.items) {
       if (item.type === 'workspace' && item.workspaceGroup) {
-        if (item.workspaceGroup.conversations.some((c) => c.id === id)) {
+        if (item.workspaceGroup.conversations.some((c) => (c.logical_conversation_id ?? c.id) === id)) {
           return { section: 'projects', workspace: item.workspaceGroup.workspace };
         }
-      } else if (item.type === 'conversation' && item.conversation?.id === id) {
+      } else if (
+        item.type === 'conversation' &&
+        (item.conversation?.logical_conversation_id ?? item.conversation?.id) === id
+      ) {
         return { section: 'conversations' };
       }
     }
@@ -102,9 +105,13 @@ export const useConversations = () => {
       return;
     }
 
-    setActiveConversation(id);
-    clearCompletionUnread(id);
-    clearManualUnread(id);
+    const active = conversations.find(
+      (conversation) => (conversation.logical_conversation_id ?? conversation.id) === id
+    );
+    const coreId = active?.id ?? id;
+    setActiveConversation(coreId);
+    clearCompletionUnread(coreId);
+    clearManualUnread(coreId);
 
     if (revealedIdRef.current === id) return;
 
@@ -142,7 +149,15 @@ export const useConversations = () => {
       cancelAnimationFrame(outerRafId);
       cancelAnimationFrame(innerRafId);
     };
-  }, [clearCompletionUnread, clearManualUnread, id, setActiveConversation, pinnedConversations, timelineSections]);
+  }, [
+    clearCompletionUnread,
+    clearManualUnread,
+    id,
+    conversations,
+    setActiveConversation,
+    pinnedConversations,
+    timelineSections,
+  ]);
 
   // Persist workspace expansion state
   useEffect(() => {

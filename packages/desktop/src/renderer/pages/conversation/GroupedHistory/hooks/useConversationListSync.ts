@@ -351,7 +351,14 @@ const refreshConversations = () => {
         conversation_idsState = new Set(items.map((conversation) => conversation.id));
         // Map ALL rows (unfiltered) so a team member conversation's project_id is
         // resolvable too — the team route looks up its leader conversation here.
-        projectIdByIdState = new Map(items.map((conversation) => [conversation.id, conversation.project_id ?? null]));
+        projectIdByIdState = new Map(
+          items.flatMap(
+            (conversation): Array<[string, string | null]> => [
+              [conversation.id, conversation.project_id ?? null],
+              [conversation.logical_conversation_id ?? conversation.id, conversation.project_id ?? null],
+            ]
+          )
+        );
         emitStoreChange();
         return;
       }

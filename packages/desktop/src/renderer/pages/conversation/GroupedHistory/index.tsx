@@ -91,9 +91,12 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
   // This doesn't trigger state update, avoiding double render
   useEffect(() => {
     if (id) {
-      setActiveConversation(id);
+      const active = conversations.find(
+        (conversation) => (conversation.logical_conversation_id ?? conversation.id) === id
+      );
+      setActiveConversation(active?.id ?? id);
     }
-  }, [id, setActiveConversation]);
+  }, [id, conversations, setActiveConversation]);
 
   const {
     selectedConversationIds,
@@ -171,7 +174,7 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
       tooltipEnabled,
       batchMode,
       checked: selectedConversationIds.has(conversation.id),
-      selected: id === conversation.id,
+      selected: id === (conversation.logical_conversation_id ?? conversation.id),
       menuVisible: dropdownVisibleId !== null && dropdownVisibleId === conversation.id,
       onToggleChecked: toggleSelectedConversation,
       onConversationClick: handleConversationClick,
