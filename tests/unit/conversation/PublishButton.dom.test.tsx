@@ -186,6 +186,22 @@ describe('conversation publishing', () => {
     expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
   });
 
+  it.each([undefined, false, 'true'])(
+    'keeps disconnected publishing disabled without a confirmed saved revision (%s)',
+    async (savedRevisionAvailable) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () => status({ connected: false, savedRevisionAvailable }));
+      vi.stubGlobal('fetch', fetcher);
+      view();
+      await open();
+      const publish = screen.getByRole('button', { name: key('publishApp') });
+      expect(publish).toBeDisabled();
+      fireEvent.click(publish);
+      expect(fetcher.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+    }
+  );
+
   it('opens preview with a native form containing only the selected conversation', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => status());
     vi.stubGlobal('fetch', fetcher);

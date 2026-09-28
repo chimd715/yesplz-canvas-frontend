@@ -15,6 +15,7 @@ type PublishingStatus = {
   projectId: string;
   phase: Phase;
   connected: boolean;
+  savedRevisionAvailable?: boolean;
   workspaceMatches: boolean;
   conversationId?: string;
   history: { url?: string; conversationId?: string; revisionId?: string; embedCode?: string }[];
@@ -50,6 +51,7 @@ async function readStatus(response: Response): Promise<PublishingStatus> {
     projectId: data.projectId,
     phase: data.phase as Phase,
     connected: data.connected,
+    savedRevisionAvailable: typeof data.savedRevisionAvailable === 'boolean' ? data.savedRevisionAvailable : undefined,
     workspaceMatches: data.workspaceMatches,
     conversationId: typeof data.conversationId === 'string' ? data.conversationId : undefined,
     history: data.history.map((entry: unknown) => {
@@ -160,7 +162,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
         (!revisionId || (entry === data.history.at(-1) && entry.revisionId === revisionId))
     )
     .at(-1)?.url;
-  const unavailable = !data.connected || data.phase === 'unconfigured';
+  const unavailable = (!data.connected && !data.savedRevisionAvailable) || data.phase === 'unconfigured';
   const canPublish =
     data.workspaceMatches &&
     !unavailable &&

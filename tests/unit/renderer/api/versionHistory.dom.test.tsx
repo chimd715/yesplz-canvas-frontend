@@ -227,7 +227,7 @@ describe('saved conversation versions', () => {
     ).toBe(true);
   });
 
-  it('publishes the selected immutable revision and hides embed code for a different revision', async () => {
+  it.each([true, false])('publishes the selected revision with runtime connected=%s', async (connected) => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
       String(input).includes('/versions')
         ? Response.json(initial())
@@ -235,7 +235,8 @@ describe('saved conversation versions', () => {
             projectId: 'project',
             conversationId: 'core-1',
             phase: 'ready',
-            connected: true,
+            connected,
+            savedRevisionAvailable: !connected,
             workspaceMatches: true,
             history: [
               {
