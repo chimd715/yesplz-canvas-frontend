@@ -194,6 +194,39 @@ describe('saved conversation versions', () => {
     expect(openPreview).not.toHaveBeenCalled();
   });
 
+  it('reads publishing status without a partial revision selector before the first saved version', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
+      String(input).includes('/versions')
+        ? Response.json({
+            ...initial(),
+            activeCoreConversationId: 'core-2',
+            activeRevisionId: null,
+            versions: [],
+          })
+        : Response.json({
+            projectId: 'project',
+            conversationId: 'core-2',
+            phase: 'ready',
+            connected: true,
+            workspaceMatches: true,
+            history: [],
+          })
+    );
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    await waitFor(() => expect(screen.getByTestId('active')).toHaveTextContent('core-2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    expect(await screen.findByRole('button', { name: 'conversation.publishing.publishApp' })).toBeDisabled();
+    expect(
+      fetcher.mock.calls.some(([input]) => String(input) === '/api/platform/publishing?conversationId=core-2')
+    ).toBe(true);
+    expect(
+      fetcher.mock.calls
+        .filter(([input]) => String(input).includes('/publishing'))
+        .every(([input]) => !String(input).includes('logicalConversationId') && !String(input).includes('revisionId'))
+    ).toBe(true);
+  });
+
   it('publishes the selected immutable revision and hides embed code for a different revision', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
       String(input).includes('/versions')

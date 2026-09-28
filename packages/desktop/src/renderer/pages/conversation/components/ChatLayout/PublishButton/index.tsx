@@ -81,7 +81,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
   const { t } = useTranslation();
   const versions = useVersionHistory();
   const revisionId = versions?.selectedVersion?.id;
-  const logicalConversationId = versions?.data ? versions.logicalConversationId : undefined;
+  const logicalConversationId = revisionId ? versions?.logicalConversationId : undefined;
   const versionQuery = logicalConversationId
     ? `&logicalConversationId=${encodeURIComponent(logicalConversationId)}${revisionId ? `&revisionId=${encodeURIComponent(revisionId)}` : ''}`
     : '';
