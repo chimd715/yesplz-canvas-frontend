@@ -17,6 +17,8 @@ vi.mock('@arco-design/web-react', async (importOriginal) => ({
 import PublishButton from '@/renderer/pages/conversation/components/ChatLayout/PublishButton';
 
 const key = (name: string) => `conversation.publishing.${name}`;
+const embedKey = (name: string) => `conversation.embedding.${name}`;
+const embedCode = '<script src="https://current.example.app/widget.js" defer></script>\n<shop-widget></shop-widget>';
 const status = (overrides: Record<string, unknown> = {}, code = 200) =>
   Response.json(
     {
@@ -57,6 +59,79 @@ afterEach(() => {
 });
 
 describe('conversation publishing', () => {
+  it('opens platform-specific installation help beside Publish and copies the published code without deploying', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      status({
+        history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }],
+      })
+    );
+    vi.stubGlobal('fetch', fetcher);
+    view();
+    fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
+    expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(embedCode);
+    expect(screen.getByText(embedKey('shopifyAdd'))).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: embedKey('others') }));
+    expect(await screen.findByText(embedKey('htmlPaste'))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: embedKey('copyCode') }));
+    expect(copy).toHaveBeenCalledWith(embedCode);
+    expect(fetcher.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+  });
+
+  it.each([
+    ['publishFirst', {}],
+    ['publishAgain', { history: [{ url: 'https://current.example.app/', conversationId: 'first' }] }],
+    [
+      'replaced',
+      {
+        history: [
+          { url: 'https://current.example.app/', conversationId: 'first', embedCode },
+          { url: 'https://current.example.app/', conversationId: 'other', embedCode },
+        ],
+      },
+    ],
+    ['publishAgain', { history: [{ url: 'javascript:alert(1)', conversationId: 'first', embedCode }] }],
+    [
+      'pending',
+      { phase: 'publishing', history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }] },
+    ],
+    [
+      'unavailable',
+      { phase: 'failed', history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }] },
+    ],
+  ])('explains %s without presenting misleading installation code', async (notice, overrides) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async () => status(overrides))
+    );
+    view();
+    fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
+    expect(await screen.findByText(embedKey(notice as string))).toBeVisible();
+    expect(screen.queryByRole('button', { name: embedKey('copyCode') })).not.toBeInTheDocument();
+  });
+
+  it('hides cached embed code when the refresh fails and restores it after retry', async () => {
+    let failed = false;
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () =>
+          failed
+            ? new Response(null, { status: 503 })
+            : status({ history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }] })
+        )
+    );
+    view();
+    const button = await screen.findByRole('button', { name: embedKey('embed'), exact: true });
+    failed = true;
+    fireEvent.click(button);
+    expect(await screen.findByText(embedKey('unavailable'))).toBeVisible();
+    expect(screen.queryByLabelText(embedKey('installationCode'))).not.toBeInTheDocument();
+    failed = false;
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(embedCode);
+  });
+
   it('adds no control or request to Electron, and no control to a plain Aion host', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 }));
     vi.stubGlobal('fetch', fetcher);

@@ -25,3 +25,42 @@
   border-color: var(--bg-3);
   color: var(--text-disabled);
 }
+
+.embedButton:global(.arco-btn) {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.embedPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 400px;
+  max-width: calc(100vw - 50px);
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+.embedPopover:global(.arco-popover) {
+  /* Arco sets a 350px inline maximum; this panel also needs its content padding. */
+  max-width: calc(100vw - 16px) !important;
+}
+
+.instructions {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.instructions li + li {
+  margin-top: 10px;
+}
+
+.embedCode,
+.embedCode :global(textarea) {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+}

@@ -805,5 +805,29 @@
       "interrupted": "متوقف شده"
     },
     "requestFailed": "تأیید درخواست انتشار ممکن نیست. پیش از تلاش دوباره، وضعیت را بررسی کنید."
+  },
+  "embedding": {
+    "embed": "Embed",
+    "title": "Embed widget",
+    "shopify": "Shopify",
+    "others": "Others (HTML)",
+    "shopifyOpen": "In Shopify, open Online Store → Themes → Edit theme (or Customize).",
+    "shopifyAdd": "Choose the page template, add a Custom Liquid section or block, and paste the installation code.",
+    "shopifySave": "Save or publish the theme changes, then open the storefront to check the widget.",
+    "shopifyNote": "Requires a theme with Custom Liquid. The widget appears on pages using the selected template.",
+    "shopifyHelp": "Shopify theme guide",
+    "htmlOpen": "Open the HTML page or a custom HTML block that allows scripts.",
+    "htmlPaste": "Paste the installation code inside the page body, where the widget should appear.",
+    "htmlSave": "Save and publish the page, then reload it to check the widget.",
+    "htmlNote": "Keep both the script and widget tag. Load the script once per page.",
+    "installationCode": "Installation code",
+    "copyCode": "Copy code",
+    "publishedNote": "Uses the published version. Publishing another conversation in this workspace can replace this URL.",
+    "publishFirst": "Publish this widget first. Its installation code will appear here after a successful publish.",
+    "publishAgain": "This version has no installation code. Publish the widget again. If no code appears, ask the assistant to make the widget embeddable.",
+    "replaced": "This conversation is not the current publication. Publish this widget to get its installation code.",
+    "pending": "Publishing is in progress. Installation code will be available when it finishes.",
+    "checking": "Checking the published version…",
+    "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
   }
 }

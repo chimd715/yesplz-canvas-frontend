@@ -1,11 +1,12 @@
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { copyText } from '@/renderer/utils/ui/clipboard';
 import { Button, Input, Link, Message, Popover } from '@arco-design/web-react';
-import { Copy, Rocket } from '@icon-park/react';
+import { Code, Copy, Rocket } from '@icon-park/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import styles from './PublishButton.module.css';
+import EmbedGuide, { type EmbedNotice } from './EmbedGuide';
 
 type Phase = 'unconfigured' | 'provisioning' | 'ready' | 'publishing' | 'failed' | 'interrupted';
 type PublishingStatus = {
@@ -14,7 +15,7 @@ type PublishingStatus = {
   connected: boolean;
   workspaceMatches: boolean;
   conversationId?: string;
-  history: { url: string; conversationId?: string }[];
+  history: { url?: string; conversationId?: string; embedCode?: string }[];
 };
 const phases: Phase[] = ['unconfigured', 'provisioning', 'ready', 'publishing', 'failed', 'interrupted'];
 const pending = (phase?: Phase) => phase === 'provisioning' || phase === 'publishing';
@@ -49,12 +50,15 @@ async function readStatus(response: Response): Promise<PublishingStatus> {
     connected: data.connected,
     workspaceMatches: data.workspaceMatches,
     conversationId: typeof data.conversationId === 'string' ? data.conversationId : undefined,
-    history: data.history.flatMap((entry: unknown) => {
-      if (!object(entry)) return [];
+    history: data.history.map((entry: unknown) => {
+      if (!object(entry)) return {};
       const url = publicUrl(entry.url);
-      return url
-        ? [{ url, conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : undefined }]
-        : [];
+      return {
+        url,
+        conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : undefined,
+        embedCode:
+          url && typeof entry.embedCode === 'string' && entry.embedCode.length <= 16384 ? entry.embedCode : undefined,
+      };
     }),
   };
 }
@@ -83,11 +87,13 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
     }
   );
   const [visible, setVisible] = useState(false);
+  const [embedVisible, setEmbedVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [publishFailed, setPublishFailed] = useState(false);
   const request = useRef<AbortController | null>(null);
   useEffect(() => {
     setVisible(false);
+    setEmbedVisible(false);
     setSubmitting(false);
     setPublishFailed(false);
     return () => {
@@ -104,6 +110,22 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
     .at(-1)?.url;
   const unavailable = !data.connected || data.phase === 'unconfigured';
   const canPublish = data.workspaceMatches && !unavailable && !busy && !error && !isValidating;
+  // The canonical URL is shared: an older conversation's revision may no longer be served there.
+  const latest = data.history.at(-1);
+  const embedNotice: EmbedNotice | undefined =
+    error || unavailable || ['failed', 'interrupted'].includes(data.phase)
+      ? 'unavailable'
+      : busy
+        ? 'pending'
+        : isValidating
+          ? 'checking'
+          : !latest
+            ? 'publishFirst'
+            : latest.conversationId !== conversationId
+              ? 'replaced'
+              : !latest.embedCode
+                ? 'publishAgain'
+                : undefined;
 
   const publish = async () => {
     if (!canPublish || request.current) return;
@@ -204,20 +226,50 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
   );
 
   return (
-    <Popover
-      content={content}
-      trigger='click'
-      position='br'
-      popupVisible={visible}
-      onVisibleChange={(next) => {
-        setVisible(next);
-        if (next) void mutate();
-      }}
-    >
-      <Button className={styles.primary} icon={<Rocket size={16} fill='currentColor' />} aria-expanded={visible}>
-        {t('conversation.publishing.publish')}
-      </Button>
-    </Popover>
+    <div className='flex items-center gap-8px'>
+      <Popover
+        content={content}
+        trigger='click'
+        position='br'
+        popupVisible={visible}
+        onVisibleChange={(next) => {
+          setVisible(next);
+          if (next) {
+            setEmbedVisible(false);
+            void mutate();
+          }
+        }}
+      >
+        <Button className={styles.primary} icon={<Rocket size={16} fill='currentColor' />} aria-expanded={visible}>
+          {t('conversation.publishing.publish')}
+        </Button>
+      </Popover>
+      <Popover
+        className={styles.embedPopover}
+        content={
+          <EmbedGuide
+            code={embedNotice ? undefined : latest?.embedCode}
+            notice={embedNotice}
+            onRetry={() => void mutate()}
+            retrying={isValidating}
+          />
+        }
+        trigger='click'
+        position='br'
+        popupVisible={embedVisible}
+        onVisibleChange={(next) => {
+          setEmbedVisible(next);
+          if (next) {
+            setVisible(false);
+            void mutate();
+          }
+        }}
+      >
+        <Button className={styles.embedButton} icon={<Code size={16} />} aria-expanded={embedVisible}>
+          {t('conversation.embedding.embed')}
+        </Button>
+      </Popover>
+    </div>
   );
 };
 
