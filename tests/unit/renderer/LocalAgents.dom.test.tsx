@@ -90,7 +90,9 @@ vi.mock('@renderer/utils/platform', async () => {
 // Keep the test focused on LocalAgents' own logic — stub heavy children.
 vi.mock('@/renderer/components/base/AionModal', () => ({ default: () => null }));
 vi.mock('@renderer/pages/settings/AgentSettings/InlineAgentEditor', () => ({ default: () => null }));
-vi.mock('@renderer/pages/settings/AgentSettings/AgentHubModal', () => ({ AgentHubModal: () => null }));
+vi.mock('@renderer/pages/settings/AgentSettings/AgentHubModal', () => ({
+  AgentHubModal: ({ onCancel }: { onCancel: () => void }) => <button onClick={onCancel}>Close agent hub</button>,
+}));
 
 import LocalAgents from '@renderer/pages/settings/AgentSettings/LocalAgents';
 import AgentModalContent from '@renderer/components/settings/SettingsModal/contents/AgentModalContent';
@@ -148,6 +150,15 @@ const makeAgents = () => [
 ];
 
 describe('LocalAgents', () => {
+  it('mounts the existing hub only after opening it and closes it on cancel', () => {
+    useManagedAgents.mockReturnValue({ agents: makeAgents(), refreshCatalog: vi.fn() });
+    render(<LocalAgents />);
+    expect(screen.queryByText('Close agent hub')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('settings.agentManagement.installFromMarket'));
+    fireEvent.click(screen.getByText('Close agent hub'));
+    expect(screen.queryByText('Close agent hub')).not.toBeInTheDocument();
+  });
+
   it('runs the health probe and shows a success toast after an official-agent test connection succeeds', async () => {
     const refreshCatalog = vi.fn().mockResolvedValue(undefined);
     useManagedAgents.mockReturnValue({ agents: makeAgents(), revalidate: vi.fn(), refreshCatalog });
@@ -266,7 +277,7 @@ describe('LocalAgents', () => {
     expect(screen.getByText('settings.agentManagement.statusMissing')).toBeInTheDocument();
   });
 
-  it('does not render the market-install CTA in the diagnostics-only agent page', () => {
+  it('renders one market entry without restoring the redundant discovery CTA', () => {
     useManagedAgents.mockReturnValue({
       agents: makeAgents(),
       revalidate: vi.fn(),
@@ -275,7 +286,7 @@ describe('LocalAgents', () => {
 
     render(<LocalAgents />);
 
-    expect(screen.queryByText('settings.agentManagement.installFromMarket')).toBeNull();
+    expect(screen.getAllByText('settings.agentManagement.installFromMarket')).toHaveLength(1);
     expect(screen.queryByText('settings.agentManagement.discoverMoreAgents')).toBeNull();
   });
 
