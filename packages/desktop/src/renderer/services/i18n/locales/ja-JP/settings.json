@@ -1419,8 +1419,8 @@
   "crossSessionMessageResume": "再度オンにする",
   "crossSessionMessageUpdateFailed": "会話間メッセージ設定の更新に失敗しました",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",

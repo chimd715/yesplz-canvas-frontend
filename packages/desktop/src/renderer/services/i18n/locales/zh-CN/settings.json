@@ -1418,8 +1418,8 @@
   "crossSessionMessageResume": "重新开启",
   "crossSessionMessageUpdateFailed": "跨会话消息设置更新失败",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",

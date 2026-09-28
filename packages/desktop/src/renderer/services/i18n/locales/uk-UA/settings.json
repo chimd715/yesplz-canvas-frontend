@@ -1432,8 +1432,8 @@
   "crossSessionMessageResume": "Увімкнути знову",
   "crossSessionMessageUpdateFailed": "Не вдалося оновити налаштування повідомлень між розмовами",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",

@@ -1419,8 +1419,8 @@
   "crossSessionMessageResume": "다시 켜기",
   "crossSessionMessageUpdateFailed": "대화 간 메시지 설정 업데이트에 실패했습니다",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",

@@ -1417,8 +1417,8 @@
   "crossSessionMessageResume": "Réactiver",
   "crossSessionMessageUpdateFailed": "Échec de la mise à jour du réglage des messages entre conversations",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",

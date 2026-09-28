@@ -1417,8 +1417,8 @@
   "crossSessionMessageResume": "Turn back on",
   "crossSessionMessageUpdateFailed": "Failed to update the cross-conversation message setting",
   "plugins": {
-    "catalog": "Plugins",
-    "back": "Back to plugins",
+    "catalog": "Connectors",
+    "back": "Back to connectors",
     "details": "View details",
     "shopify": {
       "name": "Shopify",
