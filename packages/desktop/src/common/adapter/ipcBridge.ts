@@ -1830,6 +1830,7 @@ export interface ICreateConversationParams {
     };
   };
   extra: {
+    outputType?: 'widget';
     workspace?: string;
     custom_workspace?: boolean;
     default_files?: string[];

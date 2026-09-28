@@ -825,7 +825,7 @@
     "copyCode": "Copy code",
     "publishedNote": "Uses the published version. Publishing another conversation in this workspace can replace this URL.",
     "publishFirst": "Publish this widget first. Its installation code will appear here after a successful publish.",
-    "publishAgain": "This version has no installation code. Publish the widget again. If no code appears, ask the assistant to make the widget embeddable.",
+    "publishAgain": "No standalone widget was found at the published URL. Ask the assistant to make the widget embeddable, then publish the changes.",
     "replaced": "This conversation is not the current publication. Publish this widget to get its installation code.",
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",

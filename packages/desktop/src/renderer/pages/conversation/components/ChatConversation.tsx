@@ -204,6 +204,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
 
   const chatLayoutProps = {
     title: conversation.name,
+    isWidget: (conversation.extra as { outputType?: string } | undefined)?.outputType === 'widget',
     siderTitle: sliderTitle,
     sider: <ChatSlider conversation={conversation} />,
     headerExtra: (
@@ -427,6 +428,7 @@ const ChatConversation: React.FC<{
   return (
     <ChatLayout
       title={conversation?.name}
+      isWidget={(conversation?.extra as { outputType?: string } | undefined)?.outputType === 'widget'}
       {...chatLayoutProps}
       headerExtra={headerExtraNode}
       siderTitle={sliderTitle}

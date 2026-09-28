@@ -190,6 +190,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             conversation_overrides: assistantOverrides,
           },
           extra: {
+            ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
             default_files: files.map(chatFileRefPath),
             workspace: finalWorkspace,
             custom_workspace: isCustomWorkspace,
@@ -244,6 +245,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           conversation_overrides: assistantOverrides,
         },
         extra: {
+          ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
           workspace: finalWorkspace,
           custom_workspace: isCustomWorkspace,
           default_files: files.map(chatFileRefPath),

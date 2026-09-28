@@ -33,11 +33,11 @@ const status = (overrides: Record<string, unknown> = {}, code = 200) =>
     { status: code }
   );
 
-function view(conversationId = 'first') {
+function view(conversationId = 'first', isWidget = false) {
   const cache = new Map();
   const content = (id: string) => (
     <SWRConfig value={{ provider: () => cache, dedupingInterval: 0, revalidateOnFocus: false }}>
-      <PublishButton key={id} conversationId={id} />
+      <PublishButton key={id} conversationId={id} isWidget={isWidget} />
     </SWRConfig>
   );
   const result = render(content(conversationId));
@@ -60,9 +60,15 @@ afterEach(() => {
 
 describe('conversation publishing', () => {
   it('opens platform-specific installation help beside Publish and copies the published code without deploying', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
       status({
-        history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }],
+        history: [
+          {
+            url: 'https://current.example.app/',
+            conversationId: 'first',
+            ...(String(input).includes('/embed?') ? { embedCode } : {}),
+          },
+        ],
       })
     );
     vi.stubGlobal('fetch', fetcher);
@@ -74,7 +80,29 @@ describe('conversation publishing', () => {
     expect(await screen.findByText(embedKey('htmlPaste'))).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: embedKey('copyCode') }));
     expect(copy).toHaveBeenCalledWith(embedCode);
+    expect(
+      fetcher.mock.calls.some(([input]) => String(input) === '/api/platform/publishing/embed?conversationId=first')
+    ).toBe(true);
     expect(fetcher.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+  });
+
+  it('opens installation code after publishing a widget conversation successfully', async () => {
+    let published = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+        if (init?.method === 'POST') published = true;
+        return status({
+          history: published ? [{ url: 'https://current.example.app/', conversationId: 'first', embedCode }] : [],
+        });
+      })
+    );
+    view('first', true);
+    await open();
+    const publish = screen.getByRole('button', { name: key('publishApp') });
+    await waitFor(() => expect(publish).toBeEnabled());
+    fireEvent.click(publish);
+    expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(embedCode);
   });
 
   it.each([

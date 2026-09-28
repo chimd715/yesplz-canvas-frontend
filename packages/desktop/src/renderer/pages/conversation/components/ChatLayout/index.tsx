@@ -48,6 +48,7 @@ const ChatLayout: React.FC<{
   previewHosted?: boolean;
   /** Conversation ID for mode switching */
   conversation_id?: string;
+  isWidget?: boolean;
   /** Custom tabs slot; when provided, replaces the default ConversationTabs */
   tabsSlot?: React.ReactNode;
   /** Workspace path for opening in external tools */
@@ -200,7 +201,9 @@ const ChatLayout: React.FC<{
   const headerActions = (
     <>
       {props.headerExtra}
-      {conversation_id && <PublishButton key={conversation_id} conversationId={conversation_id} />}
+      {conversation_id && (
+        <PublishButton key={conversation_id} conversationId={conversation_id} isWidget={props.isWidget} />
+      )}
     </>
   );
 

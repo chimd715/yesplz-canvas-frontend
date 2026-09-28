@@ -74,9 +74,10 @@ const fetchStatus = async (url: string): Promise<PublishingStatus> =>
   );
 
 /** Publishing is available only when the project gateway confirms this conversation's source. */
-const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId }) => {
+const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = ({ conversationId, isWidget }) => {
   const { t } = useTranslation();
   const enabled = !isElectronDesktop() && /^https?:$/.test(window.location.protocol);
+  const [embedVisible, setEmbedVisible] = useState(false);
   const { data, error, isValidating, mutate } = useSWR<PublishingStatus>(
     enabled ? `/api/platform/publishing?conversationId=${encodeURIComponent(conversationId)}` : null,
     fetchStatus,
@@ -86,8 +87,20 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
       refreshInterval: (status) => (pending(status?.phase) ? 3000 : 0),
     }
   );
+  const {
+    data: embedData,
+    error: embedError,
+    isValidating: checkingEmbed,
+    mutate: refreshEmbed,
+  } = useSWR<PublishingStatus>(
+    enabled && embedVisible
+      ? `/api/platform/publishing/embed?conversationId=${encodeURIComponent(conversationId)}`
+      : null,
+    fetchStatus,
+    { shouldRetryOnError: false, keepPreviousData: false }
+  );
   const [visible, setVisible] = useState(false);
-  const [embedVisible, setEmbedVisible] = useState(false);
+  const [openEmbedAfterPublish, setOpenEmbedAfterPublish] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [publishFailed, setPublishFailed] = useState(false);
   const request = useRef<AbortController | null>(null);
@@ -96,11 +109,21 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
     setEmbedVisible(false);
     setSubmitting(false);
     setPublishFailed(false);
+    setOpenEmbedAfterPublish(false);
     return () => {
       request.current?.abort();
       request.current = null;
     };
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!openEmbedAfterPublish || submitting || !data || pending(data.phase)) return;
+    setOpenEmbedAfterPublish(false);
+    if (!error && data.phase === 'ready' && data.history.at(-1)?.conversationId === conversationId) {
+      setVisible(false);
+      setEmbedVisible(true);
+    }
+  }, [openEmbedAfterPublish, submitting, data, error, conversationId]);
 
   // Plain Aion and Electron have no publishing capability; do not add an irrelevant control.
   if (!enabled || !data) return null;
@@ -111,13 +134,13 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
   const unavailable = !data.connected || data.phase === 'unconfigured';
   const canPublish = data.workspaceMatches && !unavailable && !busy && !error && !isValidating;
   // The canonical URL is shared: an older conversation's revision may no longer be served there.
-  const latest = data.history.at(-1);
+  const latest = embedData?.history.at(-1);
   const embedNotice: EmbedNotice | undefined =
-    error || unavailable || ['failed', 'interrupted'].includes(data.phase)
+    error || embedError || unavailable || ['failed', 'interrupted'].includes(embedData?.phase ?? data.phase)
       ? 'unavailable'
-      : busy
+      : busy || pending(embedData?.phase)
         ? 'pending'
-        : isValidating
+        : isValidating || checkingEmbed || !embedData
           ? 'checking'
           : !latest
             ? 'publishFirst'
@@ -145,7 +168,10 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(795000)]),
         })
       );
-      if (!controller.signal.aborted) await mutate(next, { revalidate: false });
+      if (!controller.signal.aborted) {
+        await mutate(next, { revalidate: false });
+        if (isWidget) setOpenEmbedAfterPublish(true);
+      }
     } catch {
       if (!controller.signal.aborted) {
         setPublishFailed(true);
@@ -250,8 +276,8 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
           <EmbedGuide
             code={embedNotice ? undefined : latest?.embedCode}
             notice={embedNotice}
-            onRetry={() => void mutate()}
-            retrying={isValidating}
+            onRetry={() => void refreshEmbed()}
+            retrying={checkingEmbed}
           />
         }
         trigger='click'
@@ -261,7 +287,6 @@ const PublishButton: React.FC<{ conversationId: string }> = ({ conversationId })
           setEmbedVisible(next);
           if (next) {
             setVisible(false);
-            void mutate();
           }
         }}
       >

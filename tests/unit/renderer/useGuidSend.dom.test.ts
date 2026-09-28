@@ -93,6 +93,7 @@ describe('useGuidSend', () => {
       });
 
       expect(createConversationInvokeMock.mock.calls[0][0].name).toBe(deps.input);
+      expect(createConversationInvokeMock.mock.calls[0][0].extra.outputType).toBe('widget');
       const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
       const message = JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_widget-handoff`)!);
       expect(message.input).toContain('installation code');
@@ -115,6 +116,7 @@ describe('useGuidSend', () => {
     const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
     const message = JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_ordinary-handoff`)!);
     expect(message.input).toBe(deps.input);
+    expect(createConversationInvokeMock.mock.calls[0][0].extra.outputType).toBeUndefined();
   });
 
   it('waits for a widget description while retaining ordinary empty-chat behavior', async () => {
