@@ -47,7 +47,12 @@ import { resolveConversationBackend } from '../utils/conversationAssistantIdenti
 import LegacyReadOnlyConversation from '../platforms/legacy/LegacyReadOnlyConversation';
 import SingleChatEmptyState from './SingleChatEmptyState';
 import { useActiveLease } from '../hooks/useActiveLease';
-import { NativeAdmissionError, resumeNativeRuntime, submitNativeRequest } from '../platforms/aionrs/durableAdmission';
+import {
+  listPendingNativeRequests,
+  NativeAdmissionError,
+  resumeNativeRuntime,
+  submitNativeRequest,
+} from '../platforms/aionrs/durableAdmission';
 import { getRetainedLogicalRequests } from '../platforms/useConversationCommandQueue';
 import { runtimeResumed } from '../runtime/conversationRuntimeViewStore';
 import { useVersionHistory } from './ChatLayout/VersionHistory/context';
@@ -477,12 +482,30 @@ const ChatConversation: React.FC<{
 
   const central = !!getBuilderWorkspace();
   const workspace = getBuilderWorkspace();
+  const logicalId = conversation?.logical_conversation_id;
+  const {
+    data: discovered,
+    error: pendingError,
+    mutate: refreshPending,
+    isValidating: checkingPending,
+  } = useSWR(
+    workspace && conversation?.id && logicalId
+      ? [
+          'central-pending-requests',
+          workspace.ownerId,
+          workspace.projectId,
+          conversation.id,
+          logicalId,
+          conversation.runtime_generation,
+          conversation.head_generation,
+        ]
+      : null,
+    () => listPendingNativeRequests(conversation!.id, logicalId!),
+    { shouldRetryOnError: false }
+  );
   const retained =
-    workspace && conversation?.logical_conversation_id
-      ? getRetainedLogicalRequests(
-          `${workspace.ownerId}/${workspace.projectId}`,
-          conversation.logical_conversation_id
-        ).filter(
+    workspace && logicalId
+      ? getRetainedLogicalRequests(`${workspace.ownerId}/${workspace.projectId}`, logicalId).filter(
           (item) =>
             item.pending ||
             item.request?.context.coreId !== conversation.id ||
@@ -490,23 +513,35 @@ const ChatConversation: React.FC<{
             item.request?.context.headGeneration !== conversation.head_generation
         )
       : [];
+  const pendingItems = [
+    ...retained.map((item) => ({ ...item, hidden: false })),
+    ...(discovered ?? [])
+      .filter((item) => !retained.some((local) => local.request?.requestId === item.requestId))
+      .map((item) => ({
+        id: item.requestId,
+        input: item.prompt.content,
+        request: { requestId: item.requestId, context: item.context },
+        hidden: item.prompt.hidden,
+      })),
+  ];
   const {
     data: receipts,
     mutate: refreshReceipts,
     isValidating: checkingReceipts,
   } = useSWR(
-    retained.length && workspace
+    pendingItems.length && workspace
       ? [
           'central-retained-requests',
           workspace.ownerId,
           workspace.projectId,
-          conversation?.logical_conversation_id,
+          logicalId,
           epoch,
+          pendingItems.map((item) => item.request?.requestId ?? item.id).join(','),
         ]
       : null,
     async () =>
       Promise.all(
-        retained.map(async (item) => {
+        pendingItems.map(async (item) => {
           if (!item.request) return { id: item.id, recorded: false };
           try {
             const receipt = await submitNativeRequest(item.request, item.input, 'lookup');
@@ -518,30 +553,37 @@ const ChatConversation: React.FC<{
       ),
     { shouldRetryOnError: false, revalidateOnFocus: false }
   );
-  const pendingNotice = retained.length ? (
-    <div className='px-20px py-8px text-13px text-t-secondary' role='status'>
-      <div className='flex items-center gap-8px'>
-        <span>{t('conversation.centralRead.pending')}</span>
-        <Button size='mini' loading={checkingReceipts} onClick={() => void refreshReceipts()}>
-          {t('common.retry')}
-        </Button>
-      </div>
-      {retained.map((item) => (
-        <div key={item.request?.requestId ?? item.id} className='flex min-w-0 items-center gap-8px mt-4px'>
-          <span className='truncate flex-1 min-w-0' title={item.input}>
-            {item.input}
+  const pendingNotice =
+    pendingItems.length || pendingError ? (
+      <div className='px-20px py-8px text-13px text-t-secondary' role='status'>
+        <div className='flex items-center gap-8px'>
+          <span>
+            {t(pendingError ? 'conversation.commandQueue.requestPending' : 'conversation.centralRead.pending')}
           </span>
-          <span className='shrink-0'>
-            {t(
-              receipts?.find((receipt) => receipt.id === item.id)?.recorded
-                ? 'conversation.commandQueue.requestRecorded'
-                : 'conversation.commandQueue.requestPending'
-            )}
-          </span>
+          <Button
+            size='mini'
+            loading={checkingPending || checkingReceipts}
+            onClick={() => void Promise.all([refreshPending(), refreshReceipts()])}
+          >
+            {t('common.retry')}
+          </Button>
         </div>
-      ))}
-    </div>
-  ) : null;
+        {pendingItems.map((item) => (
+          <div key={item.request?.requestId ?? item.id} className='flex min-w-0 items-center gap-8px mt-4px'>
+            <span className='truncate flex-1 min-w-0' title={item.hidden ? undefined : item.input}>
+              {item.hidden ? t('conversation.commandQueue.requestPending') : item.input}
+            </span>
+            <span className='shrink-0'>
+              {t(
+                receipts?.find((receipt) => receipt.id === item.id)?.recorded
+                  ? 'conversation.commandQueue.requestRecorded'
+                  : 'conversation.commandQueue.requestPending'
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    ) : null;
   const activeContext = getActiveNativeRuntimeContext();
   const activated =
     isNativeRuntimeActive() &&

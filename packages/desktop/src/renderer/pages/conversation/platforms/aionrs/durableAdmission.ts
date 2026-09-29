@@ -41,6 +41,7 @@ const acceptedSchema = z.object({
   receipt: z.object({ client_request_id: uuid, msg_id: id, turn_id: id }).nullable(),
   runtime: runtimeSchema.optional(),
 });
+const pendingListSchema = z.object({ items: z.array(acceptedSchema) });
 const resumedSchema = requestContextSchema.extend({ ownerId: uuid, projectId: uuid, runtime: runtimeSchema });
 
 export class NativeAdmissionError extends Error {
@@ -74,6 +75,23 @@ export async function nativeAdmissionCapability(coreId: string): Promise<NativeA
   const capability = capabilitySchema.parse(await response.json());
   if (capability.protocol === 1 && capability.coreId !== coreId) throw new NativeAdmissionError(409);
   return capability;
+}
+
+/** Read only unresolved original requests; this never resumes or contacts the native runtime. */
+export async function listPendingNativeRequests(coreId: string, logicalId: string) {
+  const response = await request(`${path(coreId)}/pending?logicalId=${encodeURIComponent(logicalId)}`);
+  if (!response.ok) throw new NativeAdmissionError(response.status);
+  const { items } = pendingListSchema.parse(await response.json());
+  if (
+    items.some(
+      (item) =>
+        item.context.logicalId !== logicalId ||
+        item.requestId !== item.prompt.client_request_id ||
+        item.receipt !== null
+    )
+  )
+    throw new NativeAdmissionError(502);
+  return items;
 }
 
 /** Resume is explicit and fenced to the same owned continuation that the transcript resolved. */

@@ -374,4 +374,54 @@ describe('ChatConversation legacy runtime rendering', () => {
     expect(activeLease).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it('finds an earlier pending request in a fresh tab without showing a hidden prompt or opening the runtime', async () => {
+    centralGate.enabled = true;
+    const visibleId = '44444444-4444-4444-8444-444444444444';
+    const hiddenId = '55555555-5555-4555-8555-555555555555';
+    const context = {
+      logicalId: 'fresh-tab-logical',
+      coreId: 'old-core',
+      runtimeGeneration: '33333333-3333-4333-8333-333333333333',
+      headGeneration: 1,
+    };
+    const pending = [
+      {
+        requestId: visibleId,
+        context,
+        prompt: { client_request_id: visibleId, content: 'Original visible prompt', hidden: false },
+        receipt: null,
+      },
+      {
+        requestId: hiddenId,
+        context,
+        prompt: { client_request_id: hiddenId, content: 'Private instruction', hidden: true },
+        receipt: null,
+      },
+    ];
+    const fetchMock = vi.fn(async (url: string) =>
+      Response.json(
+        url.includes('/pending?') ? { items: pending } : pending.find((item) => url.includes(item.requestId))
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const conversation = {
+      ...legacyConversation('gemini'),
+      id: 'fresh-tab-core',
+      type: 'aionrs',
+      logical_conversation_id: context.logicalId,
+      head_generation: 2,
+      runtime_generation: context.runtimeGeneration,
+    } as TChatConversation;
+    render(<ChatConversation conversation={conversation} />);
+    await screen.findByText('Original visible prompt');
+    expect(screen.queryByText('Private instruction')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/platform/conversations/fresh-tab-core/requests/pending?logicalId=${context.logicalId}`,
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(activeLease).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+    vi.unstubAllGlobals();
+  });
 });

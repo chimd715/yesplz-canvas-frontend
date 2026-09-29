@@ -142,6 +142,34 @@ describe('central read native activation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('lists original unresolved targets without activating native access and rejects malformed rows', async () => {
+    const gate = await loadGate();
+    const { listPendingNativeRequests } =
+      await import('@/renderer/pages/conversation/platforms/aionrs/durableAdmission');
+    const requestId = '44444444-4444-4444-8444-444444444444';
+    const saved = {
+      requestId,
+      context: { logicalId: 'logical', coreId: 'old-core', runtimeGeneration, headGeneration: 1 },
+      prompt: { client_request_id: requestId, content: 'Original prompt', hidden: false },
+      receipt: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ items: [saved] }))
+      .mockResolvedValueOnce(
+        Response.json({ items: [{ ...saved, receipt: { client_request_id: requestId, msg_id: 'm', turn_id: 't' } }] })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(listPendingNativeRequests('current-core', 'logical')).resolves.toMatchObject([saved]);
+    await expect(listPendingNativeRequests('current-core', 'logical')).rejects.toMatchObject({ status: 502 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/platform/conversations/current-core/requests/pending?logicalId=logical',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(gate.isNativeRuntimeActive()).toBe(false);
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
   it('rejects stale head and mismatched resume response without activating native access', async () => {
     const gate = await loadGate();
     const { resumeNativeRuntime } = await import('@/renderer/pages/conversation/platforms/aionrs/durableAdmission');
