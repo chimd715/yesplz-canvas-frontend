@@ -129,8 +129,10 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
       });
       if (!response.ok) throw new Error('Store selection failed');
       setConnection(await response.json());
+      return true;
     } catch {
       setError(true);
+      return false;
     } finally {
       setConnecting(false);
     }
@@ -270,7 +272,11 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
                 <Button
                   type='primary'
                   disabled={loading || connecting || error}
-                  onClick={() => onSelected?.(connection.shop!)}
+                  loading={connecting}
+                  onClick={async () => {
+                    const shop = connection.shop!;
+                    if (await selectStore(shop)) onSelected?.(shop);
+                  }}
                 >
                   {t('settings.plugins.shopify.useStore')}
                 </Button>

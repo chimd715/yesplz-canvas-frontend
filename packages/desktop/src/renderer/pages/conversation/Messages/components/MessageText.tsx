@@ -107,11 +107,19 @@ const MessageText: React.FC<{
   turnTexts?: string[];
 }> = ({ message, showCopyRow = true, isLastMessage = false, hasForkAnchor = false, turnTexts }) => {
   const logos = useAgentLogos();
+  const conversationContext = useConversationContextSafe();
+  const isUserMessage = message.position === 'right';
   // Filter think tags from content before rendering
   // 在渲染前过滤 think 标签
   const contentToRender = useMemo(() => {
     let content = message.content.content;
     if (typeof content === 'string') {
+      // Keep product instructions in the model history, out of the merchant's message bubble.
+      if (isUserMessage && conversationContext?.isWidget && content.startsWith('---\nname: shop-widget\n')) {
+        const separator = '\n\n## User request\n\n';
+        const index = content.indexOf(separator);
+        if (index !== -1) content = content.slice(index + separator.length);
+      }
       if (hasThinkTags(content)) {
         content = stripThinkTags(content);
       }
@@ -122,11 +130,10 @@ const MessageText: React.FC<{
       return content;
     }
     return content;
-  }, [message.content.content]);
+  }, [message.content.content, isUserMessage, conversationContext?.isWidget]);
 
   const { t } = useTranslation();
   const [showCopyAlert, setShowCopyAlert] = useState(false);
-  const isUserMessage = message.position === 'right';
   // Delivered-but-not-yet-consumed marker for messages sent mid-turn to a
   // supporting backend (claude/codex). The message already reached the
   // server (it's rendered); this only answers "has the agent picked it up
@@ -166,7 +173,6 @@ const MessageText: React.FC<{
     : visibleText;
   const { data, json } = useFormatContent(renderedText);
   const shouldRenderPlainText = isUserMessage || Boolean(contextResetNotice);
-  const conversationContext = useConversationContextSafe();
   const showPlatformQuestion =
     !isUserMessage &&
     !isTeammateMessage &&
