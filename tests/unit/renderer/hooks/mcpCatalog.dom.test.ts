@@ -6,7 +6,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { getClientBusinessSettingMock, mcpServiceMock } = vi.hoisted(() => ({
+const { getClientBusinessSettingMock, mcpServiceMock, extensionsMock } = vi.hoisted(() => ({
+  extensionsMock: { getMcpServers: { invoke: vi.fn() } },
   getClientBusinessSettingMock: vi.fn(),
   mcpServiceMock: {
     listServers: { invoke: vi.fn() },
@@ -19,6 +20,7 @@ vi.mock('@/renderer/services/clientBusinessSettings', () => ({
 
 vi.mock('@/common/adapter/ipcBridge', () => ({
   mcpService: mcpServiceMock,
+  extensions: extensionsMock,
 }));
 
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
@@ -27,6 +29,7 @@ describe('ensureBackendMcpCatalog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getClientBusinessSettingMock.mockResolvedValue([]);
+    extensionsMock.getMcpServers.invoke.mockResolvedValue([]);
     mcpServiceMock.listServers.invoke.mockResolvedValue([
       {
         id: 'user-1',
@@ -39,6 +42,28 @@ describe('ensureBackendMcpCatalog', () => {
         builtin: false,
       },
     ]);
+  });
+
+  it('includes Extension transports once while preserving a user override by name', async () => {
+    extensionsMock.getMcpServers.invoke.mockResolvedValue([
+      {
+        id: 'ext-yesplz',
+        name: 'yesplz-api-reference',
+        _extensionName: 'yesplz-api',
+        transport: { type: 'http', url: 'https://mcp.example/api/mcp' },
+      },
+      { id: 'shadowed', name: 'user one', _extensionName: 'other' },
+    ]);
+    const result = await ensureBackendMcpCatalog();
+    expect(result.allServers.map((s) => s.id)).toEqual(['user-1', 'ext-yesplz']);
+    expect(result.extensionServers).toEqual([expect.objectContaining({ extension: 'yesplz-api', id: 'ext-yesplz' })]);
+  });
+
+  it('preserves user MCP entries when the optional Extension endpoint fails', async () => {
+    extensionsMock.getMcpServers.invoke.mockRejectedValue(new Error('Unavailable'));
+    const result = await ensureBackendMcpCatalog();
+    expect(result.allServers.map((s) => s.id)).toEqual(['user-1']);
+    expect(result.extensionServers).toEqual([]);
   });
 
   it('reads MCP catalog from backend settings without falling back to configService', async () => {

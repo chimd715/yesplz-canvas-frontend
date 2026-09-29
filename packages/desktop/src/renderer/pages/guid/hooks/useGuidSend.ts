@@ -119,17 +119,20 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     const selectedAllMcpServerIds = selectedMcpServerIds ?? [];
     const selectedMcpServerIdSet = new Set(selectedAllMcpServerIds);
     const selectedUserMcpServerIds = availableMcpServers
-      .filter((server) => selectedMcpServerIdSet.has(server.id) && server.builtin !== true)
+      .filter((server) => selectedMcpServerIdSet.has(server.id) && server.builtin !== true && !server.extension)
       .map((server) => server.id);
     const selectedAllSessionMcpServers = availableMcpServers
       .filter((server) => selectedMcpServerIdSet.has(server.id))
       .map((server) => toSessionMcpServer(server));
     const selectedSessionMcpServers = availableMcpServers
-      .filter((server) => selectedMcpServerIdSet.has(server.id) && server.builtin === true)
+      .filter((server) => selectedMcpServerIdSet.has(server.id) && (server.builtin === true || server.extension))
       .map((server) => toSessionMcpServer(server));
     const defaultSelectedMcpServerIds = assistantDefaultMcpIds;
     const defaultSelectedUserMcpServerIds = availableMcpServers
-      .filter((server) => (defaultSelectedMcpServerIds ?? []).includes(server.id) && server.builtin !== true)
+      .filter(
+        (server) =>
+          (defaultSelectedMcpServerIds ?? []).includes(server.id) && server.builtin !== true && !server.extension
+      )
       .map((server) => server.id);
     const assistantOverrideMcpIds =
       selectedMcpServerIds !== undefined ? selectedAllMcpServerIds : defaultSelectedMcpServerIds;

@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ipcBridge } from '@/common';
+import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
@@ -315,7 +317,64 @@ describe('GuidPage', () => {
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
+  it('selects the installed YesPlz provider with Shop Widget and respects subsequent deselection', async () => {
+    vi.mocked(ipcBridge.fs.listAvailableSkills.invoke).mockResolvedValue([
+      {
+        name: 'yesplz-api',
+        description: 'API references',
+        source: 'custom',
+        is_auto_inject: false,
+        location: '/fixture/SKILL.md',
+        is_custom: true,
+      },
+    ]);
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValue({
+      userServers: [],
+      builtinServers: [],
+      extensionServers: [],
+      allServers: [
+        {
+          id: 'ext-yesplz',
+          name: 'yesplz-api-reference',
+          extension: 'yesplz-api',
+          enabled: true,
+          transport: { type: 'http', url: 'https://mcp.example/api/mcp' },
+          created_at: 0,
+          updated_at: 0,
+          original_json: '{}',
+        },
+      ],
+    });
+    resolveGuidAssistantDefaultsMock.mockReturnValue({
+      disabledBuiltinSkillIds: [],
+      skillIds: ['existing'],
+      mcpIds: ['user-mcp'],
+    });
+    render(<GuidPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
+    await waitFor(() => {
+      expect(capturedGuidSendDeps.at(-1)?.guidEnabledSkills).toEqual(['existing', 'yesplz-api']);
+      expect(capturedGuidSendDeps.at(-1)?.selectedMcpServerIds).toEqual(['user-mcp', 'ext-yesplz']);
+    });
+    const controls = capturedGuidActionRowProps.at(-1)!;
+    act(() => {
+      (controls.onToggleSkill as (name: string, auto: boolean) => void)('yesplz-api', false);
+      (controls.onToggleMcpServer as (id: string) => void)('ext-yesplz');
+    });
+    expect(capturedGuidSendDeps.at(-1)).toMatchObject({
+      guidEnabledSkills: ['existing'],
+      selectedMcpServerIds: ['user-mcp'],
+    });
+  });
+
   beforeEach(() => {
+    vi.mocked(ipcBridge.fs.listAvailableSkills.invoke).mockResolvedValue([]);
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValue({
+      userServers: [],
+      builtinServers: [],
+      extensionServers: [],
+      allServers: [],
+    });
     locationMock.state = null;
     locationMock.key = 'guid-location';
     navigateMock.mockReset();
@@ -566,7 +625,7 @@ describe('GuidPage', () => {
     await vi.waitFor(() => {
       const latestDeps = capturedGuidSendDeps.at(-1);
       expect(latestDeps).toMatchObject({
-        guidEnabledSkills: undefined,
+        guidEnabledSkills: [],
         guidDisabledBuiltinSkills: undefined,
       });
     });

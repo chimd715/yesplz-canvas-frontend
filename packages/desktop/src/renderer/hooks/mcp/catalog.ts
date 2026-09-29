@@ -1,4 +1,4 @@
-import { mcpService } from '@/common/adapter/ipcBridge';
+import { extensions, mcpService } from '@/common/adapter/ipcBridge';
 import type { IMcpServer, IMcpServerTransport, ISessionMcpServer } from '@/common/config/storage';
 import { getClientBusinessSetting } from '@/renderer/services/clientBusinessSettings';
 
@@ -70,6 +70,7 @@ export const toSessionMcpServer = (server: Pick<IMcpServer, 'id' | 'name' | 'tra
 export const ensureBackendMcpCatalog = async (): Promise<{
   userServers: IMcpServer[];
   builtinServers: IMcpServer[];
+  extensionServers: IMcpServer[];
   allServers: IMcpServer[];
 }> => {
   const localServers = ((await getClientBusinessSetting('mcp.config').catch((): IMcpServer[] => [])) ||
@@ -77,11 +78,26 @@ export const ensureBackendMcpCatalog = async (): Promise<{
   const builtinServers = dedupeServers(localServers.filter(isBuiltinServer));
   const userServers = dedupeServers(await mcpService.listServers.invoke());
 
-  const allServers = dedupeServers([...userServers, ...builtinServers]);
+  const contributions = (await extensions.getMcpServers.invoke().catch((): Record<string, unknown>[] => [])) || [];
+  const converted: IMcpServer[] = contributions.map((server) => ({
+    id: String(server.id || ''),
+    name: String(server.name || ''),
+    description: server.description as string | undefined,
+    enabled: server.enabled !== false,
+    transport: server.transport as IMcpServer['transport'],
+    created_at: (server.created_at as number) || Date.now(),
+    updated_at: (server.updated_at as number) || Date.now(),
+    original_json: String(server.original_json || '{}'),
+    extension: String(server._extensionName || server.id || server.name),
+    builtin: false,
+  }));
+  const allServers = dedupeServers([...userServers, ...builtinServers, ...converted]);
+  const extensionServers = allServers.filter((server) => server.extension);
 
   return {
     userServers,
     builtinServers,
+    extensionServers,
     allServers,
   };
 };

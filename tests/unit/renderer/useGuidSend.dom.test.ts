@@ -75,6 +75,28 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it.each(['aionrs', 'claude'])('passes an Extension transport to %s without a fake DB row ID', async (backend) => {
+    const deps = createDeps();
+    deps.selectedAssistantBackend = backend;
+    deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<GuidSendDeps['current_model']>;
+    deps.availableMcpServers.push({
+      id: 'ext-yesplz',
+      name: 'yesplz-api-reference',
+      extension: 'yesplz-api',
+      enabled: true,
+      transport: { type: 'http', url: 'https://mcp.example/api/mcp' },
+    } as IMcpServer);
+    deps.selectedMcpServerIds = ['mcp-user', 'ext-yesplz'];
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    const payload = createConversationInvokeMock.mock.calls[0][0];
+    expect(payload.extra.selected_mcp_server_ids).toEqual(['mcp-user']);
+    expect(payload.extra.selected_session_mcp_servers).toContainEqual(
+      expect.objectContaining({ id: 'ext-yesplz', transport: { type: 'http', url: 'https://mcp.example/api/mcp' } })
+    );
+  });
   it.each(['aionrs', 'claude'])(
     'adds widget engineering instructions to a plain feature request through %s without changing its title',
     async (backend) => {

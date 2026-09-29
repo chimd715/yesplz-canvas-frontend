@@ -109,27 +109,6 @@ const GuidPage: React.FC = () => {
       });
   }, []);
 
-  const handleToggleSkill = useCallback((skillName: string, isAuto: boolean) => {
-    if (isAuto) {
-      setGuidDisabledBuiltinSkills((prev) => {
-        const list = prev ?? [];
-        return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
-      });
-    } else {
-      setGuidEnabledSkills((prev) => {
-        const list = prev ?? [];
-        return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
-      });
-    }
-  }, []);
-
-  const handleToggleMcpServer = useCallback((serverId: string) => {
-    setGuidSelectedMcpServerIds((prev) => {
-      const current = prev ?? [];
-      return current.includes(serverId) ? current.filter((id) => id !== serverId) : [...current, serverId];
-    });
-  }, []);
-
   // --- Hooks ---
   // Only aionrs uses this provider-based model picker now (Gemini runs as a
   // regular ACP backend with its own model selector).
@@ -173,11 +152,61 @@ const GuidPage: React.FC = () => {
     () => resolveGuidAssistantDefaults(selectedAssistantDetail),
     [selectedAssistantDetail]
   );
+  const effectiveEnabledSkills = useMemo(
+    () =>
+      guidEnabledSkills ?? [
+        ...new Set([
+          ...resolvedAssistantDefaults.skillIds,
+          ...(shopWidgetSelected && allSkills.some((skill) => skill.name === 'yesplz-api') ? ['yesplz-api'] : []),
+        ]),
+      ],
+    [guidEnabledSkills, resolvedAssistantDefaults.skillIds, shopWidgetSelected, allSkills]
+  );
+  const effectiveMcpIds = useMemo(
+    () =>
+      guidSelectedMcpServerIds ?? [
+        ...new Set([
+          ...resolvedAssistantDefaults.mcpIds,
+          ...availableMcpServers
+            .filter((server) => shopWidgetSelected && server.enabled && server.name === 'yesplz-api-reference')
+            .map((server) => server.id),
+        ]),
+      ],
+    [guidSelectedMcpServerIds, resolvedAssistantDefaults.mcpIds, shopWidgetSelected, availableMcpServers]
+  );
+
+  const handleToggleSkill = useCallback(
+    (skillName: string, isAuto: boolean) => {
+      if (isAuto) {
+        setGuidDisabledBuiltinSkills((prev) => {
+          const list = prev ?? resolvedAssistantDefaults.disabledBuiltinSkillIds;
+          return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
+        });
+      } else {
+        setGuidEnabledSkills((prev) => {
+          const list = prev ?? effectiveEnabledSkills;
+          return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
+        });
+      }
+    },
+    [effectiveEnabledSkills, resolvedAssistantDefaults.disabledBuiltinSkillIds]
+  );
+
+  const handleToggleMcpServer = useCallback(
+    (serverId: string) => {
+      setGuidSelectedMcpServerIds((prev) => {
+        const current = prev ?? effectiveMcpIds;
+        return current.includes(serverId) ? current.filter((id) => id !== serverId) : [...current, serverId];
+      });
+    },
+    [effectiveMcpIds]
+  );
+
   const selectedSkillNames = useMemo(() => {
     const disabledBuiltinSkillSet = new Set(
       guidDisabledBuiltinSkills ?? resolvedAssistantDefaults.disabledBuiltinSkillIds
     );
-    const enabledSkillSet = new Set(guidEnabledSkills ?? resolvedAssistantDefaults.skillIds);
+    const enabledSkillSet = new Set(effectiveEnabledSkills);
 
     return allSkills
       .filter((skill) => (skill.isAuto ? !disabledBuiltinSkillSet.has(skill.name) : enabledSkillSet.has(skill.name)))
@@ -185,7 +214,7 @@ const GuidPage: React.FC = () => {
   }, [
     allSkills,
     guidDisabledBuiltinSkills,
-    guidEnabledSkills,
+    effectiveEnabledSkills,
     resolvedAssistantDefaults.disabledBuiltinSkillIds,
     resolvedAssistantDefaults.skillIds,
   ]);
@@ -267,11 +296,11 @@ const GuidPage: React.FC = () => {
     current_model: modelSelection.current_model,
 
     guidDisabledBuiltinSkills,
-    guidEnabledSkills,
+    guidEnabledSkills: effectiveEnabledSkills,
     assistantDefaultSkillIds: resolvedAssistantDefaults.skillIds,
     assistantDefaultDisabledBuiltinSkillIds: resolvedAssistantDefaults.disabledBuiltinSkillIds,
     availableMcpServers,
-    selectedMcpServerIds: guidSelectedMcpServerIds,
+    selectedMcpServerIds: effectiveMcpIds,
     assistantDefaultMcpIds: resolvedAssistantDefaults.mcpIds,
     isGoogleAuth: modelSelection.isGoogleAuth,
 
@@ -357,7 +386,7 @@ const GuidPage: React.FC = () => {
 
     const resolvedDefaults = resolveGuidAssistantDefaults(selectedAssistantDetail);
     setGuidDisabledBuiltinSkills(resolvedDefaults.disabledBuiltinSkillIds);
-    setGuidEnabledSkills(resolvedDefaults.skillIds);
+    setGuidEnabledSkills(undefined);
   }, [selectedAssistantDetail, selectedAssistantId]);
 
   const appliedAssistantDefaultsKeyRef = useRef<string | null>(null);
@@ -456,7 +485,7 @@ const GuidPage: React.FC = () => {
           agentSelection.setSelectedThoughtLevelValue(fallbackThoughtLevel, { persistPreference: false });
         }
       }
-      setGuidSelectedMcpServerIds(resolvedDefaults.mcpIds);
+      setGuidSelectedMcpServerIds(undefined);
     };
 
     void applyAssistantDefaults().catch((error) => {
@@ -651,10 +680,10 @@ const GuidPage: React.FC = () => {
       onModeSelect={setGuidSelectedMode}
       allSkills={allSkills}
       disabledBuiltinSkills={guidDisabledBuiltinSkills ?? []}
-      enabledSkills={guidEnabledSkills ?? []}
+      enabledSkills={effectiveEnabledSkills}
       onToggleSkill={handleToggleSkill}
       mcpServers={availableMcpServers}
-      selectedMcpServerIds={guidSelectedMcpServerIds ?? []}
+      selectedMcpServerIds={effectiveMcpIds}
       onToggleMcpServer={handleToggleMcpServer}
       speechInputNode={
         <SpeechInputButton onLiveTranscript={handleLiveTranscript} onTranscript={handleSpeechTranscript} />
