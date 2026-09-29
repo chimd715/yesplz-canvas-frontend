@@ -1456,7 +1456,9 @@
       "confirmDescription": "Connect a Shopify store as the data source for this conversation. You can change the selected store later.",
       "allow": "Allow",
       "skip": "Skip",
-      "useStore": "Use this store"
+      "useStore": "Use this store",
+      "platformQuestion": "Which platform is your store on?",
+      "answerReady": "Your selection is in the message box. Send it to continue."
     },
     "description": "Plugins bring together tools, skills, and service connections."
   }

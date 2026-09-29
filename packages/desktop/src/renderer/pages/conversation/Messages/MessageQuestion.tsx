@@ -22,6 +22,22 @@ const OTHER_VALUE = '__aionui_other__';
 
 type MessageQuestionProps = {
   message: IMessageAsk;
+  /** Native text questions use the composer, not Claude's dedicated answer endpoint. */
+  onAnswer?: (answers: { question: string; labels: string[] }[]) => Promise<void>;
+};
+
+/** Recognize the product-owned native platform prompt without treating code samples as questions. */
+export const hasWidgetPlatformPrompt = (text: string): boolean => {
+  const prose = text.replace(/```[\s\S]*?(?:```|$)/g, '');
+  if (prose.includes('[SHOP_WIDGET_PLATFORM]')) return true;
+  // ponytail: legacy question matching is limited to the two fixed choices and a store-platform question.
+  return (
+    /\bShopify\b/.test(prose) &&
+    /\bOther\b/.test(prose) &&
+    (prose.includes('Which platform is your store on?') ||
+      /(?:어떤|어느|무슨)[^\n?？]{0,80}(?:플랫폼|쇼핑몰|스토어|샵)[^\n?？]{0,80}[?？]/.test(prose) ||
+      /(?:쇼핑몰|스토어|샵|플랫폼)[^\n?？]{0,80}(?:어디|어떤|어느|선택)[^\n?？]{0,80}[?？]/.test(prose))
+  );
 };
 
 type Draft = {
@@ -52,7 +68,7 @@ const isStorePlatformQuestion = (q: IAskQuestion) =>
  * question has an answer; dismiss sends an explicit decline (a deny on the
  * wire), never an empty allow.
  */
-const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message }) => {
+const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, onAnswer }) => {
   const { t } = useTranslation();
   const content = message.content || ({} as IMessageAsk['content']);
   const questions = useMemo<IAskQuestion[]>(
@@ -104,23 +120,30 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
         if (d.otherSelected && d.other.trim()) labels.push(d.other.trim());
         return { question: q.question, labels };
       });
-      await conversation.answerAsk.invoke({ conversation_id: message.conversation_id, request_id: requestId, answers });
+      if (onAnswer) await onAnswer(answers);
+      else
+        await conversation.answerAsk.invoke({
+          conversation_id: message.conversation_id,
+          request_id: requestId,
+          answers,
+        });
       setSubmitted('answered');
     } catch {
       setConnectionError(true);
     } finally {
       setSubmitting(false);
     }
-  }, [drafts, questions, message.conversation_id, requestId, submitting]);
+  }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer]);
 
   const handleDecline = useCallback(async () => {
-    await conversation.answerAsk.invoke({
-      conversation_id: message.conversation_id,
-      request_id: requestId,
-      decline: true,
-    });
+    if (!onAnswer)
+      await conversation.answerAsk.invoke({
+        conversation_id: message.conversation_id,
+        request_id: requestId,
+        decline: true,
+      });
     setSubmitted('declined');
-  }, [message.conversation_id, requestId]);
+  }, [message.conversation_id, requestId, onAnswer]);
 
   if (!questions.length) return null;
 
@@ -208,6 +231,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
           );
         })}
         {connectionError && <p role='alert'>{t('settings.plugins.shopify.error')}</p>}
+        {onAnswer && submitted === 'answered' && <p role='status'>{t('settings.plugins.shopify.answerReady')}</p>}
         {submitted === null ? (
           // Plain Arco buttons on purpose: styles.optionButton resets the button
           // chrome to a transparent full-width list row (for permission option

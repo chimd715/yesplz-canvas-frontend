@@ -10,10 +10,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpPermission, IMessagePermission } from '@/common/chat/chatLib';
 import MessageAcpPermission from '@/renderer/pages/conversation/Messages/acp/MessageAcpPermission';
 import MessagePermission from '@/renderer/pages/conversation/Messages/components/MessagePermission';
+import MessageQuestion, { hasWidgetPlatformPrompt } from '@/renderer/pages/conversation/Messages/MessageQuestion';
 
-const { genericInvoke, acpInvoke } = vi.hoisted(() => ({
+const { genericInvoke, acpInvoke, answerAskInvoke } = vi.hoisted(() => ({
   genericInvoke: vi.fn(),
   acpInvoke: vi.fn(),
+  answerAskInvoke: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -33,6 +35,7 @@ vi.mock('@/common/adapter/ipcBridge', () => ({
     confirmMessage: {
       invoke: acpInvoke,
     },
+    answerAsk: { invoke: answerAskInvoke },
   },
 }));
 
@@ -89,6 +92,42 @@ describe('permission message adapters', () => {
     vi.clearAllMocks();
     genericInvoke.mockResolvedValue(undefined);
     acpInvoke.mockResolvedValue(undefined);
+  });
+
+  it('reuses the question card for a native store prompt without calling the unsupported ask endpoint', async () => {
+    expect(hasWidgetPlatformPrompt('[SHOP_WIDGET_PLATFORM]')).toBe(true);
+    expect(hasWidgetPlatformPrompt('Which platform is your store on?\nShopify\nOther')).toBe(true);
+    expect(hasWidgetPlatformPrompt('어떤 쇼핑몰 플랫폼을 사용하시나요?\nShopify / Other')).toBe(true);
+    expect(hasWidgetPlatformPrompt('```text\n[SHOP_WIDGET_PLATFORM]\n```')).toBe(false);
+    expect(hasWidgetPlatformPrompt('Build a FAQ. Shopify and Other are examples.')).toBe(false);
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MessageQuestion
+        onAnswer={onAnswer}
+        message={{
+          id: 'native-platform',
+          conversation_id: 'widget-1',
+          type: 'ask',
+          position: 'left',
+          content: {
+            session_id: 'widget-1',
+            request_id: 'native-platform',
+            questions: [
+              {
+                question: 'Which platform is your store on?',
+                options: [{ label: 'Shopify' }, { label: 'Other' }],
+              },
+            ],
+          },
+        }}
+      />
+    );
+    expect(screen.getAllByText('Other')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('message-question-option-0-Other'));
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(onAnswer).toHaveBeenCalledWith([{ question: 'Which platform is your store on?', labels: ['Other'] }]);
+    expect(answerAskInvoke).not.toHaveBeenCalled();
   });
 
   it('keeps the generic payload exact and defaults confirmation to proceed_once', async () => {

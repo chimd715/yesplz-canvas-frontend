@@ -248,6 +248,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
     <ChatLayout {...chatLayoutProps} conversation_id={conversation.id}>
       <AionrsChat
         conversation_id={conversation.id}
+        isWidget={chatLayoutProps.isWidget}
         workspace={conversation.extra.workspace}
         emptySlot={emptySlot}
         modelSelection={modelSelection}

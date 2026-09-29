@@ -5,6 +5,8 @@
  */
 
 import type { IMessageText } from '@/common/chat/chatLib';
+import MessageQuestion, { hasWidgetPlatformPrompt } from '../MessageQuestion';
+import { emitter } from '@/renderer/utils/emitter';
 import { parseFileMarker, resolveMessageFilePath } from './fileMarker';
 import SessionMentionAction from './SessionMentionAction';
 import { parseSessionMessageBlock, parseSessionsBlock } from './sessionMarkers';
@@ -165,6 +167,14 @@ const MessageText: React.FC<{
   const { data, json } = useFormatContent(renderedText);
   const shouldRenderPlainText = isUserMessage || Boolean(contextResetNotice);
   const conversationContext = useConversationContextSafe();
+  const showPlatformQuestion =
+    !isUserMessage &&
+    !isTeammateMessage &&
+    !conversationContext?.hideSendBox &&
+    conversationContext?.type === 'aionrs' &&
+    conversationContext.isWidget === true &&
+    typeof renderedText === 'string' &&
+    hasWidgetPlatformPrompt(renderedText);
   const forkConversation = useForkConversation(conversationContext?.conversation_id);
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
@@ -340,11 +350,40 @@ const MessageText: React.FC<{
           ) : (
             <div data-testid='message-text-content'>
               <MarkdownView codeStyle={CODE_STYLE} onLocalFileLink={handleLocalFileLink}>
-                {data}
+                {showPlatformQuestion ? String(data).replaceAll('[SHOP_WIDGET_PLATFORM]', '').trim() : data}
               </MarkdownView>
             </div>
           )}
         </div>
+        {showPlatformQuestion && (
+          <div className='w-full mt-12px'>
+            <MessageQuestion
+              key={message.id}
+              message={{
+                id: `${message.id}:platform`,
+                conversation_id: message.conversation_id,
+                type: 'ask',
+                position: 'left',
+                content: {
+                  session_id: message.conversation_id,
+                  request_id: `${message.id}:platform`,
+                  questions: [
+                    {
+                      question: t('settings.plugins.shopify.platformQuestion'),
+                      options: [{ label: 'Shopify' }, { label: 'Other' }],
+                    },
+                  ],
+                },
+              }}
+              onAnswer={async (answers) => {
+                emitter.emit(
+                  'sendbox.fill',
+                  answers.map((answer) => `${answer.question} ${answer.labels.join(', ')}`).join('\n')
+                );
+              }}
+            />
+          </div>
+        )}
         {isPendingDelivery && (
           <div className='text-12px text-t-secondary mt-4px select-none' data-testid='message-status-badge'>
             {t('messages.delivery.pending', { defaultValue: 'Unread' })}

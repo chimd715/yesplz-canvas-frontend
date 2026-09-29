@@ -30,6 +30,7 @@ import type { AionrsModelSelection } from './useAionrsModelSelection';
 const AionrsChat: React.FC<{
   conversation_id: string;
   workspace: string;
+  isWidget?: boolean;
   modelSelection: AionrsModelSelection;
   session_mode?: string;
   cron_job_id?: string;
@@ -45,6 +46,7 @@ const AionrsChat: React.FC<{
 }> = ({
   conversation_id,
   workspace,
+  isWidget,
   modelSelection,
   session_mode,
   cron_job_id,
@@ -65,6 +67,7 @@ const AionrsChat: React.FC<{
     return {
       conversation_id: conversation_id,
       workspace,
+      isWidget,
       type: 'aionrs',
       cron_job_id,
       loadedSkills,
@@ -76,6 +79,7 @@ const AionrsChat: React.FC<{
   }, [
     conversation_id,
     workspace,
+    isWidget,
     cron_job_id,
     loadedSkills,
     loadedMcpServers,
