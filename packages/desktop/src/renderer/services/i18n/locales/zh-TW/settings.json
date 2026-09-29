@@ -1436,6 +1436,11 @@
       "ready": "No store selected for this conversation",
       "connected": "Connected to {{shop}}",
       "error": "Could not load or start the Shopify connection. Reopen Connectors and try again.",
+      "errors": {
+        "anotherApp": "This store is connected through another Shopify app. Reconnect using that app or choose another store. Your existing connection has not been changed.",
+        "cancelled": "Shopify connection was cancelled. Reopen Connectors to try again.",
+        "authorizationFailed": "Shopify connection could not be completed. Reopen Connectors to try again."
+      },
       "selection": "Store for this conversation",
       "choose": "Select a connected store",
       "workspaceHint": "Stores are saved in this workspace. Open a conversation to choose which store it uses.",

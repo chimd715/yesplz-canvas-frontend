@@ -51,7 +51,7 @@ type Draft = {
 const emptyDraft = (): Draft => ({ labels: [], other: '', otherSelected: false });
 
 // ponytail: recognize the fixed skill question only; add explicit action metadata if more questions need connectors.
-const isStorePlatformQuestion = (q: IAskQuestion) =>
+export const isStorePlatformQuestion = (q: IAskQuestion) =>
   q.question === 'Which platform is your store on?' &&
   q.options.length === 2 &&
   q.options.some((o) => o.label === 'Shopify') &&

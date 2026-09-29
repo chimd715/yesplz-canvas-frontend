@@ -1,20 +1,73 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { Message } from '@arco-design/web-react';
+import { conversation } from '@/common/adapter/ipcBridge';
 import {
   shopifyPendingKey,
   submitConnectorPrompt,
   useConnectorContinuation,
+  useConnectorReturnError,
 } from '@/renderer/pages/conversation/platforms/useConnectorContinuation';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }));
 vi.mock('@arco-design/web-react', () => ({ Message: { error: vi.fn() } }));
-const translate = (_key: string, values?: { shop?: string }) => `Connected to ${values?.shop}`;
+vi.mock('@/common/adapter/ipcBridge', () => ({
+  conversation: { confirmation: { list: { invoke: vi.fn() } }, answerAsk: { invoke: vi.fn() } },
+}));
+vi.mock('@/renderer/pages/conversation/Messages/MessageQuestion', () => ({
+  isStorePlatformQuestion: (q: { question: string }) => q.question === 'Which platform is your store on?',
+}));
+const translate = (key: string, values?: { shop?: string }) => (values?.shop ? `Connected to ${values.shop}` : key);
 const entry = 'n'.repeat(43);
 beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([]);
+  vi.mocked(conversation.answerAsk.invoke).mockResolvedValue(undefined);
   sessionStorage.clear();
   window.history.replaceState({}, '', '/#/conversation/current?shopify_connected=' + entry);
   sessionStorage.setItem(shopifyPendingKey('current'), entry);
+});
+
+it('shows a bound error once on the original route without resuming a successful connection', () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/#/conversation/current?shopify_failed=' + entry + '&shopify_error=another_app&keep=1'
+  );
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  const accept = vi.fn(() => true);
+  const hook = renderHook(
+    () => {
+      useConnectorReturnError('/conversation/current');
+      useConnectorContinuation('current', true, accept);
+    },
+    { wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode> }
+  );
+  expect(Message.error).toHaveBeenCalledExactlyOnceWith({
+    content: 'settings.plugins.shopify.errors.anotherApp',
+    duration: 10000,
+  });
+  expect(window.location.hash).toBe('#/conversation/current?keep=1');
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(accept).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
+  hook.unmount();
+  renderHook(() => useConnectorReturnError('/conversation/current'));
+  expect(Message.error).toHaveBeenCalledTimes(1);
+});
+
+it('ignores a foreign error return and handles a cancellation from settings', () => {
+  window.history.replaceState({}, '', '/#/conversation/other?shopify_failed=' + entry + '&shopify_error=another_app');
+  const hook = renderHook(() => useConnectorReturnError('/conversation/other'));
+  expect(Message.error).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBe(entry);
+  hook.unmount();
+  window.history.replaceState({}, '', '/#/settings/plugins?shopify_failed=' + entry + '&shopify_error=access_denied');
+  sessionStorage.setItem(shopifyPendingKey('settings/plugins'), entry);
+  renderHook(() => useConnectorReturnError('/settings/plugins'));
+  expect(Message.error).toHaveBeenCalledWith({ content: 'settings.plugins.shopify.errors.cancelled', duration: 10000 });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -74,4 +127,55 @@ it('keeps the return available when queue admission fails and ignores an unreque
   sessionStorage.setItem(shopifyPendingKey('current'), 'different');
   renderHook(() => useConnectorContinuation('current', true, accept));
   expect(accept).toHaveBeenCalledTimes(1);
+});
+
+it('answers the pending platform question after OAuth rather than leaving a continuation stuck behind it', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+  );
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'widget-data',
+      questions: [
+        { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  const accept = vi.fn(() => true);
+  renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() =>
+    expect(conversation.answerAsk.invoke).toHaveBeenCalledExactlyOnceWith({
+      conversation_id: 'current',
+      request_id: 'widget-data',
+      answers: [
+        { question: 'Which platform is your store on?', labels: ['Shopify (selected store: selected.myshopify.com)'] },
+      ],
+    })
+  );
+  expect(accept).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
+});
+
+it('keeps a failed question answer available for retry and never sends a second task', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+  );
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'widget-data',
+      questions: [
+        { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  vi.mocked(conversation.answerAsk.invoke).mockRejectedValue(new Error('Unavailable'));
+  const accept = vi.fn(() => true);
+  renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() => expect(Message.error).toHaveBeenCalled());
+  expect(accept).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBe(entry);
 });

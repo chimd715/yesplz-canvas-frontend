@@ -159,7 +159,7 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
         throw new Error('Invalid connection URL');
       const entry = target.searchParams.get('flow');
       if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(entry)) throw new Error('Invalid connection flow');
-      if (conversationId) sessionStorage.setItem(shopifyPendingKey(conversationId), entry);
+      sessionStorage.setItem(shopifyPendingKey(conversationId || returnPath.slice(3)), entry);
       window.location.assign(target.href);
     } catch {
       setError(true);

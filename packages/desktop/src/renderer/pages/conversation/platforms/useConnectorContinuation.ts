@@ -3,16 +3,64 @@ import { Message } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
+import { conversation } from '@/common/adapter/ipcBridge';
+import { isStorePlatformQuestion } from '../Messages/MessageQuestion';
 
 export const shopifyPendingKey = (conversationId: string) => `shopify_pending_${conversationId}`;
 
+/** Display a failed OAuth return without resuming the agent or clearing unrelated draft text. */
+export function useConnectorReturnError(route: string) {
+  const { t } = useTranslation();
+  useEffect(() => {
+    const [path, query] = window.location.hash.split('?');
+    const params = new URLSearchParams(query);
+    const entry = params.get('shopify_failed');
+    const key = path.replace(/^#\/(?:conversation\/)?/, '');
+    if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(entry) || sessionStorage.getItem(shopifyPendingKey(key)) !== entry)
+      return;
+    const code = params.get('shopify_error');
+    Message.error({
+      content: t(
+        code === 'another_app'
+          ? 'settings.plugins.shopify.errors.anotherApp'
+          : code === 'access_denied'
+            ? 'settings.plugins.shopify.errors.cancelled'
+            : 'settings.plugins.shopify.errors.authorizationFailed'
+      ),
+      duration: 10000,
+    });
+    sessionStorage.removeItem(shopifyPendingKey(key));
+    params.delete('shopify_failed');
+    params.delete('shopify_error');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      window.location.pathname + window.location.search + path + (params.size ? '?' + params : '')
+    );
+  }, [route, t]);
+}
+
 /** An explicit connector action uses the conversation's existing queue and history path. */
-export async function submitConnectorPrompt(input: string, conversationId: string) {
+export async function submitConnectorPrompt(input: string, conversationId: string, shop?: string) {
+  if (shop && (await answerShopifyQuestion(conversationId, shop))) return;
   let accepted = false;
   emitter.emit('sendbox.connector.submit', input, conversationId, (value) => {
     accepted ||= value;
   });
   if (!accepted) throw new Error('Conversation unavailable');
+}
+
+async function answerShopifyQuestion(conversationId: string, shop: string, signal?: AbortSignal) {
+  const pending = await conversation.confirmation.list.invoke({ conversation_id: conversationId });
+  if (signal?.aborted) throw new Error('Connection cancelled');
+  const question = pending.find((item) => item.questions?.length === 1 && isStorePlatformQuestion(item.questions[0]));
+  if (!question) return false;
+  await conversation.answerAsk.invoke({
+    conversation_id: conversationId,
+    request_id: question.call_id,
+    answers: [{ question: question.questions![0].question, labels: [`Shopify (selected store: ${shop})`] }],
+  });
+  return true;
 }
 
 export function useConnectorContinuation(conversationId: string, ready: boolean, accept: (input: string) => boolean) {
@@ -62,7 +110,10 @@ export function useConnectorContinuation(conversationId: string, ready: boolean,
           !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(status.shop)
         )
           throw new Error('Store unavailable');
-        if (!acceptRef.current(t('settings.plugins.shopify.continuePrompt', { shop: status.shop })))
+        if (
+          !(await answerShopifyQuestion(conversationId, status.shop, controller.signal)) &&
+          !acceptRef.current(t('settings.plugins.shopify.continuePrompt', { shop: status.shop }))
+        )
           throw new Error('Conversation unavailable');
         sessionStorage.removeItem(shopifyPendingKey(conversationId));
         params.delete('shopify_connected');

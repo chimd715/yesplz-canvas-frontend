@@ -70,7 +70,7 @@ const SiderConnectorsEntry: React.FC<{ collapsed: boolean }> = ({ collapsed }) =
                 const conversationId = pathname.match(/^\/conversation\/([A-Za-z0-9_-]{1,100})$/)?.[1];
                 if (!conversationId) return;
                 const prompt = t('settings.plugins.shopify.continuePrompt', { shop });
-                void submitConnectorPrompt(prompt, conversationId).catch(() => {
+                void submitConnectorPrompt(prompt, conversationId, shop).catch(() => {
                   emitter.emit('sendbox.fill', prompt);
                   Message.error(t('settings.plugins.shopify.error'));
                 });
