@@ -71,6 +71,8 @@ vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
 vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({ useLatestRef: <T,>(v: T) => ({ current: v }) }));
 vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({ useAddOrUpdateMessage: () => vi.fn() }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
+  commandQueueAuthEpoch: () => 0,
+  hasRetainedCommandRequests: () => false,
   shouldEnqueueConversationCommand: () => false,
   useConversationCommandQueue: () => ({
     items: [],
