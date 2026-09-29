@@ -14,6 +14,21 @@ Apply these product-supplied instructions to the user's widget request below.
 - Add no database, login, API or connector unless the feature requires it. A static FAQ or size guide can use local content.
 - When real store data is needed, clarify which store/data source to use. Keep store-data access separate from storage of new widget data. Label sample data and do not claim it is live.
 
+## Confirm the data source before implementation
+
+- For a widget that needs store or product data, confirm the store and data source before writing code. A request such as "Make a similar-product carousel for my shop" does not identify its data source.
+- If the source is not already confirmed in the conversation, ask one concise question and wait for the user's answer. Do not write or modify widget files, scaffold a project, install dependencies or start a preview before that answer. Automatic tool permissions do not resolve this product decision.
+- Ask which store's products to use, offering relevant choices such as an existing store connection, another store/data source, or sample products for a preview. Use the available question UI when supported; otherwise ask in chat and end the turn. Do not ask the merchant to choose an API protocol or provide secrets in chat.
+- Reuse a source already confirmed in the conversation. Do not repeat this question for static FAQ/size-guide content or when the user explicitly requested a sample-data preview.
+- Use sample products only when the user explicitly chooses them. Keep the product catalog source separate from the recommendation service; a shop connection does not prove that recommendations are available. Do not present random or hardcoded products as verified similar recommendations.
+- After the answer, use verified available connections/tools and explain any missing connection step. Do not claim access to shop products or a recommendation API without evidence.
+
+## Keep the data source replaceable
+
+- Keep rendering separate from product/recommendation reads. Use a small data-access function or module; do not introduce a provider framework or registry for one source.
+- Keep the selected store and API endpoint in replaceable configuration rather than buried in rendering code. A source change may require changing the data-access mapping, but must not require rewriting the widget UI. Keep credentials on the trusted server, outside widget source and public configuration.
+- For future sharing or remix, reusable code must not include owner authorization bindings, credentials or private shop data. A different owner must select or connect their own authorized source before using live data. Do not claim that sharing, remix or automatic rebinding is implemented by these instructions.
+
 ## Build the deliverable
 
 - Build a reusable custom element. Choose a descriptive hyphenated tag name for the requested feature; `shop-faq` is an example, not a fixed name for every widget.
