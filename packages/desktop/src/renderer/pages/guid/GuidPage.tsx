@@ -62,7 +62,7 @@ const GuidPage: React.FC = () => {
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [shopWidgetSelected, setShopWidgetSelected] = useState(false);
+  const [shopWidgetSelected, setShopWidgetSelected] = useState(true);
 
   // Open external link
   const openLink = useCallback(async (url: string) => {
@@ -574,7 +574,7 @@ const GuidPage: React.FC = () => {
     } else {
       guidInput.setInput('');
       guidInput.setFiles([]);
-      setShopWidgetSelected(false);
+      setShopWidgetSelected(true);
     }
     guidInput.setLoading(false);
     if (!preserveCurrentDraft && !(location.state as { workspace?: string } | null)?.workspace) {
