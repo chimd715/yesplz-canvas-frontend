@@ -600,6 +600,21 @@ export const localSendAccepted = (
   );
 };
 
+/** A receipt confirms persistence, not the current execution state. */
+export const localSendRecorded = (conversation_id: string): void => {
+  getRuntimeMetadata(conversation_id).pendingLocalSendSeq = null;
+  const previous = getConversationRuntimeViewSnapshot(conversation_id);
+  setConversationRuntimeSnapshot(
+    conversation_id,
+    withLogs({
+      ...previous,
+      localSubmitting: false,
+      hydrated: false,
+      canSendMessage: false,
+    })
+  );
+};
+
 export const localSendFailed = (
   conversation_id: string,
   failure: ConversationRuntimeSendFailure

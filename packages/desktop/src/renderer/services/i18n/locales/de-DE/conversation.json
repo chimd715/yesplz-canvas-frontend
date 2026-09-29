@@ -534,7 +534,14 @@
     "enterShortcut": "Enter",
     "actionMode": "Choose send action",
     "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
-    "addToQueueBusyHint": "Save to Draft box and send it later."
+    "addToQueueBusyHint": "Save to Draft box and send it later.",
+    "requestPending": "Request status is not confirmed. Check status or retry the same request.",
+    "admissionUnavailable": "Request storage is unavailable. Your message has not been sent.",
+    "unsupportedRequest": "This workspace currently accepts text messages only. Remove attachments, session references, or slash commands before sending.",
+    "retryRequest": "Retry the same request",
+    "checkRequest": "Check request status",
+    "useChatForRequest": "Send this instruction in the conversation so its request can be saved.",
+    "requestRecorded": "Accepted · Check runtime status"
   },
   "contextUsage": {
     "contextUsed": "Kontext verwendet",

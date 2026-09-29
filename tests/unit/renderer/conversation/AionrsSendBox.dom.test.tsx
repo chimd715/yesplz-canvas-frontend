@@ -1,10 +1,12 @@
 import React from 'react';
+import { mutate } from 'swr';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Message } from '@arco-design/web-react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
+import { requestContextSchema } from '@/renderer/pages/conversation/platforms/aionrs/durableAdmission';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 
 const {
@@ -16,6 +18,11 @@ const {
   markSendFailedMock,
   markSendStartedMock,
   markSendAcceptedMock,
+  markSendRecordedMock,
+  capabilityMock,
+  submitRequestMock,
+  queueOptionsRef,
+  sendNowMock,
   sendBoxPropsSpy,
   enqueueMock,
   clearFilesMock,
@@ -31,12 +38,23 @@ const {
   markSendFailedMock: vi.fn(),
   markSendStartedMock: vi.fn(),
   markSendAcceptedMock: vi.fn(),
+  markSendRecordedMock: vi.fn(),
+  capabilityMock: vi.fn().mockResolvedValue({ protocol: 0 }),
+  submitRequestMock: vi.fn(),
+  queueOptionsRef: { current: undefined as unknown },
+  sendNowMock: vi.fn(),
   sendBoxPropsSpy: vi.fn(),
-  enqueueMock: vi.fn(),
+  enqueueMock: vi.fn((value) => ({ id: 'queued', ...value, created_at: 1 })),
   clearFilesMock: vi.fn(),
   draftMutateMock: vi.fn(),
   draftContentRef: { current: '' },
   runtimeViewIsProcessingRef: { current: false },
+}));
+
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/durableAdmission', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  nativeAdmissionCapability: capabilityMock,
+  submitNativeRequest: submitRequestMock,
 }));
 
 vi.mock('@/common', () => ({
@@ -189,21 +207,28 @@ vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({
   useLatestRef: <T,>(value: T) => ({ current: value }),
 }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
-  useConversationCommandQueue: () => ({
-    items: [],
-    isPaused: false,
-    isInteractionLocked: false,
-    hasPendingCommands: false,
-    enqueue: enqueueMock,
-    remove: vi.fn(),
-    clear: vi.fn(),
-    reorder: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    lockInteraction: vi.fn(),
-    unlockInteraction: vi.fn(),
-    resetActiveExecution: vi.fn(),
-  }),
+  commandQueueAuthEpoch: () => 0,
+  hasRetainedCommandRequests: () => false,
+  useConversationCommandQueue: (options: unknown) => {
+    queueOptionsRef.current = options;
+    return {
+      items: [],
+      isPaused: false,
+      isInteractionLocked: false,
+      hasPendingCommands: false,
+      enqueue: enqueueMock,
+      sendNow: sendNowMock,
+      reconcile: vi.fn(),
+      remove: vi.fn(),
+      clear: vi.fn(),
+      reorder: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      lockInteraction: vi.fn(),
+      unlockInteraction: vi.fn(),
+      resetActiveExecution: vi.fn(),
+    };
+  },
 }));
 vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
   useConversationRuntimeView: () => ({
@@ -216,6 +241,7 @@ vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () =
     markSendStarted: markSendStartedMock,
     markSendAccepted: markSendAcceptedMock,
     markSendFailed: markSendFailedMock,
+    markSendRecorded: markSendRecordedMock,
   }),
 }));
 vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
@@ -309,6 +335,8 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue(null);
     draftContentRef.current = '';
     runtimeViewIsProcessingRef.current = false;
+    capabilityMock.mockResolvedValue({ protocol: 0 });
+    sessionStorage.clear();
   });
 
   it('does not warm up team session when draft content changes', async () => {
@@ -549,5 +577,98 @@ describe('AionrsSendBox', () => {
       expect(props.onAddToDraft).toBeDefined();
       expect(props.addToDraftDisabled).toBe(true);
     });
+  });
+  it('routes direct and Guid sends into the scoped queue, and treats receipt-only replies as unhydrated', async () => {
+    const context = {
+      logicalId: 'logical',
+      coreId: 'enrolled-ui',
+      runtimeGeneration: '11111111-1111-4111-8111-111111111111',
+      headGeneration: 2,
+    };
+    const capability = {
+      protocol: 1,
+      ...context,
+      ownerId: '22222222-2222-4222-8222-222222222222',
+      projectId: '33333333-3333-4333-8333-333333333333',
+    };
+    capabilityMock.mockResolvedValue(capability);
+    sessionStorage.setItem(
+      'aionrs_initial_message_enrolled-ui',
+      JSON.stringify({ input: 'Initial prompt', files: [] })
+    );
+    render(<AionrsSendBox conversation_id='enrolled-ui' modelSelection={modelSelection} />);
+    await waitFor(() => expect(sendNowMock).toHaveBeenCalledWith('queued'));
+    expect(enqueueMock).toHaveBeenCalledWith({ input: 'Initial prompt', files: [] });
+    expect(sessionStorage.getItem('aionrs_initial_message_enrolled-ui')).toBeNull();
+    await act(async () => screen.getByRole('button', { name: 'send' }).click());
+    expect(enqueueMock).toHaveBeenCalledWith({ input: 'Hello', files: [] });
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    const options = queueOptionsRef.current as {
+      storageScope: string;
+      retainUntilAccepted: boolean;
+      prepareItem: (item: object) => { request: { requestId: string; context: object } };
+      onExecute: (item: object, action: string) => Promise<unknown>;
+    };
+    expect(options).toMatchObject({
+      storageScope: `${capability.ownerId}/${capability.projectId}`,
+      retainUntilAccepted: true,
+    });
+    const item = options.prepareItem({ id: 'row', input: 'Hello', files: [], created_at: 1 });
+    expect(item.request.context).toEqual(requestContextSchema.parse(capability));
+    submitRequestMock.mockResolvedValue({
+      receipt: { client_request_id: item.request.requestId, msg_id: 'message', turn_id: 'turn' },
+    });
+    let result: unknown;
+    await act(async () => {
+      result = await options.onExecute(item, 'send');
+    });
+    expect(result).toBe('recorded');
+    expect(markSendRecordedMock).toHaveBeenCalled();
+    expect(markSendAcceptedMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves unsupported enrolled drafts and never falls back after capability failure', async () => {
+    capabilityMock.mockRejectedValue(new Error('Unavailable'));
+    const initialPrompt = JSON.stringify({ input: 'Keep initial prompt', files: [] });
+    sessionStorage.setItem('aionrs_initial_message_unavailable-ui', initialPrompt);
+    const view = render(<AionrsSendBox conversation_id='unavailable-ui' modelSelection={modelSelection} />);
+    await waitFor(() => expect(capabilityMock).toHaveBeenCalledWith('unavailable-ui'));
+    await act(async () => screen.getByRole('button', { name: 'send' }).click());
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('aionrs_initial_message_unavailable-ui')).toBe(initialPrompt);
+    view.unmount();
+    capabilityMock.mockResolvedValue({
+      protocol: 1,
+      logicalId: 'logical',
+      coreId: 'unsupported-ui',
+      runtimeGeneration: '11111111-1111-4111-8111-111111111111',
+      headGeneration: 2,
+      ownerId: '22222222-2222-4222-8222-222222222222',
+      projectId: '33333333-3333-4333-8333-333333333333',
+    });
+    draftContentRef.current = '/command';
+    render(<AionrsSendBox conversation_id='unsupported-ui' modelSelection={modelSelection} />);
+    await waitFor(() =>
+      expect((queueOptionsRef.current as { retainUntilAccepted: boolean }).retainUntilAccepted).toBe(true)
+    );
+    const props = sendBoxPropsSpy.mock.calls.at(-1)?.[0];
+    act(() => props.onAddToDraft());
+    expect(Message.warning).toHaveBeenCalledWith('conversation.commandQueue.unsupportedRequest');
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(draftMutateMock).not.toHaveBeenCalled();
+  });
+  it('keeps the Guid prompt when a cached legacy capability fails revalidation', async () => {
+    render(<AionrsSendBox conversation_id='stale-capability' modelSelection={modelSelection} />);
+    await waitFor(() => expect((queueOptionsRef.current as { enabled: boolean }).enabled).toBe(true));
+    const initial = JSON.stringify({ input: 'Unsent initial prompt', files: [] });
+    sessionStorage.setItem('aionrs_initial_message_stale-capability', initial);
+    capabilityMock.mockRejectedValue(new Error('Capability unavailable'));
+    await act(async () => {
+      await mutate(['native-admission', 'stale-capability', 0]).catch(() => undefined);
+    });
+    expect(sessionStorage.getItem('aionrs_initial_message_stale-capability')).toBe(initial);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
   });
 });

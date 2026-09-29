@@ -10,8 +10,9 @@ import { useAddEventListener } from '@/renderer/utils/emitter';
 import { Message } from '@arco-design/web-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig, type Cache } from 'swr';
 import { classifyConversationBusyError } from './conversationBusyError';
+import { pendingRequestSchema, type PendingNativeRequest } from './aionrs/durableAdmission';
 
 export type ConversationCommandQueueItem = {
   id: string;
@@ -23,6 +24,9 @@ export type ConversationCommandQueueItem = {
    *  bytes to the persisted state. */
   sessions?: SessionRef[];
   created_at: number;
+  request?: PendingNativeRequest;
+  pending?: boolean;
+  recorded?: boolean;
 };
 
 export type ConversationCommandQueueMode = 'auto' | 'manual';
@@ -106,6 +110,24 @@ const createDefaultQueueState = (): ConversationCommandQueueState => ({
 });
 
 const queueStore = new Map<string, ConversationCommandQueueState>();
+let queueEpoch = 0;
+const requestCaches = new Set<Cache>();
+export const commandQueueAuthEpoch = (): number => queueEpoch;
+
+export const clearScopedCommandQueues = (): void => {
+  queueEpoch++;
+  for (const cache of requestCaches)
+    for (const key of cache.keys()) {
+      if (key.includes('/conversation-command-queue/scoped/') || key.includes('native-admission')) cache.delete(key);
+    }
+  for (const key of queueStore.keys()) if (key.startsWith('scoped/')) queueStore.delete(key);
+  try {
+    for (const key of Object.keys(sessionStorage))
+      if (key.startsWith('conversation-command-queue/scoped/')) sessionStorage.removeItem(key);
+  } catch {
+    console.warn('[conversation-command-queue] Browser storage unavailable during logout');
+  }
+};
 
 const getStorageKey = (conversation_id: string): string => `conversation-command-queue/${conversation_id}`;
 const measureQueueStateBytes = (state: ConversationCommandQueueState): number =>
@@ -152,6 +174,16 @@ const normalizeQueueItem = (item: unknown): ConversationCommandQueueItem | null 
     // `undefined` rather than rejecting the whole item.
     sessions: normalizeSessionRefs(candidate.sessions),
     created_at: candidate.created_at,
+    ...(pendingRequestSchema.safeParse(candidate.request).success
+      ? {
+          request: pendingRequestSchema.parse(candidate.request),
+          pending: candidate.pending === true,
+          recorded: candidate.recorded === true,
+        }
+      : // Preserve uncertain text, but never downgrade invalid metadata to a legacy send.
+        candidate.request || candidate.pending
+        ? { pending: true }
+        : {}),
   };
 
   if (
@@ -289,6 +321,9 @@ const readPersistedQueueState = (conversation_id: string): ConversationCommandQu
   }
 };
 
+export const hasRetainedCommandRequests = (scope: string, conversationId: string): boolean =>
+  readPersistedQueueState(`scoped/${scope}/${conversationId}`).items.some((item) => !!item.request || item.pending);
+
 const removePersistedQueueState = (conversation_id: string): void => {
   queueStore.delete(conversation_id);
   if (typeof window !== 'undefined') {
@@ -300,7 +335,7 @@ const removePersistedQueueState = (conversation_id: string): void => {
   }
 };
 
-const persistQueueState = (conversation_id: string, state: ConversationCommandQueueState): void => {
+const persistQueueState = (conversation_id: string, state: ConversationCommandQueueState, required = false): void => {
   const normalized = normalizeQueueState(state);
 
   if (normalized.items.length === 0 && !normalized.isPaused && normalized.mode === 'manual') {
@@ -308,14 +343,15 @@ const persistQueueState = (conversation_id: string, state: ConversationCommandQu
     return;
   }
 
-  queueStore.set(conversation_id, normalized);
   if (typeof window !== 'undefined') {
     try {
       window.sessionStorage.setItem(getStorageKey(conversation_id), JSON.stringify(normalized));
     } catch (error) {
+      if (required) throw error;
       console.warn('[conversation-command-queue] Failed to persist queue state:', error);
     }
-  }
+  } else if (required) throw new Error('Request storage unavailable');
+  queueStore.set(conversation_id, normalized);
 };
 
 export const removeQueuedCommand = (
@@ -414,7 +450,14 @@ type UseConversationCommandQueueOptions = {
   isBusy: boolean;
   isHydrated?: boolean;
   runtimeGate?: ConversationCommandQueueRuntimeGate;
-  onExecute: (item: ConversationCommandQueueItem) => Promise<void>;
+  onExecute: (
+    item: ConversationCommandQueueItem,
+    action?: 'send' | 'lookup' | 'reconcile'
+  ) => Promise<void | false | 'recorded'>;
+  storageScope?: string;
+  retainUntilAccepted?: boolean;
+  prepareItem?: (item: ConversationCommandQueueItem) => ConversationCommandQueueItem;
+  preserveWhenDisabled?: boolean;
 };
 
 /// `sessions` is part of the enqueue input, not just of the stored item: a
@@ -599,11 +642,21 @@ export const useConversationCommandQueue = ({
   isHydrated = true,
   runtimeGate,
   onExecute,
+  storageScope,
+  retainUntilAccepted = false,
+  prepareItem,
+  preserveWhenDisabled = false,
 }: UseConversationCommandQueueOptions) => {
   const { t } = useTranslation();
+  const queueKey = storageScope ? `scoped/${storageScope}/${conversation_id}` : conversation_id;
+  const epoch = queueEpoch;
+  const { cache } = useSWRConfig();
+  if (storageScope) requestCaches.add(cache);
+  const retainedExecuting = useRef(false);
+  const restoredQueue = useRef<string | null>(null);
   const executionGate = getCommandQueueExecutionGate({ isBusy, isHydrated, runtimeGate });
   const { data = createDefaultQueueState(), mutate } = useSWR(
-    [`/conversation-command-queue/${conversation_id}`, conversation_id, enabled],
+    [`/conversation-command-queue/${queueKey}`, queueKey, enabled, storageScope ? epoch : 0],
     ([, id, is_enabled]) => (is_enabled ? readPersistedQueueState(id) : createDefaultQueueState())
   );
 
@@ -688,22 +741,24 @@ export const useConversationCommandQueue = ({
   }, [isInteractionLocked]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || retainUntilAccepted) {
       return;
     }
 
     registerBackgroundCommandQueueRunner({
       conversation_id,
-      onExecute: (item) => onExecuteRef.current(item),
+      onExecute: async (item) => {
+        await onExecuteRef.current(item);
+      },
     });
 
     return () => {
       detachBackgroundCommandQueueRunner(conversation_id);
     };
-  }, [conversation_id, enabled]);
+  }, [conversation_id, enabled, retainUntilAccepted]);
 
   useEffect(() => {
-    if (enabled) {
+    if (enabled || preserveWhenDisabled) {
       return;
     }
 
@@ -715,9 +770,9 @@ export const useConversationCommandQueue = ({
     interactionLockedRef.current = false;
     stateRef.current = createDefaultQueueState();
     setIsInteractionLocked(false);
-    removePersistedQueueState(conversation_id);
+    removePersistedQueueState(queueKey);
     void mutate(createDefaultQueueState(), { revalidate: false });
-  }, [conversation_id, enabled, mutate]);
+  }, [conversation_id, queueKey, enabled, mutate, preserveWhenDisabled]);
 
   const updateState = useCallback(
     (
@@ -727,22 +782,23 @@ export const useConversationCommandQueue = ({
         const nextState = createDefaultQueueState();
         stateRef.current = nextState;
         pausedRef.current = false;
-        removePersistedQueueState(conversation_id);
+        removePersistedQueueState(queueKey);
         return Promise.resolve(nextState);
       }
 
       return mutate(
         (current) => {
+          if (retainUntilAccepted && epoch !== queueEpoch) throw new Error('Request owner changed');
           const nextState = normalizeQueueState(updater(current ?? createDefaultQueueState()));
+          persistQueueState(queueKey, nextState, retainUntilAccepted);
           stateRef.current = nextState;
           pausedRef.current = nextState.isPaused;
-          persistQueueState(conversation_id, nextState);
           return nextState;
         },
         { revalidate: false }
       );
     },
-    [conversation_id, enabled, mutate]
+    [conversation_id, queueKey, enabled, mutate, retainUntilAccepted, epoch]
   );
 
   const clear = useCallback(() => {
@@ -752,7 +808,7 @@ export const useConversationCommandQueue = ({
     observedBusyBlockedGateRef.current = false;
     pausedRef.current = false;
     logCommandQueue(conversation_id, 'cleared');
-    void updateState(() => createDefaultQueueState());
+    void updateState((state) => ({ ...createDefaultQueueState(), items: state.items.filter((item) => item.pending) }));
   }, [conversation_id, updateState]);
 
   useAddEventListener(
@@ -762,7 +818,7 @@ export const useConversationCommandQueue = ({
         return;
       }
       clear();
-      removePersistedQueueState(conversation_id);
+      if (!stateRef.current.items.some((item) => item.pending)) removePersistedQueueState(queueKey);
     },
     [clear, conversation_id]
   );
@@ -774,7 +830,10 @@ export const useConversationCommandQueue = ({
       }
 
       const currentState = normalizeQueueState(stateRef.current);
-      const item = createQueuedCommandItem({ input, files, sessions });
+      if (retainUntilAccepted && epoch !== queueEpoch) throw new Error('Request owner changed');
+      const draft = createQueuedCommandItem({ input, files, sessions });
+      const item = prepareItem ? prepareItem(draft) : draft;
+      if (retainUntilAccepted && !item.request) throw new Error('Native admission unavailable');
       const validation = validateQueuedCommandItem(item, currentState);
 
       if (isQueueValidationFailure(validation)) {
@@ -792,6 +851,7 @@ export const useConversationCommandQueue = ({
         ...currentState,
         items: [...currentState.items, item],
       };
+      if (retainUntilAccepted) persistQueueState(queueKey, nextState, true);
       stateRef.current = nextState;
       logCommandQueue(conversation_id, 'enqueued', {
         item: summarizeQueuedCommand(item),
@@ -800,7 +860,7 @@ export const useConversationCommandQueue = ({
       void updateState(() => nextState);
       return item;
     },
-    [conversation_id, enabled, t, updateState]
+    [conversation_id, queueKey, enabled, t, updateState, prepareItem, retainUntilAccepted, epoch]
   );
 
   const update = useCallback(
@@ -811,11 +871,13 @@ export const useConversationCommandQueue = ({
 
       const currentState = normalizeQueueState(stateRef.current);
       const currentItem = currentState.items.find((item) => item.id === commandId);
-      if (!currentItem) {
+      if (!currentItem || currentItem.pending) {
         return false;
       }
 
-      const nextItems = updateQueuedCommand(currentState.items, commandId, { input });
+      const nextItems = updateQueuedCommand(currentState.items, commandId, { input }).map((item) =>
+        item.id === commandId && prepareItem ? prepareItem({ ...item, request: undefined }) : item
+      );
       const nextState: ConversationCommandQueueState = {
         ...currentState,
         isPaused: false,
@@ -841,7 +903,7 @@ export const useConversationCommandQueue = ({
       void updateState(() => nextState);
       return true;
     },
-    [conversation_id, enabled, t, updateState]
+    [conversation_id, enabled, t, updateState, prepareItem]
   );
 
   const remove = useCallback(
@@ -854,7 +916,7 @@ export const useConversationCommandQueue = ({
         commandId,
       });
       void updateState((state) => {
-        const nextItems = removeQueuedCommand(state.items, commandId);
+        const nextItems = state.items.filter((item) => item.id !== commandId || item.pending);
         return {
           ...state,
           items: nextItems,
@@ -885,8 +947,54 @@ export const useConversationCommandQueue = ({
     [conversation_id, enabled, updateState]
   );
 
-  const sendNow = useCallback(
+  const executeRetained = useCallback(
+    async (item: ConversationCommandQueueItem, action: 'send' | 'lookup' | 'reconcile') => {
+      if (retainedExecuting.current || stateRef.current.items.some((entry) => entry.pending && entry.id !== item.id))
+        return;
+      retainedExecuting.current = true;
+      const target = { ...item, pending: true };
+      try {
+        await updateState((state) => ({ ...state, items: restoreQueuedCommand(state.items, target), isPaused: true }));
+        if (epoch !== queueEpoch) throw new Error('Request owner changed');
+        if (!item.request) throw new Error('Stored request metadata is invalid');
+        const result = await onExecuteRef.current(target, item.recorded && action === 'send' ? 'reconcile' : action);
+        if (result === 'recorded')
+          await updateState((state) => ({
+            ...state,
+            items: restoreQueuedCommand(state.items, { ...target, recorded: true }),
+          }));
+        else if (result !== false)
+          await updateState((state) => ({
+            ...state,
+            items: removeQueuedCommand(state.items, target.id),
+            isPaused: false,
+          }));
+      } catch {
+        // The stored request is still unresolved. Never manufacture a new retry ID.
+      } finally {
+        retainedExecuting.current = false;
+      }
+    },
+    [updateState, epoch]
+  );
+
+  useEffect(() => {
+    if (!enabled || !retainUntilAccepted || restoredQueue.current === queueKey) return;
+    restoredQueue.current = queueKey;
+    const pending = readPersistedQueueState(queueKey).items.find((item) => item.pending);
+    if (pending) void executeRetained(pending, 'lookup');
+  }, [enabled, retainUntilAccepted, queueKey, executeRetained]);
+
+  const reconcile = useCallback(
     (commandId: string) => {
+      const item = stateRef.current.items.find((entry) => entry.id === commandId);
+      if (item?.pending) void executeRetained(item, 'reconcile');
+    },
+    [executeRetained]
+  );
+
+  const sendNow = useCallback(
+    async (commandId: string) => {
       if (!enabled) {
         return;
       }
@@ -894,6 +1002,11 @@ export const useConversationCommandQueue = ({
       const currentState = normalizeQueueState(stateRef.current);
       const target = currentState.items.find((item) => item.id === commandId);
       if (!target) {
+        return;
+      }
+
+      if (retainUntilAccepted) {
+        await executeRetained(target, 'send');
         return;
       }
 
@@ -954,7 +1067,7 @@ export const useConversationCommandQueue = ({
         );
       });
     },
-    [conversation_id, enabled, t, updateState]
+    [conversation_id, enabled, t, updateState, retainUntilAccepted, executeRetained]
   );
 
   const reorder = useCallback(
@@ -1094,6 +1207,10 @@ export const useConversationCommandQueue = ({
     }
 
     const [nextCommand, ...remainingCommands] = data.items;
+    if (retainUntilAccepted) {
+      if (!data.items.some((item) => item.pending)) void executeRetained(nextCommand, 'send');
+      return;
+    }
     waitingForTurnStartRef.current = true;
     observedBusyBlockedGateRef.current = false;
     logCommandQueue(conversation_id, 'dequeued', {
@@ -1161,6 +1278,8 @@ export const useConversationCommandQueue = ({
     isInteractionLocked,
     t,
     updateState,
+    retainUntilAccepted,
+    executeRetained,
   ]);
 
   return {
@@ -1174,6 +1293,7 @@ export const useConversationCommandQueue = ({
     remove,
     prioritize,
     sendNow,
+    reconcile,
     clear,
     reorder,
     pause,

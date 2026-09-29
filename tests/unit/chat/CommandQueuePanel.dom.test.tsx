@@ -167,4 +167,14 @@ describe('CommandQueuePanel', () => {
     config.onOk?.();
     expect(onClear).toHaveBeenCalledTimes(1);
   });
+  it('keeps status reconciliation reachable without offering resend for accepted input', () => {
+    const recorded = { ...item, pending: true, recorded: true };
+    const props = renderPanel({ items: [recorded] });
+    expect(screen.getByText('conversation.commandQueue.requestRecorded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'conversation.commandQueue.retryRequest' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.commandQueue.checkRequest' }));
+    expect(props.onEdit).toHaveBeenCalledExactlyOnceWith(recorded);
+    expect(props.onSendNow).not.toHaveBeenCalled();
+  });
 });

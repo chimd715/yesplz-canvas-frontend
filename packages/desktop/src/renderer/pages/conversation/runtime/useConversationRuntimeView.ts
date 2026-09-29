@@ -19,6 +19,7 @@ import {
   hydrateStarted,
   hydrateSucceeded,
   localSendAccepted,
+  localSendRecorded,
   localSendFailed,
   localSendStarted,
   localRestartFailed,
@@ -44,6 +45,7 @@ type UseConversationRuntimeViewReturn = {
   supportsMidturnDelivery: boolean;
   markSendStarted: () => void;
   markSendAccepted: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
+  markSendRecorded: () => void;
   markSendFailed: (failure: ConversationRuntimeSendFailure) => void;
   markStopRequested: (turn_id: string) => void;
   markStopAcknowledged: (turn_id: string, runtime: TConversationRuntimeSummary) => void;
@@ -161,6 +163,8 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     [conversation_id]
   );
 
+  const markSendRecorded = useCallback(() => localSendRecorded(conversation_id), [conversation_id]);
+
   const markSendFailed = useCallback(
     (failure: ConversationRuntimeSendFailure) => {
       flushRuntimeViewLogs(
@@ -222,6 +226,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     supportsMidturnDelivery: view.supportsMidturnDelivery,
     markSendStarted,
     markSendAccepted,
+    markSendRecorded,
     markSendFailed,
     markStopRequested,
     markStopAcknowledged,

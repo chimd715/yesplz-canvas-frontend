@@ -29,6 +29,8 @@ import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import {
   useConversationCommandQueue,
+  hasRetainedCommandRequests,
+  commandQueueAuthEpoch,
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
@@ -54,6 +56,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
+import useSWR from 'swr';
+import { nativeAdmissionCapability, submitNativeRequest, requestContextSchema } from './durableAdmission';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 
 const configErrorMessageKey = (error: unknown) => {
@@ -156,7 +160,22 @@ const AionrsSendBox: React.FC<{
     }
   );
   const runtimeView = useConversationRuntimeView(conversation_id);
-  const { markSendStarted, markSendAccepted, markSendFailed } = runtimeView;
+  const { markSendStarted, markSendAccepted, markSendFailed, markSendRecorded } = runtimeView;
+  const { data: admission, error: admissionError } = useSWR(
+    teamPermission ? null : ['native-admission', conversation_id, commandQueueAuthEpoch()],
+    () => nativeAdmissionCapability(conversation_id),
+    { shouldRetryOnError: false, revalidateOnFocus: true }
+  );
+  const requestScope = admission && 'ownerId' in admission ? `${admission.ownerId}/${admission.projectId}` : undefined;
+  const durable =
+    admission?.protocol === 1 || Boolean(requestScope && hasRetainedCommandRequests(requestScope, conversation_id));
+  const prepareQueuedItem = useCallback(
+    (item: ConversationCommandQueueItem) => {
+      if (admission?.protocol !== 1 || item.request) return item;
+      return { ...item, request: { requestId: crypto.randomUUID(), context: requestContextSchema.parse(admission) } };
+    },
+    [admission]
+  );
 
   const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
 
@@ -252,7 +271,42 @@ const AionrsSendBox: React.FC<{
   });
 
   const executeCommand = useCallback(
-    async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
+    async (
+      {
+        input,
+        files,
+        sessions,
+        request,
+      }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions' | 'request'>,
+      action: 'send' | 'lookup' | 'reconcile' = 'send'
+    ): Promise<void | false | 'recorded'> => {
+      const ownerEpoch = commandQueueAuthEpoch();
+      if (request) {
+        if (
+          (action !== 'lookup' && (admission?.protocol !== 1 || admissionError)) ||
+          request.context.coreId !== conversation_id
+        )
+          throw new Error('Native admission unavailable');
+        if (files.length || sessions?.length || input.trimStart().startsWith('/')) {
+          Message.warning(t('conversation.commandQueue.unsupportedRequest'));
+          return false;
+        }
+        try {
+          const accepted = await submitNativeRequest(request, input, action);
+          if (ownerEpoch !== commandQueueAuthEpoch() || !accepted?.receipt) return false;
+          if (accepted.runtime?.turn_id === accepted.receipt.turn_id) setActiveMsgId(accepted.receipt.msg_id);
+          if (accepted.runtime) markSendAccepted(accepted.receipt.turn_id, accepted.runtime, accepted.receipt.msg_id);
+          else markSendRecorded();
+          emitter.emit('chat.history.refresh');
+          return accepted.runtime ? undefined : 'recorded';
+        } catch {
+          Message.warning(t('conversation.commandQueue.requestPending'));
+          return false;
+        }
+      }
+      if (durable || admissionError || (!teamPermission && !admission)) {
+        throw new Error('Native admission unavailable');
+      }
       if (teamPermission) await teamPermission.warmupSession();
       if (!current_model?.use_model) {
         Message.warning(t('conversation.chat.noModelSelected'));
@@ -311,6 +365,10 @@ const AionrsSendBox: React.FC<{
       }
     },
     [
+      admission,
+      admissionError,
+      durable,
+      markSendRecorded,
       checkAndUpdateTitle,
       conversation_id,
       current_model?.use_model,
@@ -333,6 +391,7 @@ const AionrsSendBox: React.FC<{
     remove,
     prioritize,
     sendNow,
+    reconcile,
     clear,
     reorder,
     toggleMode,
@@ -341,7 +400,11 @@ const AionrsSendBox: React.FC<{
     resetActiveExecution,
   } = useConversationCommandQueue({
     conversation_id: conversation_id,
-    enabled: true,
+    enabled: Boolean(teamPermission || admission),
+    preserveWhenDisabled: true,
+    storageScope: durable ? requestScope : undefined,
+    retainUntilAccepted: durable,
+    prepareItem: prepareQueuedItem,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
     onExecute: executeCommand,
@@ -349,7 +412,7 @@ const AionrsSendBox: React.FC<{
 
   // Handle initial message from Guid page — wait until model is ready
   useEffect(() => {
-    if (!conversation_id || !current_model?.use_model) return;
+    if (!conversation_id || !current_model?.use_model || (!teamPermission && (!admission || admissionError))) return;
 
     const storageKey = `aionrs_initial_message_${conversation_id}`;
     const processedKey = `aionrs_initial_processed_${conversation_id}`;
@@ -360,7 +423,6 @@ const AionrsSendBox: React.FC<{
       if (!storedMessage) return;
 
       sessionStorage.setItem(processedKey, '1');
-      sessionStorage.removeItem(storageKey);
 
       try {
         const { input, files: initialFiles } = JSON.parse(storedMessage);
@@ -370,7 +432,27 @@ const AionrsSendBox: React.FC<{
         const initialRefs: ChatFileRef[] = Array.isArray(initialFiles)
           ? initialFiles.map((f: unknown) => (typeof f === 'string' ? uploadFileRef(f) : f)).filter(isChatFileRef)
           : [];
-        await executeCommand({ input, files: initialRefs });
+        if (durable) {
+          if (initialRefs.length || String(input).trimStart().startsWith('/')) {
+            setContent(String(input));
+            Message.warning(t('conversation.commandQueue.unsupportedRequest'));
+            sessionStorage.removeItem(processedKey);
+            return;
+          }
+          const item = enqueue({ input, files: [] });
+          if (!item) {
+            sessionStorage.removeItem(processedKey);
+            return;
+          }
+          sessionStorage.removeItem(storageKey);
+          await sendNow(item.id);
+        } else {
+          if ((await executeCommand({ input, files: initialRefs })) === false) {
+            sessionStorage.removeItem(processedKey);
+            return;
+          }
+          sessionStorage.removeItem(storageKey);
+        }
       } catch (error) {
         console.error('[AionrsSendBox] Failed to send initial message:', error);
         sessionStorage.removeItem(processedKey);
@@ -378,7 +460,19 @@ const AionrsSendBox: React.FC<{
     };
 
     void processInitialMessage();
-  }, [conversation_id, current_model?.use_model, executeCommand]);
+  }, [
+    conversation_id,
+    current_model?.use_model,
+    executeCommand,
+    admission,
+    admissionError,
+    durable,
+    enqueue,
+    sendNow,
+    setContent,
+    t,
+    teamPermission,
+  ]);
 
   // `@@` session references the user picked. Declared before the handlers that
   // read it — every send path has to both forward and release it.
@@ -390,6 +484,10 @@ const AionrsSendBox: React.FC<{
   // enqueuing. The only way to queue a message while busy is the explicit
   // "add to queue" entry (handleAddToQueue below).
   const onSendHandler = async (message: string): Promise<void | false> => {
+    if (!teamPermission && (!admission || admissionError || (durable && admission.protocol !== 1))) {
+      Message.warning(t('conversation.commandQueue.admissionUnavailable'));
+      return false;
+    }
     if (isBusy) {
       Message.warning(
         t('conversation.commandQueue.midturnBlocked', {
@@ -402,6 +500,21 @@ const AionrsSendBox: React.FC<{
 
     const filesToSend = collectChatFileRefs(uploadFile, atPath);
     const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
+    if (durable) {
+      if (filesToSend.length || sessions?.length || message.trimStart().startsWith('/')) {
+        Message.warning(t('conversation.commandQueue.unsupportedRequest'));
+        return false;
+      }
+      try {
+        const item = enqueue({ input: message, files: [] });
+        if (!item) return false;
+        await sendNow(item.id);
+      } catch {
+        Message.warning(t('conversation.commandQueue.admissionUnavailable'));
+        return false;
+      }
+      return;
+    }
     clearFiles();
     setSelectedSessions([]);
     emitter.emit('aionrs.selected.file.clear');
@@ -432,25 +545,58 @@ const AionrsSendBox: React.FC<{
   // the same way a send would.
   const canQueueCurrentDraft = content.trim().length > 0;
   const handleAddToQueue = useCallback(() => {
+    if (!teamPermission && (!admission || admissionError || (durable && admission.protocol !== 1))) {
+      Message.warning(t('conversation.commandQueue.admissionUnavailable'));
+      return;
+    }
     const filesToSend = collectChatFileRefs(uploadFile, atPath);
     // `@@` references must ride along, and must be released from the send box
     // the same way the draft text is — otherwise they leak into whatever the
     // user sends next.
-    enqueue({
-      input: content,
-      files: filesToSend,
-      sessions: selectedSessions.length > 0 ? selectedSessions : undefined,
-    });
+    if (durable && (filesToSend.length || selectedSessions.length || content.trimStart().startsWith('/'))) {
+      Message.warning(t('conversation.commandQueue.unsupportedRequest'));
+      return;
+    }
+    let queued: ConversationCommandQueueItem | null;
+    try {
+      queued = enqueue({
+        input: content,
+        files: filesToSend,
+        sessions: selectedSessions.length > 0 ? selectedSessions : undefined,
+      });
+    } catch {
+      Message.warning(t('conversation.commandQueue.admissionUnavailable'));
+      return;
+    }
+    if (!queued) return;
     setContent('');
     clearFiles();
     setSelectedSessions([]);
     emitter.emit('aionrs.selected.file.clear');
-  }, [atPath, clearFiles, content, enqueue, selectedSessions, setContent, uploadFile]);
+  }, [
+    admission,
+    admissionError,
+    atPath,
+    clearFiles,
+    content,
+    durable,
+    enqueue,
+    selectedSessions,
+    setContent,
+    t,
+    teamPermission,
+    uploadFile,
+  ]);
 
   const handleEditQueuedCommand = useCallback(
     (item: ConversationCommandQueueItem) => {
+      if (item.pending) {
+        reconcile(item.id);
+        return;
+      }
       remove(item.id);
       setContent(item.input);
+      setSelectedSessions(item.sessions ?? []);
       // Restore the two selection lanes: upload refs → uploadFile paths,
       // project refs → atPath items carrying their chatRef (so a re-send
       // collects the same project ref).
@@ -459,7 +605,7 @@ const AionrsSendBox: React.FC<{
       setAtPath(restoredAtPath);
       emitter.emit('aionrs.selected.file.clear');
     },
-    [remove, setAtPath, setContent, setUploadFile]
+    [remove, reconcile, setAtPath, setContent, setUploadFile]
   );
 
   const appendSelectedFiles = useCallback(
@@ -694,6 +840,10 @@ const AionrsSendBox: React.FC<{
     // Best-effort cancel: swallow rejections so they don't bubble up as
     // unhandled rejections. UI state is still reset via finally.
     const turnId = runtimeView.activeTurnId;
+    if (!turnId && queuedCommands.some((item) => item.pending)) {
+      Message.warning(t('conversation.commandQueue.requestPending'));
+      return;
+    }
     if (!turnId) {
       resetState();
       resetActiveExecution('stop');
@@ -714,6 +864,10 @@ const AionrsSendBox: React.FC<{
   const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
+      if (durable) {
+        await sendNow(item.id);
+        return;
+      }
       // Stop the current reply (best-effort), then promote the chosen command
       // to the front of the queue in auto mode.  The drain effect will fire it
       // once the execution gate shows canExecute — avoiding the 409 race that
@@ -722,7 +876,7 @@ const AionrsSendBox: React.FC<{
       await effectiveHandleStop();
       prioritize(item.id);
     },
-    [effectiveHandleStop, prioritize]
+    [effectiveHandleStop, prioritize, durable, sendNow]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 

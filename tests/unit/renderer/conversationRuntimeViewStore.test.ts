@@ -5,6 +5,7 @@ import {
   hydrateSucceeded,
   localSendAccepted,
   localSendStarted,
+  localSendRecorded,
   localStopAcknowledged,
   localStopRequested,
   resetConversationRuntimeViewStoreForTest,
@@ -172,4 +173,19 @@ describe('conversationRuntimeViewStore turn id contract', () => {
     expect(view.isProcessing).toBe(true);
     expect(view.localStopping).toBe(false);
   });
+});
+
+it('a persisted receipt alone cannot declare the runtime idle or sendable', () => {
+  resetConversationRuntimeViewStoreForTest();
+  localSendStarted('recorded');
+  localSendRecorded('recorded');
+  expect(getConversationRuntimeViewSnapshot('recorded')).toMatchObject({
+    hydrated: false,
+    canSendMessage: false,
+    localSubmitting: false,
+    state: 'starting',
+    activeTurnId: null,
+  });
+  hydrateSucceeded('recorded', idleRuntime());
+  expect(getConversationRuntimeViewSnapshot('recorded').canSendMessage).toBe(true);
 });

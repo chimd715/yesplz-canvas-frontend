@@ -20,6 +20,7 @@ import { uuid } from '@/common/utils';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { IDirOrFile } from '@/common/adapter/ipcBridge';
 import { loadLatestConversationMessages } from '@/renderer/utils/chat/messagePagination';
+import { nativeAdmissionCapability } from '../platforms/aionrs/durableAdmission';
 
 interface SkillRuleGeneratorProps {
   conversation_id: string;
@@ -79,6 +80,10 @@ const LoadRuleModal: React.FC<{
   const handleSelectFile = async (file: IDirOrFile) => {
     setLoadingFile(true);
     try {
+      if ((await nativeAdmissionCapability(conversation_id)).protocol === 1) {
+        Message.warning(t('conversation.commandQueue.useChatForRequest'));
+        return;
+      }
       const content = await ipcBridge.fs.readFile.invoke({ path: file.fullPath, workspace });
       if (content == null) {
         throw new Error('Rule file not found');
@@ -183,6 +188,10 @@ const SkillRuleGenerator: React.FC<SkillRuleGeneratorProps> = ({ conversation_id
 
     setLoading(true);
     try {
+      if ((await nativeAdmissionCapability(conversation_id)).protocol === 1) {
+        Message.warning(t('conversation.commandQueue.useChatForRequest'));
+        return;
+      }
       // 1. Fetch conversation history
       const page_size = 50;
       const MAX_CHARS = 30000;

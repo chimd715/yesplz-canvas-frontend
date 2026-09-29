@@ -240,6 +240,13 @@ const QueueItemCard: React.FC<QueueItemCardProps> = ({
           <Typography.Ellipsis rows={1} showTooltip className='min-w-0 flex-1 text-11px leading-16px text-t-secondary'>
             {preview}
           </Typography.Ellipsis>
+          {item.pending ? (
+            <span className='text-9px text-t-secondary'>
+              {t(
+                item.recorded ? 'conversation.commandQueue.requestRecorded' : 'conversation.commandQueue.checkRequest'
+              )}
+            </span>
+          ) : null}
           {fileCountLabel ? (
             <span
               className='inline-flex items-center rd-999px px-5px py-1px text-9px leading-none shrink-0'
@@ -254,19 +261,25 @@ const QueueItemCard: React.FC<QueueItemCardProps> = ({
         </div>
       </div>
       <div className='flex items-center gap-0.5 shrink-0 h-24px overflow-hidden'>
+        {!item.recorded &&
+          renderQueueActionIconButton({
+            ariaLabel: item.pending
+              ? t('conversation.commandQueue.retryRequest')
+              : t('conversation.commandQueue.sendNow', { defaultValue: 'Send now' }),
+            onClick: () => onSendNow(item),
+            icon: <SendOne theme='outline' size='14' strokeWidth={2.5} />,
+            accent: true,
+          })}
         {renderQueueActionIconButton({
-          ariaLabel: t('conversation.commandQueue.sendNow', { defaultValue: 'Send now' }),
-          onClick: () => onSendNow(item),
-          icon: <SendOne theme='outline' size='14' strokeWidth={2.5} />,
-          accent: true,
-        })}
-        {renderQueueActionIconButton({
-          ariaLabel: t('conversation.commandQueue.edit', { defaultValue: 'Edit' }),
+          ariaLabel: item.pending
+            ? t('conversation.commandQueue.checkRequest')
+            : t('conversation.commandQueue.edit', { defaultValue: 'Edit' }),
           onClick: () => onEdit?.(item),
           icon: <Edit theme='outline' size='14' strokeWidth={2.5} />,
         })}
         {renderQueueActionIconButton({
           ariaLabel: t('conversation.commandQueue.remove', { defaultValue: 'Remove' }),
+          disabled: item.pending,
           onClick: () => onRemove(item.id),
           icon: <Delete theme='outline' size='14' strokeWidth={2.5} />,
           danger: true,
@@ -575,7 +588,7 @@ const CommandQueuePanel: React.FC<CommandQueuePanelProps> = ({
                   <SortableQueueItem
                     key={item.id}
                     item={item}
-                    dragDisabled={false}
+                    dragDisabled={item.pending === true}
                     dragViaCard={isMobile}
                     dragHandleLabel={dragHandleLabel}
                     preview={preview}
