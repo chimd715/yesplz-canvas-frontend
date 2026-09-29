@@ -1451,6 +1451,7 @@
       "syncUnavailable": "Product sync status is unavailable. Retrying...",
       "syncProducts": "Sync products",
       "platformQuestion": "Which platform is your store on?",
+      "continuePrompt": "Connected to {{shop}}. Use this store as the data source and continue my request. Verify the available tools and data before claiming readiness.",
       "answerReady": "Your selection is in the message box. Send it to continue."
     },
     "description": "Plugins bring together tools, skills, and service connections."

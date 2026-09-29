@@ -8,6 +8,7 @@ import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/Aionrs
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { requestContextSchema } from '@/renderer/pages/conversation/platforms/aionrs/durableAdmission';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
+import { submitConnectorPrompt } from '@/renderer/pages/conversation/platforms/useConnectorContinuation';
 
 const {
   ensureConversationRuntimeMock,
@@ -42,7 +43,7 @@ const {
   capabilityMock: vi.fn().mockResolvedValue({ protocol: 0 }),
   submitRequestMock: vi.fn(),
   queueOptionsRef: { current: undefined as unknown },
-  sendNowMock: vi.fn(),
+  sendNowMock: vi.fn().mockResolvedValue(undefined),
   sendBoxPropsSpy: vi.fn(),
   enqueueMock: vi.fn((value) => ({ id: 'queued', ...value, created_at: 1 })),
   clearFilesMock: vi.fn(),
@@ -203,9 +204,6 @@ vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
     onSlashBuiltinCommand: vi.fn(),
   }),
 }));
-vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({
-  useLatestRef: <T,>(value: T) => ({ current: value }),
-}));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
   commandQueueAuthEpoch: () => 0,
   hasRetainedCommandRequests: () => false,
@@ -267,12 +265,6 @@ vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', () => ({
 }));
 vi.mock('@/renderer/services/FileService', () => ({
   allSupportedExts: [],
-}));
-vi.mock('@/renderer/utils/emitter', () => ({
-  emitter: {
-    emit: vi.fn(),
-  },
-  useAddEventListener: vi.fn(),
 }));
 vi.mock('@/renderer/utils/file/fileSelection', () => ({
   mergeFileSelectionItems: vi.fn((items: unknown[]) => items),
@@ -602,6 +594,10 @@ describe('AionrsSendBox', () => {
     expect(sessionStorage.getItem('aionrs_initial_message_enrolled-ui')).toBeNull();
     await act(async () => screen.getByRole('button', { name: 'send' }).click());
     expect(enqueueMock).toHaveBeenCalledWith({ input: 'Hello', files: [] });
+    const clearsBeforeConnection = clearFilesMock.mock.calls.length;
+    await act(() => submitConnectorPrompt('Connected to selected.myshopify.com', 'enrolled-ui'));
+    expect(enqueueMock).toHaveBeenCalledWith({ input: 'Connected to selected.myshopify.com', files: [] });
+    expect(clearFilesMock).toHaveBeenCalledTimes(clearsBeforeConnection);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
     const options = queueOptionsRef.current as {
       storageScope: string;

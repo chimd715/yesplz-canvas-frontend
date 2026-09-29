@@ -6,7 +6,7 @@
 
 import type { IMessageText } from '@/common/chat/chatLib';
 import MessageQuestion, { hasWidgetPlatformPrompt } from '../MessageQuestion';
-import { emitter } from '@/renderer/utils/emitter';
+import { submitConnectorPrompt } from '../../platforms/useConnectorContinuation';
 import { parseFileMarker, resolveMessageFilePath } from './fileMarker';
 import SessionMentionAction from './SessionMentionAction';
 import { parseSessionMessageBlock, parseSessionsBlock } from './sessionMarkers';
@@ -382,9 +382,9 @@ const MessageText: React.FC<{
                 },
               }}
               onAnswer={async (answers) => {
-                emitter.emit(
-                  'sendbox.fill',
-                  answers.map((answer) => `${answer.question} ${answer.labels.join(', ')}`).join('\n')
+                await submitConnectorPrompt(
+                  answers.map((answer) => `${answer.question} ${answer.labels.join(', ')}`).join('\n'),
+                  message.conversation_id
                 );
               }}
             />

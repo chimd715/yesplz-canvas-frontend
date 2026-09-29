@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
 import SettingsPageWrapper from '../components/SettingsPageWrapper';
 import SettingsPageHeader from '../components/SettingsPageHeader';
+import { shopifyPendingKey } from '@/renderer/pages/conversation/platforms/useConnectorContinuation';
 
 type StoreStatus = {
   available: boolean;
@@ -156,6 +157,9 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
       const target = new URL(data.url);
       if (!['http:', 'https:'].includes(target.protocol) || target.pathname !== '/auth/shopify/start')
         throw new Error('Invalid connection URL');
+      const entry = target.searchParams.get('flow');
+      if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(entry)) throw new Error('Invalid connection flow');
+      if (conversationId) sessionStorage.setItem(shopifyPendingKey(conversationId), entry);
       window.location.assign(target.href);
     } catch {
       setError(true);

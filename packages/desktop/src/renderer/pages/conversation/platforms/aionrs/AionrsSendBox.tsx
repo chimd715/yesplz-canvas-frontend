@@ -59,6 +59,7 @@ import { useAionrsMessage } from './useAionrsMessage';
 import useSWR from 'swr';
 import { nativeAdmissionCapability, submitNativeRequest, requestContextSchema } from './durableAdmission';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
+import { useConnectorContinuation } from '../useConnectorContinuation';
 
 const configErrorMessageKey = (error: unknown) => {
   const errorKind = classifyConfigSetError(error);
@@ -409,6 +410,19 @@ const AionrsSendBox: React.FC<{
     runtimeGate: commandQueueRuntimeGate,
     onExecute: executeCommand,
   });
+
+  useConnectorContinuation(
+    conversation_id,
+    Boolean(
+      commandQueueRuntimeGate.hydrated && current_model?.use_model && (teamPermission || (admission && !admissionError))
+    ),
+    (input) => {
+      const item = enqueue({ input, files: [] });
+      if (!item) return false;
+      if (!isBusy) void sendNow(item.id).catch(() => Message.error(t('settings.plugins.shopify.error')));
+      return true;
+    }
+  );
 
   // Handle initial message from Guid page — wait until model is ready
   useEffect(() => {

@@ -2376,6 +2376,7 @@ export type I18nKey =
   | 'settings.plugins.shopify.connect'
   | 'settings.plugins.shopify.connected'
   | 'settings.plugins.shopify.connection'
+  | 'settings.plugins.shopify.continuePrompt'
   | 'settings.plugins.shopify.description'
   | 'settings.plugins.shopify.error'
   | 'settings.plugins.shopify.flow'

@@ -54,6 +54,7 @@ import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
 import type { UseAcpMessageReturn } from './useAcpMessage';
+import { useConnectorContinuation } from '../useConnectorContinuation';
 
 const configErrorMessageKey = (error: unknown) => {
   const errorKind = classifyConfigSetError(error);
@@ -430,6 +431,13 @@ Please check your local CLI tool authentication status`,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
     onExecute: executeCommand,
+  });
+
+  useConnectorContinuation(conversation_id, commandQueueRuntimeGate.hydrated, (input) => {
+    const item = enqueue({ input, files: [] });
+    if (!item) return false;
+    if (!isBusy) void sendNow(item.id).catch(() => Message.error(t('settings.plugins.shopify.error')));
+    return true;
   });
 
   // `@@` session references the user picked. Declared before the handlers that

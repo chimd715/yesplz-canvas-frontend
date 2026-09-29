@@ -1,10 +1,11 @@
 import React, { Suspense, useEffect, useState } from 'react';
-import { Button, Tooltip } from '@arco-design/web-react';
+import { Button, Message, Tooltip } from '@arco-design/web-react';
 import { Connection } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import AionModal from '@/renderer/components/base/AionModal';
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
 import { useLocation } from 'react-router-dom';
+import { submitConnectorPrompt } from '@/renderer/pages/conversation/platforms/useConnectorContinuation';
 
 const ConnectorCatalog = React.lazy(() =>
   import('@/renderer/pages/settings/ToolsSettings/PluginsSettings').then((module) => ({
@@ -16,19 +17,17 @@ const SiderConnectorsEntry: React.FC<{ collapsed: boolean }> = ({ collapsed }) =
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [shopify, setShopify] = useState(false);
-  const [questionWaiting, setQuestionWaiting] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setVisible(false), [pathname]);
   useAddEventListener(
     'connectors.shopify.open',
-    (waiting, conversationId) => {
+    (_waiting, conversationId) => {
       if (
         !/^\/conversation\/[A-Za-z0-9_-]{1,100}$/.test(pathname) ||
         (conversationId && pathname !== `/conversation/${conversationId}`)
       )
         return;
       setShopify(true);
-      setQuestionWaiting(waiting);
       setVisible(true);
     },
     [pathname]
@@ -43,7 +42,6 @@ const SiderConnectorsEntry: React.FC<{ collapsed: boolean }> = ({ collapsed }) =
           className={`!w-full !h-34px !text-t-primary !rounded-8px ${collapsed ? '' : '!text-left !px-10px'}`}
           onClick={() => {
             setShopify(false);
-            setQuestionWaiting(false);
             setVisible(true);
           }}
         >
@@ -69,12 +67,13 @@ const SiderConnectorsEntry: React.FC<{ collapsed: boolean }> = ({ collapsed }) =
               compact={shopify}
               onCancel={() => setVisible(false)}
               onSelected={(shop) => {
-                if (!questionWaiting) {
-                  emitter.emit(
-                    'sendbox.fill',
-                    `Use Shopify store ${shop} as the data source for this widget. Verify the available product and recommendation tools before implementation.`
-                  );
-                }
+                const conversationId = pathname.match(/^\/conversation\/([A-Za-z0-9_-]{1,100})$/)?.[1];
+                if (!conversationId) return;
+                const prompt = t('settings.plugins.shopify.continuePrompt', { shop });
+                void submitConnectorPrompt(prompt, conversationId).catch(() => {
+                  emitter.emit('sendbox.fill', prompt);
+                  Message.error(t('settings.plugins.shopify.error'));
+                });
                 setVisible(false);
               }}
             />

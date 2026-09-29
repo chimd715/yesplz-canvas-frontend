@@ -95,7 +95,7 @@ it('shows Shopify independently of an empty agent catalog without starting authe
 });
 
 it('confirms a conversation-selected store only after loading its connection and keeps Skip non-authorizing', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
     Response.json({
       available: true,
       connected: true,
@@ -119,10 +119,10 @@ it('confirms a conversation-selected store only after loading its connection and
       '/api/platform/connectors/shopify?conversationId=widget-1',
       expect.objectContaining({ credentials: 'same-origin' })
     );
-    expect(onSelected).toHaveBeenCalledWith('demo.myshopify.com');
+    await waitFor(() => expect(onSelected).toHaveBeenCalledWith('demo.myshopify.com'));
     fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.shopify.skip' }));
     expect(onCancel).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
     fetchMock.mockRestore();
   }
