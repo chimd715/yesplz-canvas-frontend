@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import useSWR, { mutate } from 'swr';
 import { ipcBridge } from '@/common';
+import {
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import { useAssistantOrder } from '@/renderer/hooks/assistant/useAssistantOrder';
 import { selectableAssistants } from '@/renderer/utils/model/assistantSelection';
@@ -18,15 +23,20 @@ export type UseConversationAssistantsResult = {
 };
 
 export const useConversationAssistants = (): UseConversationAssistantsResult => {
+  useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
   const { assistantOrder } = useAssistantOrder();
-  const { data: assistants, isLoading } = useSWR('assistants.list', async () => {
-    try {
-      return await ipcBridge.assistants.list.invoke();
-    } catch (error) {
-      console.error('Failed to load assistants for conversation flows:', error);
-      return [] as Assistant[];
-    }
-  });
+  const { data: assistants, isLoading } = useSWR(
+    isNativeRuntimeActive() ? 'assistants.list' : null,
+    async () => {
+      try {
+        return await ipcBridge.assistants.list.invoke();
+      } catch (error) {
+        console.error('Failed to load assistants for conversation flows:', error);
+        return [] as Assistant[];
+      }
+    },
+    { revalidateOnMount: true }
+  );
 
   // Memoize the selectable list so effects depending on `presetAssistants`
   // don't re-fire on every render. SWR returns the same `assistants`
@@ -43,6 +53,7 @@ export const useConversationAssistants = (): UseConversationAssistantsResult => 
     presetAssistants,
     isLoading,
     refresh: async () => {
+      if (!isNativeRuntimeActive()) return;
       await mutate('assistants.list');
     },
   };

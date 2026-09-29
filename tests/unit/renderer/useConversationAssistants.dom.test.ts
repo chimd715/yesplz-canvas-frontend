@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type PropsWithChildren } from 'react';
+import { SWRConfig } from 'swr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcBridge } from '@/common';
 import { useConversationAssistants } from '@/renderer/pages/conversation/hooks/useConversationAssistants';
@@ -18,9 +20,39 @@ vi.mock('@/common', () => ({
   },
 }));
 
+const activation = vi.hoisted(() => ({ active: true, epoch: 0, listeners: new Set<() => void>() }));
+const wrapper = ({ children }: PropsWithChildren) =>
+  createElement(SWRConfig, { value: { provider: () => new Map() } }, children);
+vi.mock('@/common/adapter/httpBridge', () => ({
+  isNativeRuntimeActive: () => activation.active,
+  nativeRuntimeActivationEpoch: () => activation.epoch,
+  subscribeNativeRuntimeActivation: (listener: () => void) => {
+    activation.listeners.add(listener);
+    return () => activation.listeners.delete(listener);
+  },
+}));
+
 describe('useConversationAssistants', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    activation.active = true;
+    activation.epoch = 0;
+    activation.listeners.clear();
+  });
+
+  it('defers assistant lookup until explicit runtime activation', async () => {
+    activation.active = false;
+    (ipcBridge.assistants.list.invoke as never as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const { result } = renderHook(() => useConversationAssistants(), { wrapper });
+    expect(result.current.presetAssistants).toEqual([]);
+    await result.current.refresh();
+    expect(ipcBridge.assistants.list.invoke).not.toHaveBeenCalled();
+    act(() => {
+      activation.active = true;
+      activation.epoch++;
+      activation.listeners.forEach((listener) => listener());
+    });
+    await waitFor(() => expect(ipcBridge.assistants.list.invoke).toHaveBeenCalledTimes(1));
   });
 
   it('loads only enabled assistants from the backend catalog', async () => {
@@ -30,7 +62,7 @@ describe('useConversationAssistants', () => {
       { id: 'assistant-1', name: 'Researcher', source: 'user' },
     ] satisfies Partial<Assistant>[]);
 
-    const { result } = renderHook(() => useConversationAssistants());
+    const { result } = renderHook(() => useConversationAssistants(), { wrapper });
 
     await waitFor(() => expect(result.current.presetAssistants).toHaveLength(2));
 
@@ -45,7 +77,7 @@ describe('useConversationAssistants', () => {
 
     (ipcBridge.assistants.list.invoke as never as ReturnType<typeof vi.fn>).mockResolvedValue(catalog);
 
-    const { result, rerender } = renderHook(() => useConversationAssistants());
+    const { result, rerender } = renderHook(() => useConversationAssistants(), { wrapper });
 
     await waitFor(() => expect(result.current.presetAssistants).toHaveLength(2));
 
