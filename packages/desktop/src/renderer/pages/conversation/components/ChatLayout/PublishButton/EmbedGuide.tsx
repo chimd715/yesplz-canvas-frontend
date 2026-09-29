@@ -1,11 +1,45 @@
 import { copyText } from '@/renderer/utils/ui/clipboard';
 import { Button, Input, Link, Message, Tabs } from '@arco-design/web-react';
 import { Copy } from '@icon-park/react';
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from './PublishButton.module.css';
 
 export type EmbedNotice = 'publishFirst' | 'publishAgain' | 'replaced' | 'pending' | 'checking' | 'unavailable';
+
+function installationCode(code: string | undefined, platform: string): string | undefined {
+  if (!code) return code;
+  const document = new DOMParser().parseFromString(code, 'text/html');
+  const widget = document.querySelector('[data-shopify-bindings]');
+  const script = document.querySelector('script[src]');
+  if (!widget?.localName.includes('-') || !script) return code;
+  let bindings: unknown;
+  try {
+    bindings = JSON.parse(widget.getAttribute('data-shopify-bindings') ?? '');
+  } catch {
+    return code;
+  }
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return code;
+  const entries = Object.entries(bindings);
+  if (
+    !entries.length ||
+    entries.some(
+      ([name, path]) =>
+        !/^[a-z][a-z0-9-]*$/.test(name) ||
+        name.startsWith('on') ||
+        name === 'data-shopify-bindings' ||
+        !widget.hasAttribute(name) ||
+        typeof path !== 'string' ||
+        !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(path)
+    )
+  )
+    return code;
+  widget.removeAttribute('data-shopify-bindings');
+  if (platform === 'shopify') {
+    for (const [name, path] of entries) widget.setAttribute(name, `{{ ${String(path)} | escape }}`);
+  }
+  return `${script.outerHTML}\n${widget.outerHTML}`;
+}
 
 /** Installation help for the published artifact; opening this panel never deploys or modifies a shop. */
 const EmbedGuide: React.FC<{ code?: string; notice?: EmbedNotice; onRetry: () => void; retrying: boolean }> = ({
@@ -15,10 +49,12 @@ const EmbedGuide: React.FC<{ code?: string; notice?: EmbedNotice; onRetry: () =>
   retrying,
 }) => {
   const { t } = useTranslation();
+  const [platform, setPlatform] = useState('shopify');
+  const displayedCode = installationCode(code, platform);
   return (
     <div className={styles.embedPanel}>
       <div className='text-16px font-600 text-t-primary'>{t('conversation.embedding.title')}</div>
-      <Tabs defaultActiveTab='shopify' size='small'>
+      <Tabs activeTab={platform} onChange={setPlatform} size='small'>
         <Tabs.TabPane key='shopify' title={t('conversation.embedding.shopify')}>
           <ol className={styles.instructions}>
             <li>{t('conversation.embedding.shopifyOpen')}</li>
@@ -43,11 +79,11 @@ const EmbedGuide: React.FC<{ code?: string; notice?: EmbedNotice; onRetry: () =>
           <p className='text-12px text-t-secondary'>{t('conversation.embedding.htmlNote')}</p>
         </Tabs.TabPane>
       </Tabs>
-      {code ? (
+      {displayedCode ? (
         <div className='flex flex-col gap-12px'>
           <Input.TextArea
             className={styles.embedCode}
-            value={code}
+            value={displayedCode}
             readOnly
             spellCheck={false}
             autoSize={{ minRows: 4, maxRows: 7 }}
@@ -58,7 +94,7 @@ const EmbedGuide: React.FC<{ code?: string; notice?: EmbedNotice; onRetry: () =>
             className={styles.primary}
             icon={<Copy size={14} />}
             onClick={() => {
-              void copyText(code)
+              void copyText(displayedCode)
                 .then(() => Message.success(t('common.copySuccess')))
                 .catch(() => Message.error(t('common.copyFailed')));
             }}

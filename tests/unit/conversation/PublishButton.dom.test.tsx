@@ -105,6 +105,85 @@ describe('conversation publishing', () => {
     expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(embedCode);
   });
 
+  it('copies declared dynamic Liquid inputs and preserves fixed settings and HTML preview examples', async () => {
+    const marked = embedCode.replace(
+      '<shop-widget>',
+      `<shop-widget product-id="123456789" collection-id="987654321" customer-id="42" data-shopify-bindings='{"product-id":"product.id","collection-id":"collection.id","customer-id":"customer.id"}' limit="8" heading="A &amp; B &quot;Sale&quot;">`
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () =>
+          status({ history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode: marked }] })
+        )
+    );
+    view();
+    fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
+    const input = await screen.findByLabelText(embedKey('installationCode'));
+    const shopify =
+      '<script src="https://current.example.app/widget.js" defer=""></script>\n<shop-widget product-id="{{ product.id | escape }}" collection-id="{{ collection.id | escape }}" customer-id="{{ customer.id | escape }}" limit="8" heading="A &amp; B &quot;Sale&quot;"></shop-widget>';
+    expect(input).toHaveValue(shopify);
+    fireEvent.click(screen.getByRole('button', { name: embedKey('copyCode') }));
+    expect(copy).toHaveBeenLastCalledWith(shopify);
+
+    fireEvent.click(screen.getByRole('tab', { name: embedKey('others') }));
+    const html =
+      '<script src="https://current.example.app/widget.js" defer=""></script>\n<shop-widget product-id="123456789" collection-id="987654321" customer-id="42" limit="8" heading="A &amp; B &quot;Sale&quot;"></shop-widget>';
+    expect(input).toHaveValue(html);
+    fireEvent.click(screen.getByRole('button', { name: embedKey('copyCode') }));
+    expect(copy).toHaveBeenLastCalledWith(html);
+    fireEvent.click(screen.getByRole('tab', { name: embedKey('shopify') }));
+    expect(input).toHaveValue(shopify);
+  });
+
+  it('supports dynamic collection and page context without a product ID', async () => {
+    const marked = embedCode.replace(
+      '<shop-widget>',
+      `<shop-widget collection-id="987654321" page-path="/collections/example" data-shopify-bindings='{"collection-id":"collection.id","page-path":"request.path"}'>`
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () =>
+          status({ history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode: marked }] })
+        )
+    );
+    view();
+    fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
+    expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(
+      '<script src="https://current.example.app/widget.js" defer=""></script>\n<shop-widget collection-id="{{ collection.id | escape }}" page-path="{{ request.path | escape }}"></shop-widget>'
+    );
+  });
+
+  it.each([
+    'product-id="123456789"',
+    'product-id="123456789" data-product-context="demo"',
+    'product-id="123456789" data-other-bindings="product.id"',
+    'product-id="123456789" data-shopify-bindings="not JSON"',
+    `product-id="123456789" data-shopify-bindings='[]'`,
+    `product-id="123456789" data-shopify-bindings='{}'`,
+    `product-id="123456789" data-shopify-bindings='{"product-id":42}'`,
+    `product-id="123456789" data-shopify-bindings='{"product-id":"product.id }}{{ customer.email"}'`,
+    `product-id="123456789" data-shopify-bindings='{"collection-id":"collection.id"}'`,
+    `onclick="example" data-shopify-bindings='{"onclick":"product.id"}'`,
+    `data-shopify-bindings='{"data-shopify-bindings":"product.id"}'`,
+  ])('keeps undeclared, malformed or unsafe dynamic inputs unchanged (%s)', async (attributes) => {
+    const original = embedCode.replace('<shop-widget>', `<shop-widget ${attributes}>`);
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () =>
+          status({ history: [{ url: 'https://current.example.app/', conversationId: 'first', embedCode: original }] })
+        )
+    );
+    view();
+    fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
+    expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(original);
+  });
+
   it.each([
     ['publishFirst', {}],
     ['publishAgain', { history: [{ url: 'https://current.example.app/', conversationId: 'first' }] }],
