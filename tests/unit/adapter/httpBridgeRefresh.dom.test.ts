@@ -7,6 +7,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpRequest } from '@/common/adapter/httpBridge';
 
+vi.mock('@/common/platform/bridge', () => ({
+  bridge: {
+    buildProvider: vi.fn(() => ({ provider: vi.fn(), invoke: vi.fn() })),
+    buildEmitter: vi.fn(() => ({ on: vi.fn(), emit: vi.fn() })),
+  },
+}));
+
 type WindowWithPort = { __backendPort?: number };
 
 /** Minimal `Response`-like stub covering the fields `httpRequest` reads. */
@@ -73,6 +80,31 @@ describe('httpRequest 401 → refresh → replay (WebUI #4124 fix)', () => {
 
     // original 401 + one refresh attempt, then give up (no replay)
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the caller request identity and message body when replaying after refresh', async () => {
+    const { conversation } = await import('@/common/adapter/ipcBridge');
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options: RequestInit) => {
+        if (url === '/api/auth/refresh') return { ok: true };
+        bodies.push(JSON.parse(String(options.body)));
+        if (bodies.length === 1) return errorResponse(401, { code: 'UNAUTHORIZED', error: 'expired' });
+        return jsonResponse(200, { data: { msg_id: 'message-1', turn_id: 'turn-1', runtime: null } });
+      })
+    );
+
+    await conversation.sendMessage.invoke({
+      conversation_id: 'conversation-1',
+      input: 'Keep this request',
+      client_request_id: 'caller-request_1',
+    });
+
+    expect(bodies).toEqual([
+      { content: 'Keep this request', client_request_id: 'caller-request_1' },
+      { content: 'Keep this request', client_request_id: 'caller-request_1' },
+    ]);
   });
 
   it('does not refresh when the first response succeeds', async () => {

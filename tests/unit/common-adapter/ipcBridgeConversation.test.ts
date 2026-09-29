@@ -113,6 +113,7 @@ describe('ipcBridge conversation adapter', () => {
     const call = httpBridgeMocks.calls.find((entry) => entry.path === '/api/conversations/conv-2/messages');
     expect(call).toBeDefined();
     expect((call?.body as { sessions?: unknown } | undefined)?.sessions).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(call?.body))).toEqual({ content: 'plain' });
   });
 
   it('reads the cross-session master switch off the typed settings endpoint, not the client KV', async () => {

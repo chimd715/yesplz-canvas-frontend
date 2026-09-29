@@ -370,6 +370,7 @@ export const conversation = {
     (p) => `/api/conversations/${p.conversation_id}/messages`,
     (p) => ({
       content: p.input,
+      client_request_id: p.client_request_id,
       files: p.files,
       // `@@` session references. Omitting this silently breaks the feature end
       // to end: the backend's send-boundary resolver would always see an empty
@@ -1780,6 +1781,8 @@ export interface ICronJobUpdateParams {
 interface ISendMessageParams {
   input: string;
   conversation_id: string;
+  /** Caller-owned retry identity, only after native request-receipt support is verified. */
+  client_request_id?: string;
   /** Source-tagged file refs; the backend resolves each to an absolute path and
    *  injects it into the message. See {@link ChatFileRef}. */
   files?: ChatFileRef[];
