@@ -32,6 +32,29 @@
         padding: 0;
         overflow: hidden;
       }
+
+      .bootstrap-loading {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        background: var(--bg-base, Canvas);
+        color-scheme: light;
+      }
+
+      .bootstrap-loading img {
+        display: block;
+        width: 72px;
+        height: 63px;
+      }
+
+      [data-theme='dark'] .bootstrap-loading {
+        color-scheme: dark;
+      }
+
+      [data-theme='dark'] .bootstrap-loading img {
+        filter: invert(1);
+      }
     </style>
   </head>
   <body>
@@ -42,7 +65,15 @@
         if (t) document.body.setAttribute('arco-theme', t);
       } catch (e) {}
     </script>
-    <div id="root"></div>
+    <div id="root">
+      <!-- React replaces this fallback after its module loads. -->
+      <div class="bootstrap-loading" role="status" aria-busy="true">
+        <picture aria-hidden="true">
+          <source media="(prefers-reduced-motion: reduce)" srcset="./assets/logos/brand/poodle-loading-black.png" />
+          <img src="./assets/logos/brand/poodle-loading-black.gif" alt="" width="72" height="63" />
+        </picture>
+      </div>
+    </div>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

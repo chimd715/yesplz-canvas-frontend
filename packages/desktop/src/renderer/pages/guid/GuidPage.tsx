@@ -756,21 +756,16 @@ const GuidPage: React.FC = () => {
 
           <div className={styles.widgetEntry}>
             <Button
-              type='text'
+              type='outline'
               className={styles.widgetTile}
               aria-pressed={shopWidgetSelected}
-              aria-describedby='shop-widget-output'
+              title={t('guid.shopWidget.output')}
               disabled={guidInput.loading}
               onClick={() => setShopWidgetSelected((selected) => !selected)}
             >
-              <span className={styles.widgetTileIcon}>
-                <Shop theme='outline' size='28' strokeWidth={1.6} fill='currentColor' aria-hidden='true' />
-              </span>
+              <Shop theme='outline' size='16' fill='currentColor' aria-hidden='true' />
               <span>{t('guid.shopWidget.label')}</span>
             </Button>
-            <p id='shop-widget-output' className={styles.widgetOutput}>
-              {t('guid.shopWidget.output')}
-            </p>
           </div>
 
           {!shopWidgetSelected && selectedAssistantPrompts.length > 0 ? (

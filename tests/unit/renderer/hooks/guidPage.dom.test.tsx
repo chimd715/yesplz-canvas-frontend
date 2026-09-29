@@ -303,21 +303,24 @@ const guidInputCardProps = {
 };
 
 describe('GuidPage', () => {
-  it('selects and clears Shop Widget without overwriting a draft or starting a conversation', () => {
+  it('defaults to Shop Widget and supports clearing and reselecting without changing the draft or starting a conversation', () => {
     render(<GuidPage />);
     guidInputMock.setInput.mockClear();
     sendMock.sendMessageHandler.mockClear();
     const button = screen.getByRole('button', { name: 'guid.shopWidget.label' });
-    fireEvent.click(button);
     expect(button).toHaveAttribute('aria-pressed', 'true');
     expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(true);
     fireEvent.click(button);
     expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(false);
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(true);
     expect(guidInputMock.setInput).not.toHaveBeenCalled();
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
-  it('selects the installed YesPlz provider with Shop Widget and respects subsequent deselection', async () => {
+  it('selects the installed YesPlz provider for default Shop Widget mode and respects subsequent deselection', async () => {
     vi.mocked(ipcBridge.fs.listAvailableSkills.invoke).mockResolvedValue([
       {
         name: 'yesplz-api',
@@ -351,7 +354,7 @@ describe('GuidPage', () => {
       mcpIds: ['user-mcp'],
     });
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
+    expect(screen.getByRole('button', { name: 'guid.shopWidget.label' })).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => {
       expect(capturedGuidSendDeps.at(-1)?.guidEnabledSkills).toEqual(['existing', 'yesplz-api']);
       expect(capturedGuidSendDeps.at(-1)?.selectedMcpServerIds).toEqual(['user-mcp', 'ext-yesplz']);
@@ -578,6 +581,7 @@ describe('GuidPage', () => {
     });
 
     render(<GuidPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
 
     const promptButton = screen.getByRole('button', {
       name: /Create a three-page financial dashboard with profit/i,
@@ -587,8 +591,9 @@ describe('GuidPage', () => {
     expect(promptButton.className).toContain('!break-words');
   });
 
-  it('falls back to default instruction prompts when the selected assistant has no recommendations', () => {
+  it('falls back to default instruction prompts outside widget mode when the assistant has no recommendations', () => {
     render(<GuidPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
 
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.understand' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.cleanup' })).toBeInTheDocument();

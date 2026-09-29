@@ -31,6 +31,7 @@ describe('useMcpServers', () => {
     ensureBackendMcpCatalogMock.mockResolvedValue({
       userServers: [],
       builtinServers: [],
+      extensionServers: [],
       allServers: [],
     });
   });

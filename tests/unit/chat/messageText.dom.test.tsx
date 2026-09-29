@@ -824,7 +824,13 @@ describe('Shop Widget user request display', () => {
   it('hides product instructions without changing history or truncating the user request', () => {
     const request = 'Make a similar-product carousel.\n\n## User request\n\nKeep this heading.';
     const content = '---\nname: shop-widget\n---\nInternal product rules\n\n## User request\n\n' + request;
-    const message: IMessageText = { id: 'widget-input', conversation_id: 'widget-chat', type: 'text', position: 'right', content: { content } };
+    const message: IMessageText = {
+      id: 'widget-input',
+      conversation_id: 'widget-chat',
+      type: 'text',
+      position: 'right',
+      content: { content },
+    };
     render(
       <ConversationProvider value={{ conversation_id: 'widget-chat', type: 'aionrs', isWidget: true }}>
         <MessageText message={message} />
@@ -836,7 +842,13 @@ describe('Shop Widget user request display', () => {
 
   it('preserves an ordinary conversation that discusses the Skill document', () => {
     const content = '---\nname: shop-widget\n---\nRules\n\n## User request\n\nExplain this document';
-    const message: IMessageText = { id: 'ordinary-input', conversation_id: 'ordinary-chat', type: 'text', position: 'right', content: { content } };
+    const message: IMessageText = {
+      id: 'ordinary-input',
+      conversation_id: 'ordinary-chat',
+      type: 'text',
+      position: 'right',
+      content: { content },
+    };
     render(
       <ConversationProvider value={{ conversation_id: 'ordinary-chat', type: 'aionrs', isWidget: false }}>
         <MessageText message={message} />

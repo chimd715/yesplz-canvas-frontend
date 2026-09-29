@@ -98,6 +98,7 @@ import { bootstrapRendererConfig } from '@renderer/services/bootstrapRenderer';
 
 // Components and utilities
 import BackendStartingView from './components/layout/BackendStartingView';
+import AppLoader from './components/layout/AppLoader';
 import BackendStartupGate from './components/layout/BackendStartupGate';
 import GpuAutoDisableNotice from './components/layout/GpuAutoDisableNotice';
 import Layout from './components/layout/Layout';
@@ -354,7 +355,7 @@ const Main = () => {
   }, [ready]);
 
   if (!ready || !configReady) {
-    return null;
+    return <AppLoader />;
   }
 
   return (

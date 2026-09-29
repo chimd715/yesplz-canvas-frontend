@@ -1,5 +1,6 @@
 import { ipcBridge } from '@/common';
-import { Button, Message, Spin } from '@arco-design/web-react';
+import { Button, Message } from '@arco-design/web-react';
+import AppLoader from '@/renderer/components/layout/AppLoader';
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -114,7 +115,7 @@ const ChatConversationIndex: React.FC = () => {
     navigate('/', { replace: true });
   }, [activeId, isLoading, error, data, navigate, t]);
 
-  if (versions.isLoading || isLoading) return <Spin loading />;
+  if (versions.isLoading || isLoading) return <AppLoader />;
   if ((!versions.data && versions.error) || error)
     return (
       <div role='alert' className='flex items-center gap-12px p-20px text-t-secondary'>
