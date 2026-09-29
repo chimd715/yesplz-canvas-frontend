@@ -1800,6 +1800,7 @@ export interface ISendMessageResult {
   msg_id: string;
   turn_id: string;
   runtime: TConversationRuntimeSummary;
+  client_request_id?: string;
 }
 
 export interface IAnswerAskParams {

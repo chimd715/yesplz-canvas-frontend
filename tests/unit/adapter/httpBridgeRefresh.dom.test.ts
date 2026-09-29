@@ -91,15 +91,19 @@ describe('httpRequest 401 → refresh → replay (WebUI #4124 fix)', () => {
         if (url === '/api/auth/refresh') return { ok: true };
         bodies.push(JSON.parse(String(options.body)));
         if (bodies.length === 1) return errorResponse(401, { code: 'UNAUTHORIZED', error: 'expired' });
-        return jsonResponse(200, { data: { msg_id: 'message-1', turn_id: 'turn-1', runtime: null } });
+        return jsonResponse(200, {
+          data: { msg_id: 'message-1', turn_id: 'turn-1', runtime: null, client_request_id: 'caller-request_1' },
+        });
       })
     );
 
-    await conversation.sendMessage.invoke({
-      conversation_id: 'conversation-1',
-      input: 'Keep this request',
-      client_request_id: 'caller-request_1',
-    });
+    await expect(
+      conversation.sendMessage.invoke({
+        conversation_id: 'conversation-1',
+        input: 'Keep this request',
+        client_request_id: 'caller-request_1',
+      })
+    ).resolves.toMatchObject({ client_request_id: 'caller-request_1' });
 
     expect(bodies).toEqual([
       { content: 'Keep this request', client_request_id: 'caller-request_1' },
