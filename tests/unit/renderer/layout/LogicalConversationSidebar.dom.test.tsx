@@ -31,7 +31,7 @@ vi.mock('@/renderer/pages/cron', () => ({
 }));
 vi.mock('@/renderer/components/base/AionModal', () => ({ default: () => null }));
 vi.mock('@/renderer/pages/conversation/GroupedHistory/hooks/useConversationActions', () => ({
-  useConversationActions: () => ({}),
+  useConversationActions: () => ({ renameModalName: '' }),
 }));
 vi.mock('@/renderer/pages/conversation/GroupedHistory/hooks/useDragAndDrop', () => ({
   useDragAndDrop: () => ({ isDragEnabled: false }),

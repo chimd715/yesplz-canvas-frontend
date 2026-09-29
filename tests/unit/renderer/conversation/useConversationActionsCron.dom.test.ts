@@ -29,6 +29,11 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+vi.mock('@arco-design/web-react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@arco-design/web-react')>()),
+  Message: { success: vi.fn(), error: vi.fn() },
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
     conversation: {
