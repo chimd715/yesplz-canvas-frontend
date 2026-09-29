@@ -30,6 +30,7 @@ const {
   draftMutateMock,
   draftContentRef,
   runtimeViewIsProcessingRef,
+  retainedRequestsMock,
 } = vi.hoisted(() => ({
   ensureConversationRuntimeMock: vi.fn().mockResolvedValue({ recovered: false, config_options: [], runtime: null }),
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +51,7 @@ const {
   draftMutateMock: vi.fn(),
   draftContentRef: { current: '' },
   runtimeViewIsProcessingRef: { current: false },
+  retainedRequestsMock: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock('@/renderer/pages/conversation/platforms/aionrs/durableAdmission', async (importOriginal) => ({
@@ -207,6 +209,7 @@ vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
   commandQueueAuthEpoch: () => 0,
   hasRetainedCommandRequests: () => false,
+  getRetainedLogicalRequests: retainedRequestsMock,
   useConversationCommandQueue: (options: unknown) => {
     queueOptionsRef.current = options;
     return {
@@ -323,6 +326,7 @@ const modelSelection = {
 describe('AionrsSendBox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retainedRequestsMock.mockReturnValue([]);
     ensureConversationRuntimeMock.mockResolvedValue({ recovered: false, config_options: [], runtime: null });
     useTeamPermissionMock.mockReturnValue(null);
     draftContentRef.current = '';
@@ -661,10 +665,76 @@ describe('AionrsSendBox', () => {
     sessionStorage.setItem('aionrs_initial_message_stale-capability', initial);
     capabilityMock.mockRejectedValue(new Error('Capability unavailable'));
     await act(async () => {
-      await mutate(['native-admission', 'stale-capability', 0]).catch(() => undefined);
+      await mutate(['native-admission', 'stale-capability', 0, 0]).catch(() => undefined);
     });
     expect(sessionStorage.getItem('aionrs_initial_message_stale-capability')).toBe(initial);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
     expect(enqueueMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks a new send while an earlier logical intent belongs to another runtime or continuation', async () => {
+    const context = {
+      logicalId: 'same-logical',
+      coreId: 'new-core',
+      runtimeGeneration: '11111111-1111-4111-8111-111111111111',
+      headGeneration: 3,
+    };
+    capabilityMock.mockResolvedValue({
+      protocol: 1,
+      ...context,
+      ownerId: '22222222-2222-4222-8222-222222222222',
+      projectId: '33333333-3333-4333-8333-333333333333',
+    });
+    render(<AionrsSendBox conversation_id='new-core' modelSelection={modelSelection} />);
+    await waitFor(() =>
+      expect((queueOptionsRef.current as { retainUntilAccepted: boolean }).retainUntilAccepted).toBe(true)
+    );
+    retainedRequestsMock.mockReturnValue([
+      {
+        id: 'earlier',
+        pending: true,
+        request: { requestId: 'earlier-request', context: { ...context, coreId: 'old-core', headGeneration: 2 } },
+      },
+    ]);
+    const options = queueOptionsRef.current as {
+      prepareItem: (item: object) => object;
+      onExecute: (item: object, action: string) => Promise<unknown>;
+    };
+    await expect(
+      options.onExecute(options.prepareItem({ id: 'new', input: 'New prompt', files: [] }), 'send')
+    ).resolves.toBe(false);
+    expect(submitRequestMock).not.toHaveBeenCalled();
+    expect(Message.warning).toHaveBeenCalledWith('conversation.commandQueue.requestPending');
+    retainedRequestsMock.mockReturnValue([]);
+  });
+
+  it('looks up an old original destination without applying its runtime to the current continuation', async () => {
+    const context = {
+      logicalId: 'same-logical',
+      coreId: 'new-lookup-core',
+      runtimeGeneration: '11111111-1111-4111-8111-111111111111',
+      headGeneration: 3,
+    };
+    capabilityMock.mockResolvedValue({
+      protocol: 1,
+      ...context,
+      ownerId: '22222222-2222-4222-8222-222222222222',
+      projectId: '33333333-3333-4333-8333-333333333333',
+    });
+    render(<AionrsSendBox conversation_id='new-lookup-core' modelSelection={modelSelection} />);
+    await waitFor(() =>
+      expect((queueOptionsRef.current as { retainUntilAccepted: boolean }).retainUntilAccepted).toBe(true)
+    );
+    const pending = { requestId: 'old-request', context: { ...context, coreId: 'old-core', headGeneration: 2 } };
+    submitRequestMock.mockResolvedValue({
+      receipt: { turn_id: 'old-turn', msg_id: 'old-message' },
+      runtime: { state: 'running', turn_id: 'old-turn' },
+    });
+    const options = queueOptionsRef.current as { onExecute: (item: object, action: string) => Promise<unknown> };
+    await expect(options.onExecute({ input: 'Original prompt', files: [], request: pending }, 'lookup')).resolves.toBe(
+      'recorded'
+    );
+    expect(submitRequestMock).toHaveBeenCalledWith(pending, 'Original prompt', 'lookup');
+    expect(markSendAcceptedMock).not.toHaveBeenCalled();
   });
 });

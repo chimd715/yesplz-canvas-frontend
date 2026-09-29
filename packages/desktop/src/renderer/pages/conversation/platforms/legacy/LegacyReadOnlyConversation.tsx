@@ -21,7 +21,8 @@ import React from 'react';
 const LegacyReadOnlyConversation: React.FC<{
   conversation: TChatConversation;
   emptySlot?: React.ReactNode;
-}> = ({ conversation, emptySlot }) => {
+  centralReadOnly?: boolean;
+}> = ({ conversation, emptySlot, centralReadOnly = false }) => {
   useMessageLstCache(conversation.id);
 
   return (
@@ -29,13 +30,16 @@ const LegacyReadOnlyConversation: React.FC<{
       value={{
         conversation_id: conversation.id,
         workspace: conversation.extra?.workspace,
-        type: 'acp',
+        type: centralReadOnly && conversation.type === 'aionrs' ? 'aionrs' : 'acp',
+        isWidget:
+          centralReadOnly && (conversation.extra as { outputType?: string } | undefined)?.outputType === 'widget',
         hideSendBox: true,
+        readOnly: centralReadOnly,
         cron_job_id: conversation.extra?.cron_job_id as string | undefined,
         loadedSkills: (conversation.extra as { skills?: string[] } | undefined)?.skills,
       }}
     >
-      <ConversationArtifactProvider conversation_id={conversation.id}>
+      <ConversationArtifactProvider conversation_id={conversation.id} enabled={!centralReadOnly}>
         <div className='flex-1 flex flex-col px-20px min-h-0'>
           <FlexFullContainer>
             <MessageList className='flex-1' emptySlot={emptySlot} />

@@ -1,7 +1,15 @@
 import { ipcBridge } from '@/common';
+import {
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+  suspendNativeRuntime,
+} from '@/common/adapter/httpBridge';
 import { Button, Message } from '@arco-design/web-react';
 import AppLoader from '@/renderer/components/layout/AppLoader';
-import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import useSWR from 'swr';
@@ -14,15 +22,17 @@ import { setCurrentConversation } from '@/renderer/pages/conversation/explorer/c
 import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { getSnapshotConversationProjectId } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
+import { emitter } from '@/renderer/utils/emitter';
 
 const ChatConversationIndex: React.FC = () => {
   const { id } = useParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { closePreviewIfScopeChanged } = usePreviewContext();
+  const { closePreviewIfScopeChanged, closePreview } = usePreviewContext();
   const { syncTitleFromHistory } = useAutoTitle();
   const notFoundHandledIdRef = useRef<string | undefined>(undefined);
   const defaultConversationTitle = t('conversation.welcome.newConversation');
+  const epoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
 
   const versions = useVersionHistoryState(id);
   // Public links retain the logical id. Native chat, websocket and send-box code
@@ -34,6 +44,36 @@ const ChatConversationIndex: React.FC = () => {
   const { data, error, isLoading, mutate } = useSWR(activeId ? `conversation/${activeId}` : null, () => {
     return getConversationOrNull(activeId!);
   });
+  useLayoutEffect(() => {
+    const context = getActiveNativeRuntimeContext();
+    if (
+      !getBuilderWorkspace() ||
+      !context ||
+      !data ||
+      (context.coreId !== data.id && data.logical_conversation_id !== context.logicalId)
+    )
+      return;
+    if (
+      data.id !== context.coreId ||
+      data.logical_conversation_id !== context.logicalId ||
+      data.head_generation !== context.headGeneration ||
+      data.runtime_generation !== context.runtimeGeneration ||
+      (versions.data && versions.data.headGeneration !== context.headGeneration)
+    ) {
+      if (versions.selection.kind === 'current') closePreview?.();
+      suspendNativeRuntime();
+    }
+  }, [data, versions.data, versions.selection.kind, closePreview, epoch]);
+  useEffect(() => {
+    if (!activeId) return;
+    const refresh = (): void => {
+      void mutate();
+    };
+    emitter.on('chat.history.refresh', refresh);
+    return () => {
+      emitter.off('chat.history.refresh', refresh);
+    };
+  }, [activeId, mutate]);
 
   // Close preview only when the isolation scope changes, not on every
   // conversation switch. Same-scope conversations keep the preview open. The
@@ -96,7 +136,7 @@ const ChatConversationIndex: React.FC = () => {
   }, [activeId, mutate]);
 
   useEffect(() => {
-    if (!data || data.name !== defaultConversationTitle) {
+    if (!isNativeRuntimeActive() || !data || data.name !== defaultConversationTitle) {
       return;
     }
 

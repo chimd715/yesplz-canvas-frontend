@@ -5,6 +5,12 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  getActiveNativeRuntimeContext,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import {
   reconcileGeneratingFromRuntime,
@@ -80,12 +86,17 @@ const flushRuntimeViewLogs = (logs: ConversationRuntimeViewLogEntry[]): void => 
 const getRuntimeOrNull = (runtime: TConversationRuntimeSummary | undefined): TConversationRuntimeSummary | null =>
   runtime ?? null;
 
-export const useConversationRuntimeView = (conversation_id: string): UseConversationRuntimeViewReturn => {
+export const useConversationRuntimeView = (
+  conversation_id: string,
+  enabled = true
+): UseConversationRuntimeViewReturn => {
+  const activationEpoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
+  const active = enabled && isNativeRuntimeActive();
   const getSnapshot = useCallback(() => getConversationRuntimeViewSnapshot(conversation_id), [conversation_id]);
   const view = useSyncExternalStore(subscribeConversationRuntimeView, getSnapshot, getSnapshot);
 
   useEffect(() => {
-    if (!conversation_id) {
+    if (!conversation_id || !active) {
       return;
     }
 
@@ -98,6 +109,8 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
           return;
         }
         const runtime = getRuntimeOrNull(conversation?.runtime);
+        // Central reads omit native runtime. Preserve the actual verified resume summary.
+        if (!runtime && getActiveNativeRuntimeContext()?.coreId === conversation_id) return;
         flushRuntimeViewLogs(hydrateSucceeded(conversation_id, runtime));
         // Reconcile the sidebar spinner against authoritative runtime state:
         // a missed WS frame (window reload/reconnect race) can otherwise
@@ -118,10 +131,10 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     return () => {
       cancelled = true;
     };
-  }, [conversation_id]);
+  }, [conversation_id, active, activationEpoch]);
 
   useEffect(() => {
-    if (!conversation_id) {
+    if (!conversation_id || !active) {
       return;
     }
 
@@ -149,7 +162,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
       disposeTurnCompleted();
       disposeListChanged();
     };
-  }, [conversation_id]);
+  }, [conversation_id, active, activationEpoch]);
 
   const markSendStarted = useCallback(() => {
     flushRuntimeViewLogs(localSendStarted(conversation_id));
@@ -220,8 +233,8 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     view,
     hydrated: view.hydrated,
     state: view.state,
-    isProcessing: view.isProcessing,
-    canSendMessage: view.canSendMessage,
+    isProcessing: active && view.isProcessing,
+    canSendMessage: active && view.canSendMessage,
     activeTurnId: view.activeTurnId,
     supportsMidturnDelivery: view.supportsMidturnDelivery,
     markSendStarted,

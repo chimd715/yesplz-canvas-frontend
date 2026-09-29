@@ -22,7 +22,16 @@ vi.mock('@/renderer/pages/conversation/Preview', () => ({
 vi.mock('@/renderer/components/Markdown', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('@/common/adapter/httpBridge', () => ({ getBaseUrl: () => '' }));
+const nativeActive = vi.hoisted(() => ({ current: true }));
+vi.mock('@/common/adapter/httpBridge', () => ({
+  getBaseUrl: () => '',
+  getBuilderWorkspace: () => null,
+  getActiveNativeRuntimeContext: () => null,
+  isNativeRuntimeActive: () => nativeActive.current,
+  nativeRuntimeActivationEpoch: () => 0,
+  subscribeNativeRuntimeActivation: () => () => {},
+  suspendNativeRuntime: () => {},
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: { number?: number }) => (values?.number ? `${key} ${values.number}` : key),
@@ -91,6 +100,7 @@ const view = (publish = false, anchor?: string) =>
   );
 const card = (number: number) => within(screen.getByRole('region', { name: `${key('version')} ${number}` }));
 beforeEach(() => {
+  nativeActive.current = true;
   vi.stubGlobal('electronAPI', undefined);
   const meta = document.createElement('meta');
   meta.name = 'ai-builder-preview';
@@ -426,6 +436,7 @@ describe('saved widget source versions', () => {
   });
 
   it('previews and publishes the same saved source without native restore or a live runtime', async () => {
+    nativeActive.current = false;
     let published = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = String(input);
@@ -444,6 +455,7 @@ describe('saved widget source versions', () => {
     vi.stubGlobal('fetch', fetcher);
     view(true);
     await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    expect(fetcher.mock.calls.some(([input]) => String(input).startsWith('/api/platform/publishing?'))).toBe(false);
     fireEvent.click(sourceCard(1).getByRole('button', { name: 'preview.preview' }));
     expect(openPreview).toHaveBeenCalledWith(
       window.location.origin + source().previewUrl,

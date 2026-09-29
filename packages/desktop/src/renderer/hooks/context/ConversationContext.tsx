@@ -40,6 +40,8 @@ export interface ConversationContextValue {
    * When true, platform chat components should hide the SendBox (e.g. sub-agents in team mode)
    */
   hideSendBox?: boolean;
+  /** Persisted transcript only; native actions and artifact reads are unavailable. */
+  readOnly?: boolean;
 
   /**
    * Loaded skill names for this conversation (snapshot from conversation.extra.skills).

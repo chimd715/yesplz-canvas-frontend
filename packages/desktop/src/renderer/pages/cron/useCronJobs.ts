@@ -5,10 +5,15 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import type { ICronJob, ICronJobUpdateParams } from '@/common/adapter/ipcBridge';
 import type { TChatConversation } from '@/common/config/storage';
 import { emitter } from '@/renderer/utils/emitter';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { repairCronJobTimeZones } from '@renderer/pages/cron/repairCronJobTimeZone';
 import { formatCronRunConversationTitle } from '@renderer/pages/cron/cronUtils';
 import { getActivityTime } from '@/renderer/utils/chat/timeline';
@@ -277,6 +282,7 @@ export function useAllCronJobs() {
  * Used by ChatHistory to show indicators
  */
 export function useCronJobsMap() {
+  const activationEpoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
   const [jobsMap, setJobsMap] = useState<Map<string, ICronJob[]>>(new Map());
   const [loading, setLoading] = useState(true);
   // Track conversations with unread cron executions (red dot indicator)
@@ -308,6 +314,7 @@ export function useCronJobsMap() {
 
   // Fetch all jobs and group by conversation
   const fetchAllJobs = useCallback(async () => {
+    if (!isNativeRuntimeActive()) return;
     setLoading(true);
     try {
       const allJobs = await repairCronJobTimeZones(await ipcBridge.cron.listJobs.invoke());
@@ -336,7 +343,7 @@ export function useCronJobsMap() {
   // Initial fetch
   useEffect(() => {
     void fetchAllJobs();
-  }, [fetchAllJobs]);
+  }, [fetchAllJobs, activationEpoch]);
 
   // Event handlers
   const eventHandlers = useMemo<CronJobEventHandlers>(

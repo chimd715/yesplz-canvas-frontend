@@ -168,6 +168,8 @@ interface IChatConversation<T, Extra> {
   /** Trusted central-list routing metadata; `id` remains the active Core ID. */
   logical_conversation_id?: string;
   head_generation?: number;
+  /** Authoritative central detail generation, assigned by the durable runtime store. */
+  runtime_generation?: string;
   type: T;
   extra: Extra;
   model: TProviderWithModel;

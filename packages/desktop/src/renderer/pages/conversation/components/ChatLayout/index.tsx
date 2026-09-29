@@ -49,6 +49,7 @@ const ChatLayout: React.FC<{
   /** Conversation ID for mode switching */
   conversation_id?: string;
   isWidget?: boolean;
+  readOnly?: boolean;
   /** Custom tabs slot; when provided, replaces the default ConversationTabs */
   tabsSlot?: React.ReactNode;
   /** Workspace path for opening in external tools */
@@ -202,7 +203,12 @@ const ChatLayout: React.FC<{
     <>
       {props.headerExtra}
       {conversation_id && (
-        <PublishButton key={conversation_id} conversationId={conversation_id} isWidget={props.isWidget} />
+        <PublishButton
+          key={conversation_id}
+          conversationId={conversation_id}
+          isWidget={props.isWidget}
+          readOnly={props.readOnly}
+        />
       )}
     </>
   );
@@ -220,7 +226,7 @@ const ChatLayout: React.FC<{
           setTitleDraft={setTitleDraft}
           setEditingTitle={setEditingTitle}
           renameLoading={renameLoading}
-          canRenameTitle={canRenameTitle}
+          canRenameTitle={canRenameTitle && !props.readOnly}
           submitTitleRename={submitTitleRename}
           titleAreaMaxWidth={titleAreaMaxWidth}
           title={props.title}

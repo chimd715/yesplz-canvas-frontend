@@ -7,6 +7,7 @@
 import { bridge } from '@/common/platform/bridge';
 import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import { refreshSession } from './sessionRefresh';
+import { getBuilderWorkspace, isNativeRuntimeActive, subscribeNativeRuntimeActivation } from './httpBridge';
 import type { ElectronBridgeAPI } from '@/common/types/platform/electron';
 
 interface CustomWindow extends Window {
@@ -99,6 +100,7 @@ if (win.electronAPI) {
 
   // 1.发送队列中积压的消息，确保在重新建立连接后不会丢事件
   const flushQueue = () => {
+    if (!isNativeRuntimeActive()) return;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -113,7 +115,7 @@ if (win.electronAPI) {
 
   // 2.简单的指数退避重连，等待服务端在登录成功后接受新连接
   const scheduleReconnect = () => {
-    if (reconnectTimer !== null || !shouldReconnect) {
+    if (reconnectTimer !== null || !shouldReconnect || !isNativeRuntimeActive()) {
       return;
     }
 
@@ -142,6 +144,7 @@ if (win.electronAPI) {
 
   // 3.建立 WebSocket 连接（或复用已有的 OPEN/CONNECTING 状态）
   const connect = () => {
+    if (!isNativeRuntimeActive()) return;
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -160,12 +163,13 @@ if (win.electronAPI) {
     const currentSocket = socket;
 
     currentSocket.addEventListener('open', () => {
+      if (socket !== currentSocket || !isNativeRuntimeActive()) return;
       connectedAt = Date.now();
       flushQueue();
     });
 
     currentSocket.addEventListener('message', (event: MessageEvent) => {
-      if (!emitterRef) {
+      if (!emitterRef || !isNativeRuntimeActive() || socket !== currentSocket) {
         return;
       }
 
@@ -230,6 +234,7 @@ if (win.electronAPI) {
     });
 
     currentSocket.addEventListener('close', (event: CloseEvent) => {
+      if (socket !== currentSocket) return;
       // Only null the outer reference if it still points at this socket.
       if (socket === currentSocket) {
         socket = null;
@@ -255,7 +260,7 @@ if (win.electronAPI) {
   const ensureSocket = () => {
     // 认证已终止时不得重连，否则 emit 会绕过上面的“停止重连”逻辑
     // A terminal auth error deliberately stops reconnection; emit() must not restart it.
-    if (!shouldReconnect) {
+    if (!shouldReconnect || !isNativeRuntimeActive()) {
       return;
     }
 
@@ -274,6 +279,13 @@ if (win.electronAPI) {
 
   bridge.adapter({
     emit(name, data) {
+      if (!isNativeRuntimeActive()) {
+        // Dispose local provider callbacks without buffering native commands for resume.
+        if (name.startsWith('subscribe-') && isRecord(data) && typeof data.id === 'string') {
+          emitterRef?.emit(`subscribe.callback-${name.slice('subscribe-'.length)}${data.id}`, undefined);
+        }
+        return;
+      }
       const message: QueuedMessage = { name, data };
 
       ensureSocket();
@@ -287,6 +299,12 @@ if (win.electronAPI) {
         }
       }
 
+      // Hosted commands are never carried across an activation epoch.
+      if (getBuilderWorkspace()) {
+        if (name.startsWith('subscribe-') && isRecord(data) && typeof data.id === 'string')
+          emitterRef?.emit(`subscribe.callback-${name.slice('subscribe-'.length)}${data.id}`, undefined);
+        return;
+      }
       messageQueue.push(message);
     },
     on(emitter) {
@@ -298,6 +316,17 @@ if (win.electronAPI) {
   });
 
   connect();
+
+  subscribeNativeRuntimeActivation(() => {
+    if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    const previous = socket;
+    socket = null;
+    previous?.close();
+    connectedAt = 0;
+    reconnectDelay = BASE_RECONNECT_DELAY;
+    if (isNativeRuntimeActive()) connect();
+  });
 
   // Expose reconnection control for login flow
   win.__websocketReconnect = () => {

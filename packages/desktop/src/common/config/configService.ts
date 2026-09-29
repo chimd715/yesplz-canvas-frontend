@@ -1,4 +1,5 @@
 import type { ConfigKey, ConfigKeyMap } from './configKeys';
+import { isNativeRuntimeActive, nativeRuntimeActivationEpoch } from '@/common/adapter/httpBridge';
 
 type Subscriber = (value: unknown) => void;
 
@@ -19,6 +20,7 @@ function getBaseUrl(): string {
 }
 
 async function fetchJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (!isNativeRuntimeActive()) throw new Error('Native settings unavailable before resume');
   const url = `${getBaseUrl()}${path}`;
   const headers: Record<string, string> = {};
   if (body !== undefined) {
@@ -53,21 +55,28 @@ class ConfigServiceImpl {
   // Idempotent: concurrent callers share the same in-flight promise, and a
   // resolved init returns immediately. Modules that need persisted settings on
   // module load (theme/language) await whenReady() before reading.
-  initialize(): Promise<void> {
+  initialize(refresh = false): Promise<void> {
+    // Local defaults let the transcript render without marking native settings as loaded.
+    if (!isNativeRuntimeActive()) return Promise.resolve();
+    if (refresh) this.initPromise = null;
     if (this.initPromise) return this.initPromise;
+    const epoch = nativeRuntimeActivationEpoch();
     this.initPromise = (async () => {
       const data = await fetchJson<Record<string, unknown>>('GET', '/api/settings/client');
+      if (!isNativeRuntimeActive() || epoch !== nativeRuntimeActivationEpoch()) throw new Error('Runtime changed');
       this.cache.clear();
       if (data) {
         for (const [key, value] of Object.entries(data)) {
           this.cache.set(key, value);
+          this.notify(key as ConfigKey, value);
         }
       }
       this.initialized = true;
     })();
-    this.initPromise.catch(() => {
+    const attempt = this.initPromise;
+    attempt.catch(() => {
       // Allow a future caller to retry after a transient failure
-      this.initPromise = null;
+      if (this.initPromise === attempt) this.initPromise = null;
     });
     return this.initPromise;
   }
@@ -81,6 +90,7 @@ class ConfigServiceImpl {
   }
 
   async set<K extends ConfigKey>(key: K, value: ConfigKeyMap[K]): Promise<void> {
+    if (!isNativeRuntimeActive()) throw new Error('Native settings unavailable before resume');
     this.cache.set(key, value);
     this.notify(key, value);
     await fetchJson<void>('PUT', '/api/settings/client', { [key]: value });
@@ -92,12 +102,14 @@ class ConfigServiceImpl {
   }
 
   async remove(key: ConfigKey): Promise<void> {
+    if (!isNativeRuntimeActive()) throw new Error('Native settings unavailable before resume');
     this.cache.delete(key);
     this.notify(key, undefined);
     await fetchJson<void>('PUT', '/api/settings/client', { [key]: null });
   }
 
   async setBatch(entries: Partial<{ [K in ConfigKey]: ConfigKeyMap[K] }>): Promise<void> {
+    if (!isNativeRuntimeActive()) throw new Error('Native settings unavailable before resume');
     for (const [key, value] of Object.entries(entries)) {
       this.cache.set(key, value);
       this.notify(key as ConfigKey, value);

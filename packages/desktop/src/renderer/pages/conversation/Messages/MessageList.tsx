@@ -346,7 +346,10 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   // While the agent is still streaming, the in-progress turn's last text keeps
   // moving down, so we defer its copy/timestamp row until the turn finishes to
   // avoid the row flashing in and the layout reflowing mid-stream.
-  const { isProcessing } = useConversationRuntimeView(conversationContext?.conversation_id ?? '');
+  const { isProcessing } = useConversationRuntimeView(
+    conversationContext?.conversation_id ?? '',
+    !conversationContext?.readOnly
+  );
   const { t } = useTranslation();
   const location = useLocation();
   const locationState = (location.state || {}) as ConversationLocationState;

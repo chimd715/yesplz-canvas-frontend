@@ -44,7 +44,12 @@ import './components/workspace/registerWebFsPicker';
 
 // React and core dependencies
 import type { PropsWithChildren } from 'react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import { createRoot } from 'react-dom/client';
 import { SWRConfig } from 'swr';
 import type { TFunction } from 'i18next';
@@ -341,6 +346,7 @@ const Config: React.FC<PropsWithChildren> = ({ children }) => {
 };
 
 const Main = () => {
+  const activationEpoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
   const { ready } = useAuth();
   const [configReady, setConfigReady] = useState(false);
 
@@ -350,9 +356,9 @@ const Main = () => {
   }, [ready]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !isNativeRuntimeActive()) return;
     void repairAllCronJobTimeZonesOnce();
-  }, [ready]);
+  }, [ready, activationEpoch]);
 
   if (!ready || !configReady) {
     return <AppLoader />;

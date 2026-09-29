@@ -5,6 +5,15 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  activateNativeRuntime,
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
+import { configService } from '@/common/config/configService';
 import type { IConversationMcpStatus, IProvider, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
 import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
@@ -16,7 +25,7 @@ import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistan
 import { iconColors } from '@/renderer/styles/colors';
 import { Button, Dropdown, Menu, Message, Tooltip, Typography } from '@arco-design/web-react';
 import { History } from '@icon-park/react';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
@@ -38,6 +47,10 @@ import { resolveConversationBackend } from '../utils/conversationAssistantIdenti
 import LegacyReadOnlyConversation from '../platforms/legacy/LegacyReadOnlyConversation';
 import SingleChatEmptyState from './SingleChatEmptyState';
 import { useActiveLease } from '../hooks/useActiveLease';
+import { NativeAdmissionError, resumeNativeRuntime, submitNativeRequest } from '../platforms/aionrs/durableAdmission';
+import { getRetainedLogicalRequests } from '../platforms/useConversationCommandQueue';
+import { runtimeResumed } from '../runtime/conversationRuntimeViewStore';
+import { useVersionHistory } from './ChatLayout/VersionHistory/context';
 // import SkillRuleGenerator from './components/SkillRuleGenerator'; // Temporarily hidden
 
 const configErrorMessageKey = (error: unknown) => {
@@ -267,7 +280,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
   );
 };
 
-const ChatConversation: React.FC<{
+const NativeChatConversation: React.FC<{
   conversation?: TChatConversation;
   hideSendBox?: boolean;
 }> = ({ conversation, hideSendBox }) => {
@@ -444,6 +457,175 @@ const ChatConversation: React.FC<{
       conversation_id={conversation?.id}
     >
       {conversationNode}
+    </ChatLayout>
+  );
+};
+
+const ChatConversation: React.FC<{
+  conversation?: TChatConversation;
+  hideSendBox?: boolean;
+}> = ({ conversation, hideSendBox }) => {
+  const epoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
+  const versions = useVersionHistory();
+  const { t } = useTranslation();
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<'conflict' | 'unavailable' | null>(null);
+  const inFlight = useRef(false);
+  const currentConversation = useRef(conversation?.id);
+  currentConversation.current = conversation?.id;
+  useEffect(() => setResumeError(null), [conversation?.id]);
+
+  const central = !!getBuilderWorkspace();
+  const workspace = getBuilderWorkspace();
+  const retained =
+    workspace && conversation?.logical_conversation_id
+      ? getRetainedLogicalRequests(
+          `${workspace.ownerId}/${workspace.projectId}`,
+          conversation.logical_conversation_id
+        ).filter(
+          (item) =>
+            item.pending ||
+            item.request?.context.coreId !== conversation.id ||
+            item.request?.context.runtimeGeneration !== conversation.runtime_generation ||
+            item.request?.context.headGeneration !== conversation.head_generation
+        )
+      : [];
+  const {
+    data: receipts,
+    mutate: refreshReceipts,
+    isValidating: checkingReceipts,
+  } = useSWR(
+    retained.length && workspace
+      ? [
+          'central-retained-requests',
+          workspace.ownerId,
+          workspace.projectId,
+          conversation?.logical_conversation_id,
+          epoch,
+        ]
+      : null,
+    async () =>
+      Promise.all(
+        retained.map(async (item) => {
+          if (!item.request) return { id: item.id, recorded: false };
+          try {
+            const receipt = await submitNativeRequest(item.request, item.input, 'lookup');
+            return { id: item.id, recorded: !!receipt?.receipt };
+          } catch {
+            return { id: item.id, recorded: false };
+          }
+        })
+      ),
+    { shouldRetryOnError: false, revalidateOnFocus: false }
+  );
+  const pendingNotice = retained.length ? (
+    <div className='px-20px py-8px text-13px text-t-secondary' role='status'>
+      <div className='flex items-center gap-8px'>
+        <span>{t('conversation.centralRead.pending')}</span>
+        <Button size='mini' loading={checkingReceipts} onClick={() => void refreshReceipts()}>
+          {t('common.retry')}
+        </Button>
+      </div>
+      {retained.map((item) => (
+        <div key={item.request?.requestId ?? item.id} className='flex min-w-0 items-center gap-8px mt-4px'>
+          <span className='truncate flex-1 min-w-0' title={item.input}>
+            {item.input}
+          </span>
+          <span className='shrink-0'>
+            {t(
+              receipts?.find((receipt) => receipt.id === item.id)?.recorded
+                ? 'conversation.commandQueue.requestRecorded'
+                : 'conversation.commandQueue.requestPending'
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : null;
+  const activeContext = getActiveNativeRuntimeContext();
+  const activated =
+    isNativeRuntimeActive() &&
+    (!central ||
+      (!!conversation &&
+        activeContext?.coreId === conversation.id &&
+        activeContext.logicalId === conversation.logical_conversation_id &&
+        activeContext.headGeneration === conversation.head_generation &&
+        activeContext.runtimeGeneration === conversation.runtime_generation));
+  if (activated) {
+    return (
+      <div className='flex flex-col h-full min-h-0'>
+        {pendingNotice}
+        <div className='flex-1 min-h-0'>
+          <NativeChatConversation
+            key={`${conversation?.id}/${epoch}`}
+            conversation={conversation}
+            hideSendBox={hideSendBox}
+          />
+        </div>
+      </div>
+    );
+  }
+  if (!conversation) return null;
+
+  const canResume =
+    central &&
+    !!conversation.logical_conversation_id &&
+    typeof conversation.head_generation === 'number' &&
+    !!conversation.runtime_generation &&
+    versions?.continuationResolved !== false &&
+    !versions?.restoring;
+  const resume = async () => {
+    if (!canResume || inFlight.current) return;
+    inFlight.current = true;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      const resumed = await resumeNativeRuntime({
+        logicalId: conversation.logical_conversation_id!,
+        coreId: conversation.id,
+        runtimeGeneration: conversation.runtime_generation!,
+        headGeneration: conversation.head_generation!,
+      });
+      if (currentConversation.current !== conversation.id) return;
+      runtimeResumed(resumed.coreId, resumed.runtime);
+      activateNativeRuntime(resumed, resumed.activationEpoch);
+      void configService.initialize(true).catch(() => {});
+    } catch (failure) {
+      setResumeError(failure instanceof NativeAdmissionError && failure.status === 409 ? 'conflict' : 'unavailable');
+      void versions?.refresh();
+      emitter.emit('chat.history.refresh');
+    } finally {
+      inFlight.current = false;
+      setResuming(false);
+    }
+  };
+
+  return (
+    <ChatLayout
+      title={conversation.name}
+      conversation_id={conversation.id}
+      isWidget={(conversation.extra as { outputType?: string } | undefined)?.outputType === 'widget'}
+      previewHosted={!!conversation.project_id}
+      workspaceEnabled={false}
+      readOnly
+      sider={null}
+      headerExtra={
+        <Button size='small' type='primary' loading={resuming} disabled={!canResume} onClick={() => void resume()}>
+          {t('conversation.centralRead.resume')}
+        </Button>
+      }
+    >
+      <div role={resumeError ? 'alert' : 'status'} className='px-20px py-8px text-13px text-t-secondary'>
+        {t(
+          resumeError === 'conflict'
+            ? 'conversation.centralRead.conflict'
+            : resumeError
+              ? 'conversation.centralRead.unavailable'
+              : 'conversation.centralRead.description'
+        )}
+      </div>
+      {pendingNotice}
+      <LegacyReadOnlyConversation conversation={conversation} centralReadOnly />
     </ChatLayout>
   );
 };

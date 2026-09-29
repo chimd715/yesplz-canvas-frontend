@@ -1,18 +1,21 @@
 import { ipcBridge } from '@/common';
+import { isNativeRuntimeActive, nativeRuntimeActivationEpoch } from '@/common/adapter/httpBridge';
 import type { EnsureConversationRuntimeResponse } from '@/common/types/platform/acpTypes';
 
 const ensureRuntimeByConversation = new Map<string, Promise<EnsureConversationRuntimeResponse>>();
 
 export function ensureConversationRuntime(conversation_id: string): Promise<EnsureConversationRuntimeResponse> {
-  const existing = ensureRuntimeByConversation.get(conversation_id);
+  if (!isNativeRuntimeActive()) return Promise.reject(new Error('Native runtime unavailable before resume'));
+  const key = `${conversation_id}/${nativeRuntimeActivationEpoch()}`;
+  const existing = ensureRuntimeByConversation.get(key);
   if (existing) {
     return existing;
   }
 
   const promise = ipcBridge.conversation.ensureRuntime.invoke({ conversation_id }).finally(() => {
-    ensureRuntimeByConversation.delete(conversation_id);
+    ensureRuntimeByConversation.delete(key);
   });
-  ensureRuntimeByConversation.set(conversation_id, promise);
+  ensureRuntimeByConversation.set(key, promise);
   return promise;
 }
 

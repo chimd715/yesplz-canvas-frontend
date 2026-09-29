@@ -15,7 +15,83 @@ import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 declare global {
   interface Window {
     __backendPort?: number;
+    __BUILDER_WORKSPACE__?: unknown;
   }
+}
+
+export type BuilderWorkspace = { mode: 'central-read'; ownerId: string; projectId: string };
+export type NativeRuntimeContext = {
+  ownerId: string;
+  projectId: string;
+  logicalId: string;
+  coreId: string;
+  runtimeGeneration: string;
+  headGeneration: number;
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const workspaceBoot = typeof window === 'undefined' ? undefined : window.__BUILDER_WORKSPACE__;
+const workspace = (() => {
+  if (!workspaceBoot || typeof workspaceBoot !== 'object') return null;
+  const value = workspaceBoot as Record<string, unknown>;
+  return value.mode === 'central-read' &&
+    typeof value.ownerId === 'string' &&
+    UUID.test(value.ownerId) &&
+    typeof value.projectId === 'string' &&
+    UUID.test(value.projectId)
+    ? Object.freeze({ mode: 'central-read' as const, ownerId: value.ownerId, projectId: value.projectId })
+    : null;
+})();
+let activeRuntimeContext: Readonly<NativeRuntimeContext> | null = null;
+let activationEpoch = 0;
+const activationListeners = new Set<() => void>();
+
+/** Only authenticated shell metadata opts a hosted workspace into deferred native access. */
+export const getBuilderWorkspace = (): Readonly<BuilderWorkspace> | null => workspace;
+export const isNativeRuntimeActive = (): boolean => workspaceBoot === undefined || activeRuntimeContext !== null;
+export const nativeRuntimeActivationEpoch = (): number => activationEpoch;
+export const getActiveNativeRuntimeContext = (): Readonly<NativeRuntimeContext> | null => activeRuntimeContext;
+export const subscribeNativeRuntimeActivation = (listener: () => void): (() => void) => {
+  activationListeners.add(listener);
+  return () => activationListeners.delete(listener);
+};
+
+/** Called only after a fresh, scope- and generation-validated server resume response. */
+export function activateNativeRuntime(context: NativeRuntimeContext, expectedEpoch: number): void {
+  if (
+    !workspace ||
+    expectedEpoch !== activationEpoch ||
+    context.ownerId !== workspace.ownerId ||
+    context.projectId !== workspace.projectId ||
+    !UUID.test(context.runtimeGeneration) ||
+    !Number.isSafeInteger(context.headGeneration) ||
+    context.headGeneration < 0 ||
+    !/^[A-Za-z0-9_-]{1,100}$/.test(context.logicalId) ||
+    !/^[A-Za-z0-9_-]{1,100}$/.test(context.coreId)
+  )
+    throw new Error('Invalid runtime activation context');
+  activeRuntimeContext = Object.freeze({ ...context });
+  activationEpoch += 1;
+  activationListeners.forEach((listener) => listener());
+}
+
+/** A committed head change requires explicit resume; durable pending requests remain untouched. */
+export function suspendNativeRuntime(): void {
+  if (workspaceBoot === undefined) return;
+  activeRuntimeContext = null;
+  activationEpoch += 1;
+  activationListeners.forEach((listener) => listener());
+}
+
+function isCentralConversationRead(method: string, path: string): boolean {
+  if (method !== 'GET') return false;
+  const pathname = path.split('?')[0];
+  if (pathname === '/api/auth/user' || pathname === '/api/system/current-user' || pathname === '/api/conversations')
+    return true;
+  const match = /^\/api\/conversations\/([A-Za-z0-9_-]{1,100})(?:\/messages(?:\/([A-Za-z0-9_-]{1,100}))?)?$/.exec(
+    pathname
+  );
+  return !!match && !['active-count', 'active', 'clone'].includes(match[1]) && match[2] !== 'latest';
 }
 
 /**
@@ -223,6 +299,14 @@ export async function httpRequest<T>(
   body?: unknown,
   options?: HttpRequestOptions
 ): Promise<T> {
+  if (!isNativeRuntimeActive() && !isCentralConversationRead(method, path)) {
+    throw new BackendHttpError({
+      method,
+      path,
+      status: 503,
+      body: { code: 'NATIVE_RUNTIME_INACTIVE', error: 'Resume this workspace before using the runtime' },
+    });
+  }
   const headers: Record<string, string> = {};
 
   if (body !== undefined) {
@@ -416,6 +500,7 @@ function dispatchWsEvent(eventName: string, payload: unknown): void {
 }
 
 function ensureWs(): void {
+  if (!isNativeRuntimeActive()) return;
   if (typeof window === 'undefined') {
     console.debug('[ensureWs] skipped: no window');
     return;
@@ -438,6 +523,7 @@ function ensureWs(): void {
   const current = ws;
 
   current.addEventListener('open', () => {
+    if (ws !== current || !isNativeRuntimeActive()) return;
     console.debug('[ensureWs] CONNECTED');
     const isReconnect = wsHasOpened;
     wsHasOpened = true;
@@ -450,6 +536,7 @@ function ensureWs(): void {
   });
 
   current.addEventListener('close', (e) => {
+    if (ws !== current) return;
     console.debug('[ensureWs] CLOSED code=' + e.code + ' reason=' + e.reason);
     if (ws === current) ws = null;
     if (e.code === WS_CLOSE_POLICY_VIOLATION) {
@@ -469,6 +556,7 @@ function ensureWs(): void {
   });
 
   current.addEventListener('message', (event: MessageEvent) => {
+    if (!isNativeRuntimeActive() || ws !== current) return;
     try {
       const msg = JSON.parse(event.data as string) as {
         name?: string;
@@ -495,6 +583,7 @@ function ensureWs(): void {
 }
 
 function scheduleWsReconnect(): void {
+  if (!isNativeRuntimeActive()) return;
   if (wsReconnectTimer) return;
   const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempt), 30000);
   wsReconnectAttempt++;
@@ -529,6 +618,7 @@ async function handleWsAuthClose(): Promise<void> {
  * frame was handed to the socket.
  */
 export function wsSend(name: string, data: unknown): boolean {
+  if (!isNativeRuntimeActive()) return false;
   ensureWs();
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     return false;
@@ -541,6 +631,16 @@ export function wsSend(name: string, data: unknown): boolean {
     return false;
   }
 }
+
+subscribeNativeRuntimeActivation(() => {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = null;
+  const previous = ws;
+  ws = null;
+  previous?.close();
+  wsReconnectAttempt = 0;
+  if (isNativeRuntimeActive() && wsListeners.size > 0) ensureWs();
+});
 
 // ---------------------------------------------------------------------------
 // Emitter factory (same shape as bridge.buildEmitter)

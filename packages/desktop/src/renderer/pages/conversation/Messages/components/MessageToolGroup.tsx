@@ -5,6 +5,8 @@
  */
 
 import { ipcBridge } from '@/common';
+import { isNativeRuntimeActive } from '@/common/adapter/httpBridge';
+import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import type { IMessageToolGroup } from '@/common/chat/chatLib';
 import { iconColors } from '@/renderer/styles/colors';
 import { Alert, Button, Image, Message, Radio, Tag, Tooltip } from '@arco-design/web-react';
@@ -161,6 +163,7 @@ const ConfirmationDetails: React.FC<{
   onConfirm: (outcome: ToolConfirmationOutcome) => void;
 }> = ({ content, onConfirm }) => {
   const { t } = useTranslation();
+  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
   const { confirmationDetails } = content;
   if (!confirmationDetails) return;
   const node = useMemo(() => {
@@ -203,7 +206,7 @@ const ConfirmationDetails: React.FC<{
       {content.status === 'Confirming' && (
         <>
           <div className='mt-10px text-t-primary'>{question}</div>
-          <Radio.Group direction='vertical' size='mini' value={selected} onChange={setSelected}>
+          <Radio.Group direction='vertical' size='mini' value={selected} onChange={setSelected} disabled={readOnly}>
             {options.map((item) => {
               return (
                 <Radio key={item.value} value={item.value}>
@@ -213,7 +216,14 @@ const ConfirmationDetails: React.FC<{
             })}
           </Radio.Group>
           <div className='flex justify-start ps-20px'>
-            <Button type='primary' size='mini' disabled={!selected} onClick={() => onConfirm(selected)}>
+            <Button
+              type='primary'
+              size='mini'
+              disabled={readOnly || !selected}
+              onClick={() => {
+                if (!readOnly && isNativeRuntimeActive()) onConfirm(selected);
+              }}
+            >
               {t('messages.confirm')}
             </Button>
           </div>
@@ -234,6 +244,7 @@ const ImageDisplay: React.FC<{
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const { inPreviewGroup } = useContext(ImagePreviewContext);
+  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
 
   // 如果是本地路径，需要加载为 base64 Load local paths as base64
   React.useEffect(() => {
@@ -241,6 +252,11 @@ const ImageDisplay: React.FC<{
       setImageUrl(imgUrl);
       setLoading(false);
     } else {
+      if (readOnly) {
+        setError(true);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(false);
       ipcBridge.fs.getImageBase64
@@ -258,7 +274,7 @@ const ImageDisplay: React.FC<{
           setLoading(false);
         });
     }
-  }, [imgUrl]);
+  }, [imgUrl, readOnly]);
 
   // 获取图片 blob（复用逻辑）Get image blob (reusable logic)
   const getImageBlob = useCallback(async (): Promise<Blob> => {
@@ -492,6 +508,7 @@ const MessageToolGroup: React.FC<IMessageToolGroupProps> = ({ message }) => {
               key={call_id}
               content={content}
               onConfirm={(outcome) => {
+                if (!isNativeRuntimeActive()) return;
                 ipcBridge.conversation.confirmMessage
                   .invoke({
                     confirm_key: outcome,

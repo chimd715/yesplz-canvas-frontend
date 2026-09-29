@@ -15,6 +15,7 @@ import {
   type ConversationCommandQueueRuntimeGate,
   clearScopedCommandQueues,
   commandQueueAuthEpoch,
+  getRetainedLogicalRequests,
   resetConversationCommandQueueBackgroundRunnerForTest,
   useConversationCommandQueue,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
@@ -598,6 +599,23 @@ describe('durable command admission', () => {
   beforeEach(() => {
     sessionStorage.clear();
     clearScopedCommandQueues();
+  });
+
+  it('reads original logical intents across Core continuations only within their owner/project, without changing stored context', () => {
+    const item = {
+      id: 'intent',
+      input: 'Keep my prompt',
+      files: [],
+      created_at: 1,
+      pending: true,
+      request: { requestId, context: pendingContext },
+    };
+    const state = JSON.stringify({ items: [item], mode: 'manual', isPaused: true });
+    sessionStorage.setItem(storageKey('scoped/owner/project/durable'), state);
+    sessionStorage.setItem(storageKey('scoped/other/project/durable'), state);
+    expect(getRetainedLogicalRequests('owner/project', 'logical')).toEqual([expect.objectContaining(item)]);
+    expect(getRetainedLogicalRequests('owner/project', 'another-logical')).toEqual([]);
+    expect(sessionStorage.getItem(storageKey('scoped/owner/project/durable'))).toBe(state);
   });
 
   it('persists before send, preserves uncertain input, and only looks up after remount', async () => {

@@ -5,13 +5,18 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import brandLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
 import PwaPullToRefresh from '@/renderer/components/layout/PwaPullToRefresh';
 import Titlebar from '@/renderer/components/layout/Titlebar';
 import { Layout as ArcoLayout, Tooltip } from '@arco-design/web-react';
 import classNames from 'classnames';
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { setGlobalNavigate } from '@/renderer/utils/navigation';
@@ -183,8 +188,10 @@ const Layout: React.FC<{
   // [content | explorer] row, clamp the explorer width so chat (+ preview) keep
   // their reserve. Active only when a project is bound and on desktop.
   const currentProject = useCurrentProject();
+  useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
+  const nativeActive = isNativeRuntimeActive();
   const { containerRef: mainRowRef, containerWidth: mainRowWidth } = useContainerWidth();
-  const explorerActive = Boolean(currentProject) && !isMobile;
+  const explorerActive = nativeActive && Boolean(currentProject) && !isMobile;
   const { widthPx: explorerWidthPx, createDragHandle: createExplorerDragHandle } = useProjectExplorerColumnWidth(
     mainRowWidth,
     isPreviewOpen,
@@ -195,7 +202,7 @@ const Layout: React.FC<{
   const { collapsed: explorerCollapsed } = useProjectPanelCollapse({
     projectId: currentProject,
     isMobile,
-    active: Boolean(currentProject),
+    active: nativeActive && Boolean(currentProject),
   });
   const toggleExplorer = useCallback(() => {
     dispatchWorkspaceToggleEvent();
@@ -537,7 +544,7 @@ const Layout: React.FC<{
                   </div>
                 </div>
               )}
-              {!isMobile && (
+              {nativeActive && !isMobile && (
                 <ProjectPanelHost
                   widthPx={explorerWidthPx}
                   collapsed={explorerCollapsed}
@@ -550,7 +557,7 @@ const Layout: React.FC<{
             </div>
 
             {/* Mobile overlay: backdrop + fixed panel + floating collapse handle. */}
-            {isMobile && Boolean(currentProject) && (
+            {nativeActive && isMobile && Boolean(currentProject) && (
               <ProjectPanelMobileOverlay
                 projectId={currentProject as string}
                 collapsed={explorerCollapsed}

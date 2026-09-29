@@ -1,4 +1,10 @@
 import { ipcBridge } from '@/common';
+import {
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  suspendNativeRuntime,
+} from '@/common/adapter/httpBridge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +32,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
     !!logicalConversationId &&
     typeof document !== 'undefined' &&
     !window.electronAPI &&
-    !!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]');
+    (!!getBuilderWorkspace() || !!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]'));
   const { data, error, isLoading, isValidating, mutate } = useSWR(
     enabled ? `${versionsPath(logicalConversationId!)}/versions` : null,
     fetchVersions,
@@ -86,6 +92,8 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
     async (messageId?: string) => {
       if (
         !enabled ||
+        !isNativeRuntimeActive() ||
+        (getBuilderWorkspace() && getActiveNativeRuntimeContext()?.coreId !== activeConversationId) ||
         !continuationResolved ||
         restoring ||
         !activeConversationId ||
@@ -138,6 +146,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
       request.current = controller;
       setRestoring(true);
       setRestoreError(null);
+      suspendNativeRuntime();
       try {
         const next = await restoreVersion(
           logicalConversationId,
@@ -146,6 +155,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
           AbortSignal.any([controller.signal, AbortSignal.timeout(180000)])
         );
         if (!controller.signal.aborted) {
+          suspendNativeRuntime();
           await mutate(next, { revalidate: false });
           setSelected({ kind: 'native', revisionId, logicalConversationId });
           const version = next.versions.find((item) => item.id === revisionId);

@@ -24,6 +24,7 @@ import {
   localStopRequested,
   localStopRequestedConversationRuntimeView,
   resetConversationRuntimeViewStoreForTest,
+  runtimeResumed,
   turnCompleted,
   turnCompletedConversationRuntimeView,
 } from '@/renderer/pages/conversation/runtime/conversationRuntimeViewStore';
@@ -42,6 +43,26 @@ const runtime = (overrides: Partial<TConversationRuntimeSummary>): TConversation
 });
 
 describe('conversationRuntimeViewStore', () => {
+  it('replaces stale completion metadata with the actual resumed runtime under the same Core id', () => {
+    resetConversationRuntimeViewStoreForTest();
+    turnCompleted(conversation_id, 'reused-turn', runtime({ turn_id: 'reused-turn' }));
+    runtimeResumed(
+      conversation_id,
+      runtime({
+        state: 'running',
+        can_send_message: false,
+        has_task: true,
+        task_status: 'running',
+        is_processing: true,
+        turn_id: 'reused-turn',
+      })
+    );
+    expect(getConversationRuntimeViewSnapshot(conversation_id)).toMatchObject({
+      isProcessing: true,
+      canSendMessage: false,
+      activeTurnId: 'reused-turn',
+    });
+  });
   it('hydrates a running runtime as processing and not sendable', () => {
     const { view } = hydrateSucceededConversationRuntimeView(
       undefined,

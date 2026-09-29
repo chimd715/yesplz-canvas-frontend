@@ -882,5 +882,12 @@
       "unavailable": "The version could not be saved. Save current work to try again."
     },
     "restoreHistoryUnavailable": "Restore history is unavailable."
+  },
+  "centralRead": {
+    "description": "Saved conversation. Resume to continue working.",
+    "resume": "Resume",
+    "conflict": "This conversation changed. Refresh and try Resume again.",
+    "unavailable": "Resume is unavailable. Your saved conversation is still here.",
+    "pending": "Earlier requests keep their original destination. Check their status before sending again."
   }
 }

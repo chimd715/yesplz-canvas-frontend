@@ -504,6 +504,18 @@ export const hydrateSucceeded = (
   );
 };
 
+/** Replace local metadata after server-verified resume, including a replacement runtime with the same Core id. */
+export const runtimeResumed = (
+  conversation_id: string,
+  runtime: TConversationRuntimeSummary
+): ConversationRuntimeViewLogEntry[] => {
+  runtimeMetadata.delete(conversation_id);
+  return setConversationRuntimeSnapshot(
+    conversation_id,
+    hydrateSucceededConversationRuntimeView(undefined, conversation_id, runtime, getRuntimeMetadata(conversation_id))
+  );
+};
+
 export const hydrateFailed = (conversation_id: string, reason: string): ConversationRuntimeViewLogEntry[] =>
   setConversationRuntimeSnapshot(
     conversation_id,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
+import { getBuilderWorkspace, isNativeRuntimeActive, nativeRuntimeActivationEpoch } from '@/common/adapter/httpBridge';
 
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
 const uuid = z.string().uuid();
@@ -40,6 +41,7 @@ const acceptedSchema = z.object({
   receipt: z.object({ client_request_id: uuid, msg_id: id, turn_id: id }).nullable(),
   runtime: runtimeSchema.optional(),
 });
+const resumedSchema = requestContextSchema.extend({ ownerId: uuid, projectId: uuid, runtime: runtimeSchema });
 
 export class NativeAdmissionError extends Error {
   constructor(readonly status: number) {
@@ -65,7 +67,8 @@ async function request(url: string, method = 'GET', body?: unknown): Promise<Res
 export async function nativeAdmissionCapability(coreId: string): Promise<NativeAdmissionCapability> {
   // Standalone WebUI keeps its existing Core protocol. Hosted failures never
   // downgrade to a non-durable send.
-  if (!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]')) return { protocol: 0 };
+  if (!getBuilderWorkspace() && !document.querySelector('meta[name="ai-builder-preview"][content="enabled"]'))
+    return { protocol: 0 };
   const response = await request(path(coreId));
   if (!response.ok) throw new NativeAdmissionError(response.status);
   const capability = capabilitySchema.parse(await response.json());
@@ -73,11 +76,60 @@ export async function nativeAdmissionCapability(coreId: string): Promise<NativeA
   return capability;
 }
 
+/** Resume is explicit and fenced to the same owned continuation that the transcript resolved. */
+export async function resumeNativeRuntime(expected: {
+  logicalId: string;
+  coreId: string;
+  runtimeGeneration: string;
+  headGeneration: number;
+}) {
+  const workspace = getBuilderWorkspace();
+  const epoch = nativeRuntimeActivationEpoch();
+  if (!workspace) throw new NativeAdmissionError(503);
+  const capability = await nativeAdmissionCapability(expected.coreId);
+  if (
+    capability.protocol !== 1 ||
+    capability.ownerId !== workspace.ownerId ||
+    capability.projectId !== workspace.projectId ||
+    capability.logicalId !== expected.logicalId ||
+    capability.coreId !== expected.coreId ||
+    capability.runtimeGeneration !== expected.runtimeGeneration ||
+    capability.headGeneration !== expected.headGeneration
+  )
+    throw new NativeAdmissionError(409);
+  const context = requestContextSchema.parse(capability);
+  const response = await request(
+    `/api/platform/conversations/${encodeURIComponent(expected.coreId)}/resume`,
+    'POST',
+    context
+  );
+  if (!response.ok) throw new NativeAdmissionError(response.status);
+  const resumed = resumedSchema.parse(await response.json());
+  if (
+    resumed.ownerId !== workspace.ownerId ||
+    resumed.projectId !== workspace.projectId ||
+    JSON.stringify(requestContextSchema.parse(resumed)) !== JSON.stringify(context) ||
+    nativeRuntimeActivationEpoch() !== epoch
+  )
+    throw new NativeAdmissionError(409);
+  return {
+    ownerId: resumed.ownerId,
+    projectId: resumed.projectId,
+    logicalId: resumed.logicalId,
+    coreId: resumed.coreId,
+    runtimeGeneration: resumed.runtimeGeneration,
+    headGeneration: resumed.headGeneration,
+    runtime: resumed.runtime,
+    activationEpoch: epoch,
+  };
+}
+
 export async function submitNativeRequest(
   pending: PendingNativeRequest,
   content: string,
   action: 'send' | 'lookup' | 'reconcile'
 ) {
+  if (action !== 'lookup' && !isNativeRuntimeActive()) throw new NativeAdmissionError(503);
   const base = path(pending.context.coreId);
   const response = await request(
     action === 'send' ? base : `${base}/${pending.requestId}${action === 'reconcile' ? '/reconcile' : ''}`,

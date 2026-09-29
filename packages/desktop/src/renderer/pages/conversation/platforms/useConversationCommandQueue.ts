@@ -324,6 +324,34 @@ const readPersistedQueueState = (conversation_id: string): ConversationCommandQu
 export const hasRetainedCommandRequests = (scope: string, conversationId: string): boolean =>
   readPersistedQueueState(`scoped/${scope}/${conversationId}`).items.some((item) => !!item.request || item.pending);
 
+/** Read original owner/project-scoped intents across continuations without moving or rewriting them. */
+export const getRetainedLogicalRequests = (scope: string, logicalId: string): ConversationCommandQueueItem[] => {
+  const prefix = `scoped/${scope}/`;
+  const keys = new Set([...queueStore.keys()].filter((key) => key.startsWith(prefix)));
+  try {
+    for (const key of Object.keys(sessionStorage))
+      if (key.startsWith(`conversation-command-queue/${prefix}`))
+        keys.add(key.slice('conversation-command-queue/'.length));
+  } catch {
+    /* unavailable browser storage leaves existing in-memory intents visible */
+  }
+  return [...keys].flatMap((key) => {
+    let state = queueStore.get(key);
+    if (!state) {
+      try {
+        state = normalizeQueueState(JSON.parse(sessionStorage.getItem(getStorageKey(key)) ?? '{}'));
+      } catch {
+        return [];
+      }
+    }
+    return state.items
+      .filter(
+        (item) => (item.pending || !!item.request) && (!item.request || item.request.context.logicalId === logicalId)
+      )
+      .map((item) => structuredClone(item));
+  });
+};
+
 const removePersistedQueueState = (conversation_id: string): void => {
   queueStore.delete(conversation_id);
   if (typeof window !== 'undefined') {

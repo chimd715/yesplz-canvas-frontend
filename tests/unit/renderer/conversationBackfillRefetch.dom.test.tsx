@@ -21,6 +21,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IConversationListChangedEvent } from '@/common/adapter/ipcBridge';
 import type { TChatConversation } from '@/common/config/storage';
+import type { NativeRuntimeContext } from '@/common/adapter/httpBridge';
+
+const nativeActivation = vi.hoisted(() => ({
+  context: null as NativeRuntimeContext | null,
+  epoch: 0,
+  suspend: vi.fn(),
+}));
+vi.mock('@/common/adapter/httpBridge', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getBuilderWorkspace: () =>
+    nativeActivation.context
+      ? {
+          mode: 'central-read',
+          ownerId: nativeActivation.context.ownerId,
+          projectId: nativeActivation.context.projectId,
+        }
+      : null,
+  getActiveNativeRuntimeContext: () => nativeActivation.context,
+  nativeRuntimeActivationEpoch: () => nativeActivation.epoch,
+  subscribeNativeRuntimeActivation: () => () => {},
+  suspendNativeRuntime: nativeActivation.suspend,
+}));
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 vi.mock('react-router-dom', () => ({
@@ -128,6 +150,42 @@ describe('logical conversation routing', () => {
     meta.content = 'enabled';
     document.head.append(meta);
   };
+  it('suspends an old activation when the authoritative same logical conversation resolves to another Core continuation', async () => {
+    enableVersions();
+    nativeActivation.context = {
+      ownerId: '11111111-1111-4111-8111-111111111111',
+      projectId: '22222222-2222-4222-8222-222222222222',
+      logicalId: 'same-logical',
+      coreId: 'old-core',
+      runtimeGeneration: '33333333-3333-4333-8333-333333333333',
+      headGeneration: 1,
+    };
+    nativeActivation.suspend.mockClear();
+    getConversationOrNull.mockResolvedValue({
+      ...conv(null),
+      id: 'new-core',
+      logical_conversation_id: 'same-logical',
+      head_generation: 2,
+      runtime_generation: '44444444-4444-4444-8444-444444444444',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input) =>
+        String(input).includes('/source-versions?')
+          ? Response.json({ configured: false, versions: [], cards: [] })
+          : Response.json({
+              activeCoreConversationId: 'new-core',
+              activeRevisionId: null,
+              headGeneration: 2,
+              versions: [],
+              reverted: [],
+            })
+      )
+    );
+    renderIndex();
+    await waitFor(() => expect(nativeActivation.suspend).toHaveBeenCalled());
+    nativeActivation.context = null;
+  });
   it('resolves the logical id before mounting its active Core continuation', async () => {
     enableVersions();
     let resolve!: (response: Response) => void;

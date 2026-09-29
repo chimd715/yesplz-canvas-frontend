@@ -5,6 +5,13 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+  suspendNativeRuntime,
+} from '@/common/adapter/httpBridge';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import CommandQueuePanel from '@/renderer/components/chat/CommandQueuePanel';
@@ -30,6 +37,7 @@ import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import {
   useConversationCommandQueue,
   hasRetainedCommandRequests,
+  getRetainedLogicalRequests,
   commandQueueAuthEpoch,
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
@@ -52,7 +60,7 @@ import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/me
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
@@ -162,11 +170,24 @@ const AionrsSendBox: React.FC<{
   );
   const runtimeView = useConversationRuntimeView(conversation_id);
   const { markSendStarted, markSendAccepted, markSendFailed, markSendRecorded } = runtimeView;
+  const activationEpoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
   const { data: admission, error: admissionError } = useSWR(
-    teamPermission ? null : ['native-admission', conversation_id, commandQueueAuthEpoch()],
+    teamPermission ? null : ['native-admission', conversation_id, commandQueueAuthEpoch(), activationEpoch],
     () => nativeAdmissionCapability(conversation_id),
     { shouldRetryOnError: false, revalidateOnFocus: true }
   );
+  useEffect(() => {
+    const active = getActiveNativeRuntimeContext();
+    if (
+      getBuilderWorkspace() &&
+      active?.coreId === conversation_id &&
+      admission?.protocol === 1 &&
+      (admission.runtimeGeneration !== active.runtimeGeneration ||
+        admission.headGeneration !== active.headGeneration ||
+        admission.logicalId !== active.logicalId)
+    )
+      suspendNativeRuntime();
+  }, [admission, conversation_id]);
   const requestScope = admission && 'ownerId' in admission ? `${admission.ownerId}/${admission.projectId}` : undefined;
   const durable =
     admission?.protocol === 1 || Boolean(requestScope && hasRetainedCommandRequests(requestScope, conversation_id));
@@ -282,10 +303,25 @@ const AionrsSendBox: React.FC<{
       action: 'send' | 'lookup' | 'reconcile' = 'send'
     ): Promise<void | false | 'recorded'> => {
       const ownerEpoch = commandQueueAuthEpoch();
+      if (
+        action === 'send' &&
+        admission?.protocol === 1 &&
+        getRetainedLogicalRequests(`${admission.ownerId}/${admission.projectId}`, admission.logicalId).some(
+          (item) =>
+            item.request?.requestId !== request?.requestId &&
+            (item.pending ||
+              item.request?.context.coreId !== conversation_id ||
+              item.request?.context.runtimeGeneration !== admission.runtimeGeneration ||
+              item.request?.context.headGeneration !== admission.headGeneration)
+        )
+      ) {
+        Message.warning(t('conversation.commandQueue.requestPending'));
+        return false;
+      }
       if (request) {
         if (
           (action !== 'lookup' && (admission?.protocol !== 1 || admissionError)) ||
-          request.context.coreId !== conversation_id
+          (action !== 'lookup' && request.context.coreId !== conversation_id)
         )
           throw new Error('Native admission unavailable');
         if (files.length || sessions?.length || input.trimStart().startsWith('/')) {
@@ -295,6 +331,12 @@ const AionrsSendBox: React.FC<{
         try {
           const accepted = await submitNativeRequest(request, input, action);
           if (ownerEpoch !== commandQueueAuthEpoch() || !accepted?.receipt) return false;
+          if (
+            action === 'lookup' &&
+            admission?.protocol === 1 &&
+            JSON.stringify(request.context) !== JSON.stringify(requestContextSchema.parse(admission))
+          )
+            return 'recorded';
           if (accepted.runtime?.turn_id === accepted.receipt.turn_id) setActiveMsgId(accepted.receipt.msg_id);
           if (accepted.runtime) markSendAccepted(accepted.receipt.turn_id, accepted.runtime, accepted.receipt.msg_id);
           else markSendRecorded();

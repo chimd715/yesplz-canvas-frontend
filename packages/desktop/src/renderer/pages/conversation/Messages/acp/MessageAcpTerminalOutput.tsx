@@ -9,6 +9,8 @@ import type { IMessageAcpTerminalOutput } from '@/common/chat/chatLib';
 import { Button, Card, Tag } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
+import { isNativeRuntimeActive } from '@/common/adapter/httpBridge';
 
 /**
  * Live card for a client-hosted terminal (ACP terminal/*): the delegated
@@ -18,6 +20,7 @@ import { useTranslation } from 'react-i18next';
  */
 const MessageAcpTerminalOutput: React.FC<{ message: IMessageAcpTerminalOutput }> = ({ message }) => {
   const { t } = useTranslation();
+  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
   const { content, conversation_id } = message;
   const outputRef = useRef<HTMLPreElement>(null);
   const [killing, setKilling] = useState(false);
@@ -33,7 +36,7 @@ const MessageAcpTerminalOutput: React.FC<{ message: IMessageAcpTerminalOutput }>
   }, [content?.output, running]);
 
   const handleStop = useCallback(async () => {
-    if (!conversation_id || !content?.terminal_id) return;
+    if (readOnly || !isNativeRuntimeActive() || !conversation_id || !content?.terminal_id) return;
     setKilling(true);
     try {
       await ipcBridge.conversation.killTerminal.invoke({
@@ -44,7 +47,7 @@ const MessageAcpTerminalOutput: React.FC<{ message: IMessageAcpTerminalOutput }>
       console.error('[MessageAcpTerminalOutput] kill failed:', error);
       setKilling(false);
     }
-  }, [conversation_id, content?.terminal_id]);
+  }, [conversation_id, content?.terminal_id, readOnly]);
 
   if (!content?.terminal_id) {
     return null;
@@ -76,7 +79,7 @@ const MessageAcpTerminalOutput: React.FC<{ message: IMessageAcpTerminalOutput }>
           $ {content.command}
         </code>
         {statusTag}
-        {running && (
+        {running && !readOnly && (
           <Button size='mini' status='danger' loading={killing} onClick={handleStop} data-testid='terminal-card-stop'>
             {t('conversation.terminal.stop', { defaultValue: 'Stop' })}
           </Button>

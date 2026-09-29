@@ -32,7 +32,7 @@
  * `browser.ts` can share it without bootstrapping each other's WebSocket.
  */
 
-import { resolveCoreCsrfToken } from './httpBridge';
+import { isNativeRuntimeActive, resolveCoreCsrfToken } from './httpBridge';
 
 /** WebSocket close code the backend uses for auth policy violations (RFC 6455 §7.4.1). */
 export const WS_CLOSE_POLICY_VIOLATION = 1008;
@@ -64,7 +64,7 @@ let inFlight: Promise<boolean> | null = null;
  * callers branch on the boolean and fall back to their existing failure handling.
  */
 export function refreshSession(): Promise<boolean> {
-  if (!isWebUiBrowserMode()) {
+  if (!isWebUiBrowserMode() || !isNativeRuntimeActive()) {
     // Desktop/local mode has no refreshable cookie session.
     return Promise.resolve(false);
   }

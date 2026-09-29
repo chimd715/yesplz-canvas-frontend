@@ -332,49 +332,61 @@ export const getSnapshotConversationName = (conversation_id: string): string | u
   return name ? name : undefined;
 };
 
-const refreshConversations = () => {
-  void ipcBridge.database.getUserConversations
-    .invoke({ limit: 10000 })
-    .then((result) => {
-      const items = result?.items;
-      if (items && Array.isArray(items)) {
-        const filteredData = items.filter((conv) => {
-          // Legacy rows from the pre-provider-probe health check flow are hidden
-          // from normal history. New health checks must not create conversations.
-          const extra = conv.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
-          return extra?.is_health_check !== true && !extra?.team_id && !extra?.teamId;
-        });
-        conversationsState = filteredData;
-        // Use ALL conversation IDs (including team/legacy health-check rows) so the
-        // responseStream listener recognises them as known and doesn't
-        // trigger an infinite refreshConversations loop.
-        conversation_idsState = new Set(items.map((conversation) => conversation.id));
-        // Map ALL rows (unfiltered) so a team member conversation's project_id is
-        // resolvable too — the team route looks up its leader conversation here.
-        projectIdByIdState = new Map(
-          items.flatMap(
-            (conversation): Array<[string, string | null]> => [
-              [conversation.id, conversation.project_id ?? null],
-              [conversation.logical_conversation_id ?? conversation.id, conversation.project_id ?? null],
-            ]
-          )
-        );
-        emitStoreChange();
-        return;
-      }
+let latestConversationListRefresh = 0;
 
-      conversationsState = [];
-      conversation_idsState = new Set();
-      projectIdByIdState = new Map();
-      emitStoreChange();
-    })
-    .catch((error) => {
-      console.error('[WorkspaceGroupedHistory] Failed to load conversations:', error);
-      conversationsState = [];
-      conversation_idsState = new Set();
-      projectIdByIdState = new Map();
-      emitStoreChange();
+const refreshConversations = () => {
+  const refreshId = ++latestConversationListRefresh;
+  void (async () => {
+    const rows = new Map<string, TChatConversation>();
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    while (true) {
+      // eslint-disable-next-line no-await-in-loop -- Each page needs the previous page's cursor.
+      const result = await ipcBridge.database.getUserConversations.invoke({
+        limit: 200,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (refreshId !== latestConversationListRefresh) return;
+      if (!Array.isArray(result?.items) || result.items.some((row) => typeof row?.id !== 'string' || !row.id.trim())) {
+        throw new Error('Invalid conversation history page');
+      }
+      for (const row of result.items) {
+        if (!rows.has(row.id)) rows.set(row.id, row);
+      }
+      if (!result.has_more) break;
+      // Core can skip unreadable rows, so a short page does not imply completion.
+      const nextCursor = result.items.at(-1)?.id;
+      if (!nextCursor || cursors.has(nextCursor)) throw new Error('Conversation history cursor did not advance');
+      cursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+
+    // Replace the snapshot only after every page succeeds; failed reads retain it.
+    const items = [...rows.values()];
+    conversationsState = items.filter((conv) => {
+      // Legacy rows from the pre-provider-probe health check flow are hidden
+      // from normal history. New health checks must not create conversations.
+      const extra = conv.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
+      return extra?.is_health_check !== true && !extra?.team_id && !extra?.teamId;
     });
+    // Use ALL conversation IDs (including team/legacy health-check rows) so the
+    // responseStream listener recognises them as known and doesn't
+    // trigger an infinite refreshConversations loop.
+    conversation_idsState = new Set(items.map((conversation) => conversation.id));
+    // Map ALL rows (unfiltered) so a team member conversation's project_id is
+    // resolvable too — the team route looks up its leader conversation here.
+    projectIdByIdState = new Map(
+      items.flatMap(
+        (conversation): Array<[string, string | null]> => [
+          [conversation.id, conversation.project_id ?? null],
+          [conversation.logical_conversation_id ?? conversation.id, conversation.project_id ?? null],
+        ]
+      )
+    );
+    emitStoreChange();
+  })().catch((error) => {
+    console.error('[WorkspaceGroupedHistory] Failed to load conversations:', error);
+  });
 };
 
 /** Source of a generating-state transition, logged for field diagnosis. */

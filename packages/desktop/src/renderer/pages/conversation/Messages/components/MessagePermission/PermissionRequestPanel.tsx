@@ -9,6 +9,8 @@ import { Attention, CheckOne } from '@icon-park/react';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
+import { isNativeRuntimeActive } from '@/common/adapter/httpBridge';
 import styles from './PermissionRequestPanel.module.css';
 import {
   getPermissionOptionsIdentity,
@@ -44,6 +46,7 @@ export const PermissionRequestPanel: React.FC<PermissionRequestPanelProps> = ({
   onConfirm,
 }) => {
   const { t } = useTranslation();
+  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
   const optionsIdentity = getPermissionOptionsIdentity(options);
   const [isResponding, setIsResponding] = useState(false);
   const [hasResponded, setHasResponded] = useState(false);
@@ -76,7 +79,7 @@ export const PermissionRequestPanel: React.FC<PermissionRequestPanelProps> = ({
   // or the option set has changed underneath us.
   const submitOption = useCallback(
     async (option: PermissionPanelOption) => {
-      if (respondingRef.current || hasResponded || option.disabled) return;
+      if (readOnly || !isNativeRuntimeActive() || respondingRef.current || hasResponded || option.disabled) return;
 
       const requestEpoch = requestEpochRef.current;
       const optionsEpoch = optionsEpochRef.current;
@@ -102,7 +105,7 @@ export const PermissionRequestPanel: React.FC<PermissionRequestPanelProps> = ({
         }
       }
     },
-    [hasResponded, onConfirm]
+    [hasResponded, onConfirm, readOnly]
   );
 
   return (
@@ -127,7 +130,7 @@ export const PermissionRequestPanel: React.FC<PermissionRequestPanelProps> = ({
 
         {!hasResponded && (
           <>
-            <fieldset className={styles.optionsFieldset} disabled={isResponding}>
+            <fieldset className={styles.optionsFieldset} disabled={isResponding || readOnly}>
               <legend id={optionsLabelId} className={styles.optionsLegend}>
                 {t('messages.chooseAction')}
               </legend>
@@ -143,8 +146,8 @@ export const PermissionRequestPanel: React.FC<PermissionRequestPanelProps> = ({
                       key={option.id}
                       className={styles.optionButton}
                       data-testid={option.testId}
-                      data-disabled={Boolean(option.disabled || isResponding)}
-                      disabled={option.disabled || isResponding}
+                      data-disabled={Boolean(option.disabled || isResponding || readOnly)}
+                      disabled={option.disabled || isResponding || readOnly}
                       loading={submittingId === option.id}
                       onClick={() => void submitOption(option)}
                     >

@@ -1,9 +1,16 @@
 import { ipcBridge } from '@/common';
+import {
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { copyText } from '@/renderer/utils/ui/clipboard';
 import { Button, Input, Link, Message, Popover, Select } from '@arco-design/web-react';
 import { Code, Copy, Rocket } from '@icon-park/react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import styles from './PublishButton.module.css';
@@ -89,10 +96,19 @@ const fetchStatus = async (url: string): Promise<PublishingStatus> =>
   );
 
 /** Publishing is available only when the project gateway confirms this conversation's source. */
-const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = ({ conversationId, isWidget }) => {
+const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; readOnly?: boolean }> = ({
+  conversationId,
+  isWidget,
+  readOnly,
+}) => {
   const { t } = useTranslation();
   const versions = useVersionHistory();
   const selection = versions?.selection;
+  useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
+  const currentWorkActive =
+    !readOnly &&
+    isNativeRuntimeActive() &&
+    (!getBuilderWorkspace() || getActiveNativeRuntimeContext()?.coreId === conversationId);
   const revisionId = selection?.kind === 'native' ? selection.revisionId : undefined;
   const sourceVersionId = selection?.kind === 'source' ? selection.sourceVersionId : undefined;
   const logicalConversationId = selection?.kind === 'native' ? selection.logicalConversationId : undefined;
@@ -102,9 +118,12 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
       ? `&logicalConversationId=${encodeURIComponent(logicalConversationId)}${revisionId ? `&revisionId=${encodeURIComponent(revisionId)}` : ''}`
       : '';
   const enabled = !isElectronDesktop() && /^https?:$/.test(window.location.protocol);
+  const canReadStatus = enabled && (currentWorkActive || !!sourceVersionId || !!revisionId);
   const [embedVisible, setEmbedVisible] = useState(false);
   const { data, error, isValidating, mutate } = useSWR<PublishingStatus>(
-    enabled ? `/api/platform/publishing?conversationId=${encodeURIComponent(conversationId)}${versionQuery}` : null,
+    canReadStatus
+      ? `/api/platform/publishing?conversationId=${encodeURIComponent(conversationId)}${versionQuery}`
+      : null,
     fetchStatus,
     {
       shouldRetryOnError: false,
@@ -118,7 +137,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
     isValidating: checkingEmbed,
     mutate: refreshEmbed,
   } = useSWR<PublishingStatus>(
-    enabled && embedVisible
+    canReadStatus && embedVisible
       ? `/api/platform/publishing/embed?conversationId=${encodeURIComponent(conversationId)}${versionQuery}`
       : null,
     fetchStatus,
@@ -157,7 +176,14 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
   }, [revisionId, sourceVersionId]);
 
   useEffect(() => {
-    if (!enabled || !isWidget || !versions?.continuationResolved || !versions.sourceHistory?.configured) return;
+    if (
+      !currentWorkActive ||
+      !enabled ||
+      !isWidget ||
+      !versions?.continuationResolved ||
+      !versions.sourceHistory?.configured
+    )
+      return;
     return ipcBridge.conversation.turnCompleted?.on((event) => {
       const messageId = event.last_message.id;
       if (
@@ -177,6 +203,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
     });
   }, [
     enabled,
+    currentWorkActive,
     isWidget,
     conversationId,
     versions?.continuationResolved,
@@ -230,7 +257,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
         !versions.sourceLoading
       : selection?.kind === 'native'
         ? versions?.selectedVersion?.status === 'ready' && !versions.restoring && !versions.error
-        : !versions?.restoring && versions?.continuationResolved !== false;
+        : currentWorkActive && !versions?.restoring && versions?.continuationResolved !== false;
   const canPublish =
     data.workspaceMatches &&
     !unavailable &&
@@ -361,6 +388,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean }> = 
             long
             loading={versions.saving}
             disabled={
+              !currentWorkActive ||
               busy ||
               versions.restoring ||
               !versions.continuationResolved ||

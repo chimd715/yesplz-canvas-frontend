@@ -11,6 +11,8 @@ import { CheckOne } from '@icon-park/react';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { emitter } from '@/renderer/utils/emitter';
+import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
+import { isNativeRuntimeActive } from '@/common/adapter/httpBridge';
 // The permission panel's stylesheet supplies the shared card chrome; own.* adds
 // the question-specific pieces (option rows with secondary description lines),
 // built on the same tokens so the two cards read as siblings (user feedback,
@@ -70,6 +72,7 @@ export const isStorePlatformQuestion = (q: IAskQuestion) =>
  */
 const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, onAnswer }) => {
   const { t } = useTranslation();
+  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
   const content = message.content || ({} as IMessageAsk['content']);
   const questions = useMemo<IAskQuestion[]>(
     () => (Array.isArray(content.questions) ? content.questions : []),
@@ -90,7 +93,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
   const requestId = content.request_id || message.id;
 
   const handleSubmit = useCallback(async () => {
-    if (submitting) return;
+    if (readOnly || !isNativeRuntimeActive() || submitting) return;
     setSubmitting(true);
     setConnectionError(false);
     try {
@@ -133,10 +136,10 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
     } finally {
       setSubmitting(false);
     }
-  }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer]);
+  }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer, readOnly]);
 
   const handleDecline = useCallback(async () => {
-    if (submitting) return;
+    if (readOnly || !isNativeRuntimeActive() || submitting) return;
     setSubmitting(true);
     setConnectionError(false);
     try {
@@ -152,7 +155,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
     } finally {
       setSubmitting(false);
     }
-  }, [message.conversation_id, requestId, onAnswer, submitting]);
+  }, [message.conversation_id, requestId, onAnswer, submitting, readOnly]);
 
   if (!questions.length) return null;
 
@@ -174,7 +177,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                   placeholder={t('messages.askParameterPlaceholder')}
                   value={d.other}
                   onChange={(other) => updateDraft(qi, { other, otherSelected: true })}
-                  disabled={submitted !== null || submitting}
+                  disabled={readOnly || submitted !== null || submitting}
                   maxLength={4000}
                   data-testid={`message-question-other-input-${qi}`}
                 />
@@ -183,7 +186,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                   className={own.optionList}
                   value={d.labels}
                   onChange={(labels) => updateDraft(qi, { labels: labels as string[] })}
-                  disabled={submitted !== null}
+                  disabled={readOnly || submitted !== null}
                 >
                   {q.options.map((opt) => (
                     <Checkbox
@@ -204,12 +207,13 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                   className={own.optionList}
                   value={d.otherSelected ? OTHER_VALUE : d.labels[0]}
                   onChange={(value) => {
+                    if (readOnly || !isNativeRuntimeActive()) return;
                     if (value === 'Shopify' && isStorePlatformQuestion(q))
                       emitter.emit('connectors.shopify.open', true, message.conversation_id);
                     if (value === OTHER_VALUE) updateDraft(qi, { labels: [], otherSelected: true });
                     else updateDraft(qi, { labels: [value], otherSelected: false });
                   }}
-                  disabled={submitted !== null || submitting}
+                  disabled={readOnly || submitted !== null || submitting}
                 >
                   {q.options.map((opt) => (
                     <Radio
@@ -241,7 +245,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                       placeholder={t('messages.askOtherPlaceholder')}
                       value={d.other}
                       onChange={(v) => updateDraft(qi, { other: v })}
-                      disabled={submitted !== null}
+                      disabled={readOnly || submitted !== null}
                       data-testid={`message-question-other-input-${qi}`}
                     />
                   ) : null}
@@ -260,14 +264,19 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
             <Button
               type='primary'
               size='small'
-              disabled={!allAnswered}
+              disabled={readOnly || !allAnswered}
               loading={submitting}
               onClick={handleSubmit}
               data-testid='message-question-submit'
             >
               {t('messages.askSubmit')}
             </Button>
-            <Button size='small' disabled={submitting} onClick={handleDecline} data-testid='message-question-decline'>
+            <Button
+              size='small'
+              disabled={readOnly || submitting}
+              onClick={handleDecline}
+              data-testid='message-question-decline'
+            >
               {t('messages.askDecline')}
             </Button>
           </div>
