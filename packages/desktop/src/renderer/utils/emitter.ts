@@ -17,6 +17,7 @@ export type ReplyQuote = {
 };
 
 interface EventTypes {
+  'connectors.shopify.open': [boolean, string?]; // waiting question, optional target conversation
   // The 2nd arg is the target conversation id: only the send box whose
   // conversation matches consumes the event (team renders one send box per
   // member column, so a bare type prefix alone would leak to same-type peers).

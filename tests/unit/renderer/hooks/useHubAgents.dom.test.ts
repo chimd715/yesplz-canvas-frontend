@@ -49,7 +49,7 @@ vi.mock('@/renderer/utils/model/agentLogo', () => ({
 vi.mock('@/renderer/pages/settings/components/SettingsPageWrapper', () => ({
   default: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children),
 }));
-import PluginsSettings from '@/renderer/pages/settings/ToolsSettings/PluginsSettings';
+import PluginsSettings, { ConnectorCatalog } from '@/renderer/pages/settings/ToolsSettings/PluginsSettings';
 import { ipcBridge } from '@/common';
 
 import { mutate } from 'swr';
@@ -92,4 +92,38 @@ it('shows Shopify independently of an empty agent catalog without starting authe
   expect(ipcBridge.hub.getExtensionList.invoke).not.toHaveBeenCalled();
   expect(ipcBridge.hub.install.invoke).not.toHaveBeenCalled();
   fetchMock.mockRestore();
+});
+
+it('confirms a conversation-selected store only after loading its connection and keeps Skip non-authorizing', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({
+      available: true,
+      connected: true,
+      shop: 'demo.myshopify.com',
+      stores: [{ shop: 'demo.myshopify.com', connected: true }],
+    })
+  );
+  const onSelected = vi.fn();
+  const onCancel = vi.fn();
+  try {
+    render(
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: ['/conversation/widget-1'] },
+        React.createElement(ConnectorCatalog, { compact: true, onSelected, onCancel })
+      )
+    );
+    expect(onSelected).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.plugins.shopify.useStore' }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/platform/connectors/shopify?conversationId=widget-1',
+      expect.objectContaining({ credentials: 'same-origin' })
+    );
+    expect(onSelected).toHaveBeenCalledWith('demo.myshopify.com');
+    fireEvent.click(screen.getByRole('button', { name: 'settings.plugins.shopify.skip' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  } finally {
+    fetchMock.mockRestore();
+  }
 });

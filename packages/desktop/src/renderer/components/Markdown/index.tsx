@@ -13,6 +13,8 @@ import rehypeRaw from 'rehype-raw';
 import 'katex/dist/katex.min.css';
 
 import { openExternalUrl } from '@/renderer/utils/platform';
+import { emitter } from '@/renderer/utils/emitter';
+import { Button } from '@arco-design/web-react';
 import { parseHttpUrl } from '@/renderer/utils/url';
 import { useOptionalPreviewContext } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
 import classNames from 'classnames';
@@ -99,6 +101,18 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         a: ({ node: _node, ...rest }: Record<string, unknown>) => {
           const anchorProps = rest as React.AnchorHTMLAttributes<HTMLAnchorElement>;
           const rawHref = typeof anchorProps.href === 'string' ? anchorProps.href : '';
+          if (rawHref === '#connect-shopify') {
+            return (
+              <Button
+                className='markdown-local-file-link'
+                size='small'
+                type='text'
+                onClick={() => emitter.emit('connectors.shopify.open', false)}
+              >
+                {t('settings.plugins.shopify.connect')}
+              </Button>
+            );
+          }
           const localFileReference = resolveLocalFileLinkReference(rawHref);
           if (localFileReference) {
             return (
@@ -122,7 +136,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
           return <img {...imgProps} alt={imgProps.alt || ''} />;
         },
       }),
-      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink]
+      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink, t]
     );
 
     const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeKatex] : [rehypeKatex]), [allowHtml]);

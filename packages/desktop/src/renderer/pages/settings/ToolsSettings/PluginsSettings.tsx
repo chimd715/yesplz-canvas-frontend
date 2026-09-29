@@ -13,9 +13,20 @@ type StoreStatus = {
   stores?: { shop: string; connected: boolean }[];
 };
 
-const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ conversationId }) => {
+type ConnectorOptions = {
+  compact?: boolean;
+  onCancel?: () => void;
+  onSelected?: (shop: string) => void;
+};
+
+const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: string }> = ({
+  conversationId,
+  compact,
+  onCancel,
+  onSelected,
+}) => {
   const { t } = useTranslation();
-  const [showShopify, setShowShopify] = useState(false);
+  const [showShopify, setShowShopify] = useState(compact === true);
   const [connection, setConnection] = useState<StoreStatus>({
     available: false,
     connected: false,
@@ -76,7 +87,7 @@ const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ convers
     setConnecting(true);
     setError(false);
     try {
-      const path = '/' + window.location.hash;
+      const path = conversationId ? '/#/conversation/' + conversationId : '/' + window.location.hash;
       const returnPath = /^\/#\/(guid|settings\/plugins|conversation\/[A-Za-z0-9_-]{1,100})$/.test(path)
         ? path
         : '/#/guid';
@@ -113,32 +124,38 @@ const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ convers
       )}
       {showShopify ? (
         <div className='flex flex-col gap-20px py-8px'>
-          <Button
-            type='text'
-            className='self-start !px-0'
-            icon={<ArrowLeft size={16} />}
-            onClick={() => setShowShopify(false)}
-          >
-            {t('settings.plugins.back')}
-          </Button>
+          {!compact && (
+            <Button
+              type='text'
+              className='self-start !px-0'
+              icon={<ArrowLeft size={16} />}
+              onClick={() => setShowShopify(false)}
+            >
+              {t('settings.plugins.back')}
+            </Button>
+          )}
           <div className='flex items-start gap-16px'>
             <Shop size={32} className='shrink-0 text-t-secondary' />
             <div className='min-w-0'>
               <h2 className='m-0 text-20px font-600 text-t-primary'>{t('settings.plugins.shopify.name')}</h2>
-              <p className='mt-8px mb-0 text-14px text-t-secondary'>{t('settings.plugins.shopify.description')}</p>
+              <p className='mt-8px mb-0 text-14px text-t-secondary'>
+                {t(compact ? 'settings.plugins.shopify.confirmDescription' : 'settings.plugins.shopify.description')}
+              </p>
             </div>
           </div>
           <div className='border-t border-border-2 pt-16px'>
             <h3 className='m-0 text-14px font-600 text-t-primary'>{t('settings.plugins.shopify.connection')}</h3>
             <p className='mt-8px mb-0 text-13px text-t-secondary'>{t('settings.plugins.shopify.flow')}</p>
           </div>
-          <div>
-            <h3 className='m-0 text-14px font-600 text-t-primary'>{t('settings.plugins.shopify.capabilities')}</h3>
-            <ul className='my-8px pl-20px text-13px text-t-secondary leading-7'>
-              <li>{t('settings.plugins.shopify.products')}</li>
-              <li>{t('settings.plugins.shopify.collections')}</li>
-            </ul>
-          </div>
+          {!compact && (
+            <div>
+              <h3 className='m-0 text-14px font-600 text-t-primary'>{t('settings.plugins.shopify.capabilities')}</h3>
+              <ul className='my-8px pl-20px text-13px text-t-secondary leading-7'>
+                <li>{t('settings.plugins.shopify.products')}</li>
+                <li>{t('settings.plugins.shopify.collections')}</li>
+              </ul>
+            </div>
+          )}
           <div className='flex flex-col gap-8px border-t border-border-2 pt-16px'>
             <span role='status' className='text-13px font-500 text-t-primary'>
               {status}
@@ -175,16 +192,34 @@ const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ convers
                 ))}
               </ul>
             )}
-            <Button
-              type='primary'
-              className='self-start mt-4px'
-              disabled={loading || !connection.available}
-              loading={connecting}
-              onClick={() => void connect()}
-              aria-describedby='shopify-connection-status'
-            >
-              {t(connection.stores?.length ? 'settings.plugins.shopify.addStore' : 'settings.plugins.shopify.connect')}
-            </Button>
+            <div className='flex items-center justify-end gap-8px mt-8px'>
+              {compact && <Button onClick={onCancel}>{t('settings.plugins.shopify.skip')}</Button>}
+              {compact && conversationId && connection.connected && connection.shop && (
+                <Button
+                  type='primary'
+                  disabled={loading || connecting || error}
+                  onClick={() => onSelected?.(connection.shop!)}
+                >
+                  {t('settings.plugins.shopify.useStore')}
+                </Button>
+              )}
+              <Button
+                type={compact && connection.connected ? 'secondary' : 'primary'}
+                className='self-start mt-4px'
+                disabled={loading || !connection.available}
+                loading={connecting}
+                onClick={() => void connect()}
+                aria-describedby='shopify-connection-status'
+              >
+                {t(
+                  compact && !connection.stores?.length
+                    ? 'settings.plugins.shopify.allow'
+                    : connection.stores?.length
+                      ? 'settings.plugins.shopify.addStore'
+                      : 'settings.plugins.shopify.connect'
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       ) : (
@@ -206,10 +241,16 @@ const ConversationConnectors: React.FC<{ conversationId?: string }> = ({ convers
   );
 };
 
-export const ConnectorCatalog: React.FC = () => {
+export const ConnectorCatalog: React.FC<ConnectorOptions> = (props) => {
   const { pathname } = useLocation();
   const conversationId = pathname.match(/^\/conversation\/([A-Za-z0-9_-]{1,100})$/)?.[1];
-  return <ConversationConnectors key={conversationId ?? 'workspace'} conversationId={conversationId} />;
+  return (
+    <ConversationConnectors
+      key={`${conversationId ?? 'workspace'}:${props.compact === true}`}
+      conversationId={conversationId}
+      {...props}
+    />
+  );
 };
 
 const PluginsSettings: React.FC = () => {

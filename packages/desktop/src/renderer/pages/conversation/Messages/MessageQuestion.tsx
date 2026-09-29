@@ -10,6 +10,7 @@ import { Button, Card, Checkbox, Input, Radio } from '@arco-design/web-react';
 import { CheckOne } from '@icon-park/react';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { emitter } from '@/renderer/utils/emitter';
 // The permission panel's stylesheet supplies the shared card chrome; own.* adds
 // the question-specific pieces (option rows with secondary description lines),
 // built on the same tokens so the two cards read as siblings (user feedback,
@@ -33,6 +34,15 @@ type Draft = {
 
 const emptyDraft = (): Draft => ({ labels: [], other: '', otherSelected: false });
 
+// ponytail: recognize the fixed skill question only; add explicit action metadata if more questions need connectors.
+const isStorePlatformQuestion = (q: IAskQuestion) =>
+  q.question === 'Which platform is your store on?' &&
+  q.options.length === 2 &&
+  q.options.some((o) => o.label === 'Shopify') &&
+  q.options.some((o) => o.label === 'Other') &&
+  !q.multiSelect &&
+  !q.multi_select;
+
 /**
  * Structured question card (`ask` frame — claude AskUserQuestion).
  *
@@ -51,6 +61,8 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
   );
   const [drafts, setDrafts] = useState<Draft[]>(() => questions.map(emptyDraft));
   const [submitted, setSubmitted] = useState<'answered' | 'declined' | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
 
   const updateDraft = useCallback((index: number, patch: Partial<Draft>) => {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
@@ -62,19 +74,44 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
   const requestId = content.request_id || message.id;
 
   const handleSubmit = useCallback(async () => {
-    // claude keys its answers map by the question TEXT; a multi-select answer
-    // is an array of labels (claude joins with ", "). Other-text rides as a
-    // plain label — claude accepts arbitrary answer strings. Sent over the
-    // DEDICATED ask channel, not the permission confirm endpoint.
-    const answers = questions.map((q, i) => {
-      const d = drafts[i];
-      const labels = [...d.labels];
-      if (d.otherSelected && d.other.trim()) labels.push(d.other.trim());
-      return { question: q.question, labels };
-    });
-    await conversation.answerAsk.invoke({ conversation_id: message.conversation_id, request_id: requestId, answers });
-    setSubmitted('answered');
-  }, [drafts, questions, message.conversation_id, requestId]);
+    if (submitting) return;
+    setSubmitting(true);
+    setConnectionError(false);
+    try {
+      let shop: string | undefined;
+      if (questions.some((q, i) => isStorePlatformQuestion(q) && drafts[i]?.labels[0] === 'Shopify')) {
+        const response = await fetch(
+          '/api/platform/connectors/shopify?conversationId=' + encodeURIComponent(message.conversation_id),
+          { credentials: 'same-origin' }
+        );
+        if (!response.ok) throw new Error('Connection status unavailable');
+        const data = await response.json();
+        if (data.connected !== true || typeof data.shop !== 'string' || !data.shop) {
+          emitter.emit('connectors.shopify.open', true, message.conversation_id);
+          return;
+        }
+        shop = data.shop;
+      }
+      // claude keys its answers map by the question TEXT; a multi-select answer
+      // is an array of labels (claude joins with ", "). Other-text rides as a
+      // plain label — claude accepts arbitrary answer strings. Sent over the
+      // DEDICATED ask channel, not the permission confirm endpoint.
+      const answers = questions.map((q, i) => {
+        const d = drafts[i];
+        const labels = [...d.labels];
+        if (shop && isStorePlatformQuestion(q) && labels[0] === 'Shopify')
+          labels[0] = `Shopify (selected store: ${shop})`;
+        if (d.otherSelected && d.other.trim()) labels.push(d.other.trim());
+        return { question: q.question, labels };
+      });
+      await conversation.answerAsk.invoke({ conversation_id: message.conversation_id, request_id: requestId, answers });
+      setSubmitted('answered');
+    } catch {
+      setConnectionError(true);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [drafts, questions, message.conversation_id, requestId, submitting]);
 
   const handleDecline = useCallback(async () => {
     await conversation.answerAsk.invoke({
@@ -123,12 +160,13 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
                 <Radio.Group
                   className={own.optionList}
                   value={d.otherSelected ? OTHER_VALUE : d.labels[0]}
-                  onChange={(value) =>
-                    value === OTHER_VALUE
-                      ? updateDraft(qi, { labels: [], otherSelected: true })
-                      : updateDraft(qi, { labels: [value], otherSelected: false })
-                  }
-                  disabled={submitted !== null}
+                  onChange={(value) => {
+                    if (value === 'Shopify' && isStorePlatformQuestion(q))
+                      emitter.emit('connectors.shopify.open', true, message.conversation_id);
+                    if (value === OTHER_VALUE) updateDraft(qi, { labels: [], otherSelected: true });
+                    else updateDraft(qi, { labels: [value], otherSelected: false });
+                  }}
+                  disabled={submitted !== null || submitting}
                 >
                   {q.options.map((opt) => (
                     <Radio
@@ -143,15 +181,17 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
                       </span>
                     </Radio>
                   ))}
-                  <Radio
-                    className={own.optionRow}
-                    value={OTHER_VALUE}
-                    data-testid={`message-question-option-${qi}-other`}
-                  >
-                    <span className={own.optionText}>
-                      <span className={own.optionLabel}>{t('messages.askOther')}</span>
-                    </span>
-                  </Radio>
+                  {!isStorePlatformQuestion(q) && (
+                    <Radio
+                      className={own.optionRow}
+                      value={OTHER_VALUE}
+                      data-testid={`message-question-option-${qi}-other`}
+                    >
+                      <span className={own.optionText}>
+                        <span className={own.optionLabel}>{t('messages.askOther')}</span>
+                      </span>
+                    </Radio>
+                  )}
                   {d.otherSelected ? (
                     <Input
                       className={own.otherInput}
@@ -167,6 +207,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
             </div>
           );
         })}
+        {connectionError && <p role='alert'>{t('settings.plugins.shopify.error')}</p>}
         {submitted === null ? (
           // Plain Arco buttons on purpose: styles.optionButton resets the button
           // chrome to a transparent full-width list row (for permission option
@@ -176,12 +217,13 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message })
               type='primary'
               size='small'
               disabled={!allAnswered}
+              loading={submitting}
               onClick={handleSubmit}
               data-testid='message-question-submit'
             >
               {t('messages.askSubmit')}
             </Button>
-            <Button size='small' onClick={handleDecline} data-testid='message-question-decline'>
+            <Button size='small' disabled={submitting} onClick={handleDecline} data-testid='message-question-decline'>
               {t('messages.askDecline')}
             </Button>
           </div>

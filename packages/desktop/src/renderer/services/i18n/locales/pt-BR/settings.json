@@ -1440,7 +1440,12 @@
       "selection": "Store for this conversation",
       "choose": "Select a connected store",
       "workspaceHint": "Stores are saved in this workspace. Open a conversation to choose which store it uses.",
-      "addStore": "Connect another store"
+      "addStore": "Connect another store",
+      "confirmTitle": "Connect Shopify Store",
+      "confirmDescription": "Connect a Shopify store as the data source for this conversation. You can change the selected store later.",
+      "allow": "Allow",
+      "skip": "Skip",
+      "useStore": "Use this store"
     },
     "description": "Plugins bring together tools, skills, and service connections."
   }
