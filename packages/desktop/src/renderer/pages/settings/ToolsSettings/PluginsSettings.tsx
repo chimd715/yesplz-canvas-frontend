@@ -11,6 +11,8 @@ type StoreStatus = {
   connected: boolean;
   shop?: string;
   stores?: { shop: string; connected: boolean }[];
+  syncAvailable?: boolean;
+  sync?: { status: string; totalCount?: number };
 };
 
 type ConnectorOptions = {
@@ -48,6 +50,8 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
           available: data.available === true,
           connected: data.connected === true,
           shop: typeof data.shop === 'string' ? data.shop : undefined,
+          syncAvailable: data.syncAvailable === true,
+          sync: data.sync,
           stores: Array.isArray(data.stores)
             ? data.stores.filter(
                 (store: { shop?: unknown; connected?: unknown }) =>
@@ -64,6 +68,54 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
       });
     return () => controller.abort();
   }, [conversationId]);
+  useEffect(() => {
+    if (!connection.sync || ['COMPLETED', 'FAILED'].includes(connection.sync.status)) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          '/api/platform/connectors/shopify' +
+            (conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : ''),
+          { signal: controller.signal, credentials: 'same-origin' }
+        );
+        if (!response.ok) throw new Error('Synchronization status unavailable');
+        const data: StoreStatus = await response.json();
+        if (!controller.signal.aborted) {
+          setConnection(data);
+          setError(false);
+        }
+      } catch {
+        if (!controller.signal.aborted) setError(true);
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(() => void poll(), 4000);
+      }
+    };
+    timer = setTimeout(() => void poll(), 4000);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [conversationId, connection.sync?.status]);
+  const synchronize = async () => {
+    if (!conversationId || !connection.shop) return;
+    setConnecting(true);
+    setError(false);
+    try {
+      const response = await fetch('/api/platform/connectors/shopify', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync', conversationId, shop: connection.shop }),
+      });
+      if (!response.ok) throw new Error('Synchronization unavailable');
+      setConnection(await response.json());
+    } catch {
+      setError(true);
+    } finally {
+      setConnecting(false);
+    }
+  };
   const selectStore = async (shop: string) => {
     if (!conversationId) return;
     setConnecting(true);
@@ -160,6 +212,26 @@ const ConversationConnectors: React.FC<ConnectorOptions & { conversationId?: str
             <span role='status' className='text-13px font-500 text-t-primary'>
               {status}
             </span>
+            {connection.connected && connection.syncAvailable && (
+              <div className='flex items-center justify-between gap-8px'>
+                <span role='status' className='text-13px text-t-secondary'>
+                  {connection.sync?.status === 'COMPLETED'
+                    ? t('settings.plugins.shopify.syncCompleted', { count: connection.sync.totalCount ?? 0 })
+                    : connection.sync?.status === 'FAILED'
+                      ? t('settings.plugins.shopify.syncFailed')
+                      : connection.sync?.status === 'UNAVAILABLE'
+                        ? t('settings.plugins.shopify.syncUnavailable')
+                        : connection.sync
+                          ? t('settings.plugins.shopify.syncRunning')
+                          : t('settings.plugins.shopify.syncReady')}
+                </span>
+                {(!connection.sync || ['COMPLETED', 'FAILED'].includes(connection.sync.status)) && (
+                  <Button size='small' loading={connecting} onClick={() => void synchronize()}>
+                    {t('settings.plugins.shopify.syncProducts')}
+                  </Button>
+                )}
+              </div>
+            )}
             <p id='shopify-connection-status' className='m-0 text-13px text-t-secondary'>
               {connection.available ? t('settings.plugins.shopify.flow') : t('settings.plugins.shopify.setup')}
             </p>

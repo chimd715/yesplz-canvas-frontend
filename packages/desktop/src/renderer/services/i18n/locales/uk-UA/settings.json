@@ -1458,6 +1458,12 @@
       "allow": "Allow",
       "skip": "Skip",
       "useStore": "Use this store",
+      "syncReady": "Product sync is ready",
+      "syncRunning": "Syncing products...",
+      "syncCompleted": "Products synchronized: {{count}}",
+      "syncFailed": "Product sync failed. Retry synchronization.",
+      "syncUnavailable": "Product sync status is unavailable. Retrying...",
+      "syncProducts": "Sync products",
       "platformQuestion": "Which platform is your store on?",
       "answerReady": "Your selection is in the message box. Send it to continue."
     },

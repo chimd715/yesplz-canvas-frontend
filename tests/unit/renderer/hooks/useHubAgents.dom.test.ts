@@ -127,3 +127,48 @@ it('confirms a conversation-selected store only after loading its connection and
     fetchMock.mockRestore();
   }
 });
+
+it('retries failed product sync for the selected conversation and stops polling after completion', async () => {
+  const connection = {
+    available: true,
+    connected: true,
+    shop: 'demo.myshopify.com',
+    stores: [{ shop: 'demo.myshopify.com', connected: true }],
+    syncAvailable: true,
+  };
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json({ ...connection, sync: { status: 'FAILED' } }))
+    .mockResolvedValueOnce(Response.json({ ...connection, sync: { status: 'RUNNING' } }))
+    .mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockResolvedValueOnce(Response.json({ ...connection, sync: { status: 'COMPLETED', totalCount: 3 } }));
+  const view = render(
+    React.createElement(
+      MemoryRouter,
+      { initialEntries: ['/conversation/widget-1'] },
+      React.createElement(ConnectorCatalog, { compact: true })
+    )
+  );
+  try {
+    const retry = await screen.findByRole('button', { name: 'settings.plugins.shopify.syncProducts' });
+    vi.useFakeTimers();
+    await act(async () => fireEvent.click(retry));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/platform/connectors/shopify',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'sync', conversationId: 'widget-1', shop: connection.shop }),
+      })
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(4000));
+    await act(async () => vi.advanceTimersByTimeAsync(4000));
+    expect(screen.getByText('settings.plugins.shopify.syncCompleted')).toBeVisible();
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+    fetchMock.mockRestore();
+  }
+});
