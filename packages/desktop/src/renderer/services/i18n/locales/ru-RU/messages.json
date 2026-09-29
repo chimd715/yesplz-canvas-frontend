@@ -101,5 +101,7 @@
   "requestDetails": "Детали запроса:",
   "delivery": {
     "pending": "Непрочитано"
-  }
+  },
+  "askParameterPlaceholder": "Enter a value",
+  "askSubmitError": "Could not submit the answer. Try again."
 }

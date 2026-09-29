@@ -97,5 +97,7 @@
   "requestDetails": "Detalles de la solicitud:",
   "delivery": {
     "pending": "No leído"
-  }
+  },
+  "askParameterPlaceholder": "Enter a value",
+  "askSubmitError": "Could not submit the answer. Try again."
 }

@@ -97,5 +97,7 @@
   "requestDetails": "リクエスト内容:",
   "delivery": {
     "pending": "未読"
-  }
+  },
+  "askParameterPlaceholder": "Enter a value",
+  "askSubmitError": "Could not submit the answer. Try again."
 }

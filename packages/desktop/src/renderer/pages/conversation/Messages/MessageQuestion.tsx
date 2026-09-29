@@ -136,14 +136,23 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
   }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer]);
 
   const handleDecline = useCallback(async () => {
-    if (!onAnswer)
-      await conversation.answerAsk.invoke({
-        conversation_id: message.conversation_id,
-        request_id: requestId,
-        decline: true,
-      });
-    setSubmitted('declined');
-  }, [message.conversation_id, requestId, onAnswer]);
+    if (submitting) return;
+    setSubmitting(true);
+    setConnectionError(false);
+    try {
+      if (!onAnswer)
+        await conversation.answerAsk.invoke({
+          conversation_id: message.conversation_id,
+          request_id: requestId,
+          decline: true,
+        });
+      setSubmitted('declined');
+    } catch {
+      setConnectionError(true);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [message.conversation_id, requestId, onAnswer, submitting]);
 
   if (!questions.length) return null;
 
@@ -158,7 +167,18 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
             <div key={qi} className={own.questionBlock} data-testid={`message-question-item-${qi}`}>
               {q.header ? <div className={own.header}>{q.header}</div> : null}
               <div className={own.question}>{q.question}</div>
-              {multi ? (
+              {q.options.length === 0 ? (
+                <Input
+                  className={own.otherInput}
+                  aria-label={q.question}
+                  placeholder={t('messages.askParameterPlaceholder')}
+                  value={d.other}
+                  onChange={(other) => updateDraft(qi, { other, otherSelected: true })}
+                  disabled={submitted !== null || submitting}
+                  maxLength={4000}
+                  data-testid={`message-question-other-input-${qi}`}
+                />
+              ) : multi ? (
                 <Checkbox.Group
                   className={own.optionList}
                   value={d.labels}
@@ -230,7 +250,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
             </div>
           );
         })}
-        {connectionError && <p role='alert'>{t('settings.plugins.shopify.error')}</p>}
+        {connectionError && <p role='alert'>{t('messages.askSubmitError')}</p>}
         {onAnswer && submitted === 'answered' && <p role='status'>{t('settings.plugins.shopify.answerReady')}</p>}
         {submitted === null ? (
           // Plain Arco buttons on purpose: styles.optionButton resets the button

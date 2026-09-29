@@ -130,6 +130,34 @@ describe('permission message adapters', () => {
     expect(answerAskInvoke).not.toHaveBeenCalled();
   });
 
+  it('collects a text parameter through the dedicated question channel without a choice row', async () => {
+    answerAskInvoke.mockResolvedValue(undefined);
+    render(
+      <MessageQuestion
+        message={{
+          id: 'parameter-question',
+          conversation_id: 'conversation-1',
+          type: 'ask',
+          position: 'left',
+          content: {
+            session_id: 'conversation-1',
+            request_id: 'parameter-question',
+            questions: [{ question: 'Which API URL?', options: [] }],
+          },
+        }}
+      />
+    );
+    expect(screen.getByTestId('message-question-submit')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Which API URL?'), { target: { value: 'https://api.example.com' } });
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(answerAskInvoke).toHaveBeenCalledWith({
+      conversation_id: 'conversation-1',
+      request_id: 'parameter-question',
+      answers: [{ question: 'Which API URL?', labels: ['https://api.example.com'] }],
+    });
+  });
+
   it('keeps the generic payload exact and defaults confirmation to proceed_once', async () => {
     const message = makeGenericMessage();
     render(<MessagePermission message={message} />);
