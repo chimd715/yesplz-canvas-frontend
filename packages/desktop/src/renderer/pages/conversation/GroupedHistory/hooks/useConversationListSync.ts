@@ -136,10 +136,10 @@ export const isWaitingConfirmationStreamMessage = (type: string): boolean => {
 
 /**
  * Extract the confirmation id from a waiting-confirmation stream frame, aligned
- * with the `id` the backend later carries on the `confirmation.remove` event so
- * the waiting state clears against the right pending request:
+ * with the `id` the backend later carries on `confirmation.remove`, or its call
+ * id alias resolved through the pending-confirmations list:
  *  - `ask`            → `request_id`
- *  - `permission`     → `call_id` (falls back to `id`)
+ *  - `permission`     → `id` (falls back to `call_id`)
  *  - `acp_permission` → `tool_call.tool_call_id`
  * Returns `undefined` when the frame carries no usable id.
  */
@@ -154,10 +154,10 @@ export const extractConfirmationId = (message: { type?: string; data?: unknown }
     return typeof record.request_id === 'string' && record.request_id ? record.request_id : undefined;
   }
   if (message.type === 'permission') {
-    if (typeof record.call_id === 'string' && record.call_id) {
-      return record.call_id;
+    if (typeof record.id === 'string' && record.id) {
+      return record.id;
     }
-    return typeof record.id === 'string' && record.id ? record.id : undefined;
+    return typeof record.call_id === 'string' && record.call_id ? record.call_id : undefined;
   }
   if (message.type === 'acp_permission') {
     const toolCall = record.tool_call;
@@ -480,7 +480,25 @@ const markWaitingConfirmation = (conversation_id: string, confirmationId: string
 };
 
 const clearWaitingConfirmationById = (conversation_id: string, confirmationId: string) => {
+  const matched = waitingConfirmationIdsByConversationState.get(conversation_id)?.has(confirmationId);
   applyWaitingConfirmation(conversation_id, { kind: 'unmark', confirmationId });
+  const pending = waitingConfirmationIdsByConversationState.get(conversation_id);
+  if (matched || !pending) return;
+
+  // Ask/ACP frames may carry a call id while removal carries a different
+  // confirmation id. Resolve against the remaining requests, not stream activity.
+  void ipcBridge.conversation.confirmation.list
+    .invoke({ conversation_id })
+    .then((confirmations) => {
+      if (!Array.isArray(confirmations) || waitingConfirmationIdsByConversationState.get(conversation_id) !== pending)
+        return;
+      for (const id of pending) {
+        if (!confirmations.some((confirmation) => confirmation.id === id || confirmation.call_id === id)) {
+          applyWaitingConfirmation(conversation_id, { kind: 'unmark', confirmationId: id });
+        }
+      }
+    })
+    .catch(() => {});
 };
 
 const clearAllWaitingConfirmation = (conversation_id: string) => {

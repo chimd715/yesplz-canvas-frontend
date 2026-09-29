@@ -14,6 +14,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { ipcBridge } from '@/common';
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -26,9 +27,9 @@ vi.mock('@/common', () => ({
     },
     conversation: {
       listChanged: { on: () => () => {} },
-      responseStream: { on: () => () => {} },
+      responseStream: { on: vi.fn(() => () => {}) },
       turnCompleted: { on: () => () => {} },
-      confirmation: { remove: { on: () => () => {} } },
+      confirmation: { list: { invoke: vi.fn() }, remove: { on: vi.fn(() => () => {}) } },
     },
     application: {
       writeRendererLog: { invoke: vi.fn().mockResolvedValue(undefined) },
@@ -85,5 +86,61 @@ describe('reconcileGeneratingFromRuntime', () => {
     await waitFor(() => expect(getSnapshotConversationProjectId('logical-chat')).toBe('project-1'));
     expect(getSnapshotConversationProjectId('active-core')).toBe('project-1');
     expect(getSnapshotConversationProjectId('unknown')).toBeUndefined();
+  });
+});
+
+describe('waiting confirmation removal', () => {
+  it('clears an answered request alias while preserving another pending question during generation', async () => {
+    const { result } = renderHook(() => useConversationListSync());
+    const stream = vi.mocked(ipcBridge.conversation.responseStream.on).mock.calls[0]![0];
+    const remove = vi.mocked(ipcBridge.conversation.confirmation.remove.on).mock.calls[0]![0];
+    vi.mocked(ipcBridge.conversation.confirmation.list.invoke).mockResolvedValue([
+      { id: 'confirmation-b', call_id: 'request-b', description: '', options: [] },
+    ]);
+
+    act(() => {
+      stream({ conversation_id: 'ask-alias', type: 'ask', data: { request_id: 'request-a' } });
+      stream({ conversation_id: 'ask-alias', type: 'ask', data: { request_id: 'request-b' } });
+      stream({ conversation_id: 'ask-alias', type: 'thought', data: {} });
+    });
+    expect(result.current.isConversationWaitingConfirmation('ask-alias')).toBe(true);
+
+    await act(async () => remove({ conversation_id: 'ask-alias', id: 'confirmation-a' }));
+    expect(result.current.isConversationWaitingConfirmation('ask-alias')).toBe(true);
+
+    vi.mocked(ipcBridge.conversation.confirmation.list.invoke).mockResolvedValue([]);
+    await act(async () => remove({ conversation_id: 'ask-alias', id: 'confirmation-b' }));
+    expect(result.current.isConversationWaitingConfirmation('ask-alias')).toBe(false);
+  });
+
+  it('ignores an older empty confirmation response when a new question arrives', async () => {
+    const { result } = renderHook(() => useConversationListSync());
+    const stream = vi.mocked(ipcBridge.conversation.responseStream.on).mock.calls[0]![0];
+    const remove = vi.mocked(ipcBridge.conversation.confirmation.remove.on).mock.calls[0]![0];
+    let finishLookup!: (value: []) => void;
+    vi.mocked(ipcBridge.conversation.confirmation.list.invoke).mockReturnValue(
+      new Promise((resolve) => {
+        finishLookup = resolve;
+      })
+    );
+
+    act(() => {
+      stream({ conversation_id: 'ask-race', type: 'ask', data: { request_id: 'old-request' } });
+      remove({ conversation_id: 'ask-race', id: 'old-confirmation' });
+      stream({ conversation_id: 'ask-race', type: 'ask', data: { request_id: 'new-request' } });
+    });
+    await act(async () => finishLookup([]));
+    expect(result.current.isConversationWaitingConfirmation('ask-race')).toBe(true);
+  });
+
+  it('preserves pending questions when their confirmation lookup fails', async () => {
+    const { result } = renderHook(() => useConversationListSync());
+    const stream = vi.mocked(ipcBridge.conversation.responseStream.on).mock.calls[0]![0];
+    const remove = vi.mocked(ipcBridge.conversation.confirmation.remove.on).mock.calls[0]![0];
+    vi.mocked(ipcBridge.conversation.confirmation.list.invoke).mockRejectedValue(new Error('Unavailable'));
+
+    act(() => stream({ conversation_id: 'ask-unavailable', type: 'ask', data: { request_id: 'request' } }));
+    await act(async () => remove({ conversation_id: 'ask-unavailable', id: 'confirmation' }));
+    expect(result.current.isConversationWaitingConfirmation('ask-unavailable')).toBe(true);
   });
 });

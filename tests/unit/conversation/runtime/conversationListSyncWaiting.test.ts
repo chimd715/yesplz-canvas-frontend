@@ -28,12 +28,12 @@ describe('extractConfirmationId', () => {
     expect(extractConfirmationId({ type: 'ask', data: { request_id: 'req-1', questions: [] } })).toBe('req-1');
   });
 
-  it('prefers call_id on a permission frame', () => {
-    expect(extractConfirmationId({ type: 'permission', data: { id: 'conf-1', call_id: 'call-1' } })).toBe('call-1');
+  it('prefers the confirmation id carried by the removal event on a permission frame', () => {
+    expect(extractConfirmationId({ type: 'permission', data: { id: 'conf-1', call_id: 'call-1' } })).toBe('conf-1');
   });
 
-  it('falls back to id on a permission frame without call_id', () => {
-    expect(extractConfirmationId({ type: 'permission', data: { id: 'conf-1' } })).toBe('conf-1');
+  it('falls back to call_id on a permission frame without id', () => {
+    expect(extractConfirmationId({ type: 'permission', data: { call_id: 'call-1' } })).toBe('call-1');
   });
 
   it('reads tool_call.tool_call_id from an acp_permission frame', () => {
