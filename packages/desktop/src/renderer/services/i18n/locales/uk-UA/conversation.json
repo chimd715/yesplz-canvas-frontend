@@ -876,6 +876,26 @@
     "restoring": "Restoring version…",
     "restoreConflict": "This conversation changed. Refresh and try again.",
     "restoreUnavailable": "Could not restore this version. Your current work remains available.",
-    "unavailable": "Could not load this conversation. Try again."
+    "unavailable": "Could not load this conversation. Try again.",
+    "currentWork": "Current work",
+    "sourceVersion": "Saved version {{number}}",
+    "sourceSummary": "Widget version saved",
+    "latestSaved": "Latest saved",
+    "selected": "Selected",
+    "select": "Select version",
+    "versionId": "Version ID",
+    "sourceDescription": "Preview and publish use this saved version. Selecting it keeps your current work in place.",
+    "dynamicPreviewUnavailable": "Preview of saved server apps is unavailable. Use Current work to preview the running app.",
+    "saveCurrent": "Save current work",
+    "saveDescription": "Save current work so you can preview and publish this version.",
+    "snapshot": {
+      "loading": "Loading saved versions…",
+      "notConfigured": "Version saving is unavailable.",
+      "saving": "Saving current work…",
+      "busy": "Wait for the current response to finish, then save current work again.",
+      "missing": "No completed widget source is available. Finish a response, then save current work again.",
+      "unavailable": "The version could not be saved. Save current work to try again."
+    },
+    "restoreHistoryUnavailable": "Restore history is unavailable."
   }
 }

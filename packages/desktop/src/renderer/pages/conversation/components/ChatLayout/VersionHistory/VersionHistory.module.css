@@ -6,6 +6,18 @@
   background: var(--bg-1);
   color: var(--text-primary);
 }
+.selected {
+  border-color: var(--text-secondary);
+}
+.identity {
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.notice {
+  margin: 12px 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
 
 .heading,
 .actions,
@@ -34,9 +46,17 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
+.state {
+  color: var(--text-primary);
+  font-weight: 500;
+}
 .actions {
   justify-content: flex-end;
   margin-top: 10px;
+}
+.actions > :global(.arco-btn) {
+  flex: 1;
+  border-radius: 8px;
 }
 .details {
   margin-top: 12px;

@@ -113,14 +113,16 @@ export const isHostedPreviewUrl = (value: string): boolean => {
 };
 
 /** Only the platform's fixed, owner-checked revision handoff may load on the Builder origin. */
-export const isHistoricalPreviewUrl = (value: string, revisionId?: string): boolean => {
+export const isHistoricalPreviewUrl = (value: string, versionId?: string, kind?: 'native' | 'source'): boolean => {
   if (!document.querySelector('meta[name="ai-builder-preview"][content="enabled"]')) return false;
   try {
     const url = new URL(value, window.location.origin);
     const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
-    const match = new RegExp(`^/platform/projects/${uuid}/revisions/[A-Za-z0-9_-]{1,100}/(${uuid})/preview$`).exec(
+    const native = new RegExp(`^/platform/projects/${uuid}/revisions/[A-Za-z0-9_-]{1,100}/(${uuid})/preview$`).exec(
       url.pathname
     );
+    const source = new RegExp(`^/platform/projects/${uuid}/source-versions/(${uuid})/preview$`).exec(url.pathname);
+    const match = kind === 'source' ? source : kind === 'native' ? native : (native ?? source);
     return (
       ['http:', 'https:'].includes(url.protocol) &&
       url.origin === window.location.origin &&
@@ -129,7 +131,7 @@ export const isHistoricalPreviewUrl = (value: string, revisionId?: string): bool
       !url.hash &&
       (url.search === '' || url.search === '?embed=1') &&
       !!match &&
-      (revisionId === undefined || match[1] === revisionId)
+      (versionId === undefined || match[1] === versionId)
     );
   } catch {
     return false;

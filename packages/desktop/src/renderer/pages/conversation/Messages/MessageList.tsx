@@ -732,7 +732,15 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     return <MessageListSkeleton rowWidthClass={rowWidthClass} />;
   }
 
-  if (processedList.length === 0 && emptySlot && !versions?.data?.versions.length && !versions?.data?.reverted.length) {
+  if (
+    processedList.length === 0 &&
+    emptySlot &&
+    !versions?.data?.versions.length &&
+    !versions?.data?.reverted.length &&
+    !versions?.sourceHistory?.versions.length &&
+    !versions?.saving &&
+    !versions?.snapshotError
+  ) {
     return <div className='relative flex-1 h-full flex items-center justify-center'>{emptySlot}</div>;
   }
 

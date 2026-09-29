@@ -133,11 +133,12 @@ describe('logical conversation routing', () => {
     let resolve!: (response: Response) => void;
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        () =>
-          new Promise<Response>((done) => {
-            resolve = done;
-          })
+      vi.fn((input) =>
+        String(input).includes('/source-versions?')
+          ? Promise.resolve(Response.json({ configured: false, versions: [], cards: [] }))
+          : new Promise<Response>((done) => {
+              resolve = done;
+            })
       )
     );
     getConversationOrNull.mockResolvedValue({ ...conv('p1'), id: 'continued-core' });
@@ -171,6 +172,24 @@ describe('logical conversation routing', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
     renderIndex();
     await screen.findByRole('alert');
+    expect(getConversationOrNull).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+  });
+  it('keeps the continuation write fence even when independent saved source history succeeds', async () => {
+    enableVersions();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input) =>
+        String(input).includes('/source-versions?')
+          ? Response.json({ configured: true, versions: [], cards: [] })
+          : new Response(null, { status: 503 })
+      );
+    vi.stubGlobal('fetch', fetcher);
+    renderIndex();
+    await screen.findByRole('alert');
+    expect(
+      fetcher.mock.calls.some(([input]) => String(input) === '/api/platform/source-versions?conversationId=c1')
+    ).toBe(true);
     expect(getConversationOrNull).not.toHaveBeenCalled();
     expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
   });

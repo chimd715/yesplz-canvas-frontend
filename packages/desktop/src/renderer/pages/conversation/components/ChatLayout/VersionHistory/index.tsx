@@ -3,11 +3,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
-import { fetchVersions, restoreVersion, VersionRequestError, versionsPath, versionPreviewUrl } from './api';
+import {
+  captureSourceVersion,
+  fetchSourceVersions,
+  fetchVersions,
+  restoreVersion,
+  VersionRequestError,
+  sourceVersionsPath,
+  versionsPath,
+  versionPreviewUrl,
+  type VersionSelection,
+} from './api';
 
 export { VersionHistoryProvider, useVersionHistory } from './context';
 export { versionPreviewUrl } from './api';
-export type { SavedVersion, RevertedGroup, VersionHistory } from './api';
+export type { SavedVersion, RevertedGroup, VersionHistory, SourceVersion, VersionSelection } from './api';
 
 export function useVersionHistoryState(logicalConversationId: string | undefined) {
   const { openPreview, closePreview } = usePreviewContext();
@@ -27,19 +37,42 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
       refreshInterval: (history) => (history?.versions.some((version) => version.status === 'building') ? 3000 : 0),
     }
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeConversationId = data?.activeCoreConversationId ?? logicalConversationId;
+  const continuationResolved = !enabled || (!isLoading && !(!data && error));
+  const sources = useSWR(
+    enabled && activeConversationId ? sourceVersionsPath(activeConversationId) : null,
+    fetchSourceVersions,
+    { shouldRetryOnError: false, keepPreviousData: false, revalidateOnFocus: true }
+  );
+  const [selected, setSelected] = useState<VersionSelection | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<'busy' | 'missing' | 'unavailable' | null>(null);
+  const sourceRequest = useRef<AbortController | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<'conflict' | 'unavailable' | null>(null);
   const request = useRef<AbortController | null>(null);
   useEffect(() => {
-    setSelectedId(null);
+    setSelected(null);
+    setSaving(false);
+    setSnapshotError(null);
     setRestoreError(null);
     setRestoring(false);
     return () => {
       request.current?.abort();
       request.current = null;
+      sourceRequest.current?.abort();
+      sourceRequest.current = null;
     };
   }, [logicalConversationId]);
+
+  useEffect(() => {
+    setSaving(false);
+    setSnapshotError(null);
+    return () => {
+      sourceRequest.current?.abort();
+      sourceRequest.current = null;
+    };
+  }, [activeConversationId]);
 
   useEffect(() => {
     const activeCoreConversationId = data?.activeCoreConversationId;
@@ -49,9 +82,58 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
     });
   }, [data?.activeCoreConversationId, mutate]);
 
+  const saveSourceVersion = useCallback(
+    async (messageId?: string) => {
+      if (
+        !enabled ||
+        !continuationResolved ||
+        restoring ||
+        !activeConversationId ||
+        !sources.data?.configured ||
+        sourceRequest.current
+      )
+        return;
+      const controller = new AbortController();
+      sourceRequest.current = controller;
+      setSaving(true);
+      setSnapshotError(null);
+      try {
+        const next = await captureSourceVersion(
+          activeConversationId,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(180000)]),
+          messageId
+        );
+        if (!controller.signal.aborted) await sources.mutate(next, { revalidate: false });
+      } catch (failure) {
+        if (!controller.signal.aborted) {
+          setSnapshotError(
+            failure instanceof VersionRequestError && failure.status === 409
+              ? 'busy'
+              : failure instanceof VersionRequestError && failure.status === 404
+                ? 'missing'
+                : 'unavailable'
+          );
+          // A lost response may follow a successful capture. Reconcile once without recapturing.
+          void sources.mutate();
+        }
+      } finally {
+        if (sourceRequest.current === controller) sourceRequest.current = null;
+        if (!controller.signal.aborted) setSaving(false);
+      }
+    },
+    [enabled, continuationResolved, restoring, activeConversationId, sources.data?.configured, sources.mutate]
+  );
+
   const restore = useCallback(
     async (revisionId: string) => {
-      if (!data || error || !logicalConversationId || request.current) return;
+      if (
+        !data ||
+        error ||
+        !logicalConversationId ||
+        request.current ||
+        !data.versions.some((version) => version.id === revisionId)
+      )
+        return;
       const controller = new AbortController();
       request.current = controller;
       setRestoring(true);
@@ -65,7 +147,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
         );
         if (!controller.signal.aborted) {
           await mutate(next, { revalidate: false });
-          setSelectedId(revisionId);
+          setSelected({ kind: 'native', revisionId, logicalConversationId });
           const version = next.versions.find((item) => item.id === revisionId);
           const previewUrl = version && versionPreviewUrl(version);
           if (previewUrl) {
@@ -97,7 +179,33 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
     },
     [data, error, logicalConversationId, mutate, openPreview, closePreview, t]
   );
-  const selectedVersion = data?.versions.find((version) => version.id === (selectedId ?? data.activeRevisionId));
+  const selection: VersionSelection = selected ?? { kind: 'current' };
+  const selectedVersion =
+    selection.kind === 'native' ? data?.versions.find((version) => version.id === selection.revisionId) : undefined;
+  const selectedSourceVersion =
+    selection.kind === 'source'
+      ? sources.data?.versions.find((version) => version.id === selection.sourceVersionId)
+      : undefined;
+  const selectVersion = useCallback(
+    (revisionId: string) => {
+      if (logicalConversationId) {
+        setSelected({ kind: 'native', revisionId, logicalConversationId });
+        closePreview();
+      }
+    },
+    [logicalConversationId, closePreview]
+  );
+  const selectSourceVersion = useCallback(
+    (sourceVersionId: string) => {
+      setSelected({ kind: 'source', sourceVersionId });
+      closePreview();
+    },
+    [closePreview]
+  );
+  const selectCurrent = useCallback(() => {
+    setSelected({ kind: 'current' });
+    closePreview();
+  }, [closePreview]);
   return useMemo(
     () => ({
       logicalConversationId,
@@ -107,10 +215,23 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
       isValidating,
       restoring,
       restoreError,
+      selection,
       selectedVersion,
-      selectVersion: setSelectedId,
+      selectedSourceVersion,
+      sourceHistory: sources.data,
+      sourceError: sources.error,
+      sourceLoading: sources.isLoading,
+      sourceValidating: sources.isValidating,
+      sourceEnabled: enabled,
+      continuationResolved,
+      saving,
+      snapshotError,
+      selectVersion,
+      selectSourceVersion,
+      selectCurrent,
+      saveSourceVersion,
       restore,
-      refresh: () => mutate(),
+      refresh: () => Promise.all([mutate(), sources.mutate()]),
     }),
     [
       logicalConversationId,
@@ -120,7 +241,22 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
       isValidating,
       restoring,
       restoreError,
+      selection,
       selectedVersion,
+      selectedSourceVersion,
+      sources.data,
+      sources.error,
+      sources.isLoading,
+      sources.isValidating,
+      sources.mutate,
+      enabled,
+      continuationResolved,
+      saving,
+      snapshotError,
+      selectVersion,
+      selectSourceVersion,
+      selectCurrent,
+      saveSourceVersion,
       restore,
       mutate,
     ]

@@ -33,6 +33,72 @@ export type SavedVersion = z.infer<typeof versionSchema>;
 export type RevertedGroup = z.infer<typeof revertedSchema>;
 export type VersionHistory = z.infer<typeof versionHistorySchema>;
 
+const sourceVersionSchema = z.object({
+  id: z.string().uuid(),
+  appId: z.string().uuid(),
+  createdAt: z.string().datetime({ offset: true }),
+  sourceKind: z.enum(['static', 'node']),
+  sourceRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  conversationId: id.optional(),
+  logicalConversationId: id.optional(),
+  previewUrl: z.string().max(4096).optional(),
+});
+const sourceHistorySchema = z.object({
+  configured: z.boolean(),
+  versions: z.array(sourceVersionSchema).max(10000),
+  cards: z.array(z.object({ messageId: id, sourceVersionId: z.string().uuid() })).max(10000),
+  latestSavedVersionId: z.string().uuid().optional(),
+  publishedSourceVersionId: z.string().uuid().optional(),
+});
+export type SourceVersion = z.infer<typeof sourceVersionSchema>;
+export type SourceHistory = z.infer<typeof sourceHistorySchema>;
+export const isSourceVersion = (version: SavedVersion | SourceVersion): version is SourceVersion =>
+  'sourceKind' in version;
+export type VersionSelection =
+  | { kind: 'current' }
+  | { kind: 'source'; sourceVersionId: string }
+  | { kind: 'native'; revisionId: string; logicalConversationId: string };
+
+export const sourceVersionsPath = (conversationId: string): string =>
+  `/api/platform/source-versions?conversationId=${encodeURIComponent(conversationId)}`;
+
+export async function fetchSourceVersions(path: string): Promise<SourceHistory | null> {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'error',
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new VersionRequestError(response.status);
+  return sourceHistorySchema.parse(await response.json());
+}
+
+export async function captureSourceVersion(conversationId: string, signal: AbortSignal, messageId?: string) {
+  const response = await fetch('/api/platform/source-versions/snapshot', {
+    method: 'POST',
+    credentials: 'same-origin',
+    redirect: 'error',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversationId, ...(messageId ? { messageId } : {}) }),
+    signal,
+  });
+  if (!response.ok) throw new VersionRequestError(response.status);
+  const result = sourceHistorySchema
+    .extend({ versionId: z.string().uuid(), messageId: id.optional() })
+    .parse(await response.json());
+  if (
+    !result.configured ||
+    !result.versions.some((version) => version.id === result.versionId) ||
+    (messageId &&
+      (result.messageId !== messageId ||
+        !result.cards.some((card) => card.messageId === messageId && card.sourceVersionId === result.versionId)))
+  ) {
+    throw new VersionRequestError(502);
+  }
+  return result;
+}
+
 const historyPageSchema = z.object({
   items: z
     .array(
@@ -105,10 +171,15 @@ export async function fetchRevertedMessages(path: string): Promise<HistoryPage> 
 }
 
 /** Historical previews use a trusted handoff or an explicit isolated URL, never the live app. */
-export function versionPreviewUrl(version: SavedVersion): string | undefined {
-  if (version.status !== 'ready' || !version.previewUrl) return;
-  if (isHistoricalPreviewUrl(version.previewUrl, version.id))
-    return new URL(version.previewUrl, window.location.origin).href;
+export function versionPreviewUrl(version: SavedVersion | SourceVersion): string | undefined {
+  const source = isSourceVersion(version);
+  if ((source ? version.sourceKind !== 'static' : version.status !== 'ready') || !version.previewUrl) return;
+  if (isHistoricalPreviewUrl(version.previewUrl, version.id, source ? 'source' : 'native')) {
+    const url = new URL(version.previewUrl, window.location.origin);
+    return url.href;
+  }
+  // Code versions must use their exact owner-bound handoff, never an alias or arbitrary external URL.
+  if (source) return;
   try {
     const url = new URL(version.previewUrl);
     const local = url.hostname.endsWith('.localhost');

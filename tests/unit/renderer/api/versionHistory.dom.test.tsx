@@ -1,13 +1,23 @@
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
+import type { IConversationTurnCompletedEvent } from '@/common/adapter/ipcBridge';
 
 const openPreview = vi.hoisted(() => vi.fn());
-const turnCompleted = vi.hoisted(() => vi.fn(() => () => undefined));
+const closePreview = vi.hoisted(() => vi.fn());
+const turnListeners = vi.hoisted(() => new Set<(event: IConversationTurnCompletedEvent) => void>());
+const turnCompleted = vi.hoisted(() =>
+  vi.fn((listener: (event: IConversationTurnCompletedEvent) => void) => {
+    turnListeners.add(listener);
+    return () => {
+      turnListeners.delete(listener);
+    };
+  })
+);
 vi.mock('@/common', () => ({ ipcBridge: { conversation: { turnCompleted: { on: turnCompleted } } } }));
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
-  usePreviewContext: () => ({ openPreview, closePreview: vi.fn() }),
+  usePreviewContext: () => ({ openPreview, closePreview }),
 }));
 vi.mock('@/renderer/components/Markdown', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -33,6 +43,8 @@ import {
   versionPreviewUrl,
   type VersionHistory,
   type SavedVersion,
+  type SourceHistory,
+  type SourceVersion,
 } from '@/renderer/pages/conversation/components/ChatLayout/VersionHistory/api';
 import PublishButton from '@/renderer/pages/conversation/components/ChatLayout/PublishButton';
 
@@ -54,22 +66,27 @@ const initial = (): VersionHistory => ({
   reverted: [],
 });
 const key = (name: string) => `conversation.versions.${name}`;
-function Harness({ publish = false }: { publish?: boolean }) {
+function Harness({ publish = false, anchor }: { publish?: boolean; anchor?: string }) {
   const history = useVersionHistoryState('logical');
   return (
     <VersionHistoryProvider value={history}>
       <output data-testid='active'>{history.data?.activeCoreConversationId}</output>
       <output data-testid='error'>{history.restoreError}</output>
       <output data-testid='restoring'>{String(history.restoring)}</output>
-      <VersionTimelineItems />
-      {publish && <PublishButton conversationId={history.data?.activeCoreConversationId ?? 'core-1'} isWidget />}
+      {anchor && (
+        <div data-testid='completed-message'>
+          <VersionTimelineItems messageIds={[anchor]} />
+        </div>
+      )}
+      <VersionTimelineItems visibleMessageIds={anchor ? [anchor] : []} />
+      {publish && <PublishButton conversationId={history.data?.activeCoreConversationId ?? 'logical'} isWidget />}
     </VersionHistoryProvider>
   );
 }
-const view = (publish = false) =>
+const view = (publish = false, anchor?: string) =>
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, revalidateOnFocus: false }}>
-      <Harness publish={publish} />
+      <Harness publish={publish} anchor={anchor} />
     </SWRConfig>
   );
 const card = (number: number) => within(screen.getByRole('region', { name: `${key('version')} ${number}` }));
@@ -80,7 +97,9 @@ beforeEach(() => {
   meta.content = 'enabled';
   document.head.append(meta);
   openPreview.mockClear();
+  closePreview.mockClear();
   turnCompleted.mockClear();
+  turnListeners.clear();
 });
 afterEach(() => {
   cleanup();
@@ -216,7 +235,9 @@ describe('saved conversation versions', () => {
     view(true);
     await waitFor(() => expect(screen.getByTestId('active')).toHaveTextContent('core-2'));
     fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
-    expect(await screen.findByRole('button', { name: 'conversation.publishing.publishApp' })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'conversation.publishing.publishApp' })).toBeEnabled()
+    );
     expect(
       fetcher.mock.calls.some(([input]) => String(input) === '/api/platform/publishing?conversationId=core-2')
     ).toBe(true);
@@ -300,5 +321,307 @@ describe('version response validation', () => {
     window.location.origin + '/live',
   ])('rejects unsafe or live preview %s', (previewUrl) => {
     expect(versionPreviewUrl({ ...saved('first'), previewUrl })).toBeUndefined();
+  });
+});
+
+const sourceApp = '11111111-1111-4111-8111-111111111111';
+const sourceA = '22222222-2222-4222-8222-222222222222';
+const sourceB = '33333333-3333-4333-8333-333333333333';
+const source = (id = sourceA, sourceKind: 'static' | 'node' = 'static'): SourceVersion => ({
+  id,
+  appId: '44444444-4444-4444-8444-444444444444',
+  createdAt: '2026-09-29T00:00:00.000Z',
+  sourceKind,
+  sourceRevision: 'a'.repeat(64),
+  conversationId: 'logical',
+  previewUrl: `/platform/projects/${sourceApp}/source-versions/${id}/preview?embed=1`,
+});
+const sourceHistory = (): SourceHistory => ({
+  configured: true,
+  versions: [source()],
+  cards: [{ messageId: 'older-message', sourceVersionId: sourceA }],
+  latestSavedVersionId: sourceA,
+});
+const sourceCard = (number: number) =>
+  within(screen.getByRole('region', { name: `${key('sourceVersion')} ${number}` }));
+const publishing = (overrides: Record<string, unknown> = {}) =>
+  Response.json({
+    projectId: 'project',
+    conversationId: 'logical',
+    phase: 'ready',
+    connected: true,
+    workspaceMatches: true,
+    history: [],
+    ...overrides,
+  });
+const completed = (overrides: Partial<IConversationTurnCompletedEvent> = {}): IConversationTurnCompletedEvent => ({
+  session_id: 'logical',
+  turn_id: 'turn-b',
+  status: 'finished',
+  state: 'ai_waiting_input',
+  detail: '',
+  can_send_message: true,
+  runtime: {
+    state: 'idle',
+    can_send_message: true,
+    has_task: false,
+    is_processing: false,
+    pending_confirmations: 0,
+    turn_id: 'turn-b',
+    supports_midturn_delivery: false,
+  },
+  workspace: '/widget',
+  model: { platform: '', name: '', use_model: '' },
+  last_message: { id: 'done-b', type: 'text', content: 'Completed widget', created_at: 1780000000000 },
+  ...overrides,
+});
+const emitCompleted = (event = completed()) =>
+  act(() => {
+    turnListeners.forEach((listener) => listener(event));
+  });
+
+describe('saved widget source versions', () => {
+  it('captures one new idle completion, renders its persisted card beside the message, and reloads without backfill', async () => {
+    let current = sourceHistory();
+    let finish!: (response: Response) => void;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/platform/source-versions/snapshot')
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      if (url.includes('/source-versions?')) return Response.json(current);
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const first = view(true, 'done-b');
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    await emitCompleted(completed({ status: 'running' }));
+    await emitCompleted(completed({ runtime: { ...completed().runtime, is_processing: true } }));
+    await emitCompleted(completed({ session_id: 'other' }));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    await emitCompleted();
+    await emitCompleted();
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1));
+    expect(fetcher.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body).toBe(
+      '{"conversationId":"logical","messageId":"done-b"}'
+    );
+    expect(screen.queryByRole('region', { name: `${key('sourceVersion')} 2` })).not.toBeInTheDocument();
+    current = {
+      ...current,
+      versions: [...current.versions, source(sourceB)],
+      cards: [...current.cards, { messageId: 'done-b', sourceVersionId: sourceB }],
+      latestSavedVersionId: sourceB,
+    };
+    await act(async () => finish(Response.json({ ...current, versionId: sourceB, messageId: 'done-b' })));
+    expect(
+      await within(screen.getByTestId('completed-message')).findByRole('region', { name: `${key('sourceVersion')} 2` })
+    ).toBeVisible();
+    first.unmount();
+    view(true, 'done-b');
+    await within(screen.getByTestId('completed-message')).findByRole('region', { name: `${key('sourceVersion')} 2` });
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('previews and publishes the same saved source without native restore or a live runtime', async () => {
+    let published = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/source-versions?'))
+        return Response.json({ ...sourceHistory(), ...(published ? { publishedSourceVersionId: sourceA } : {}) });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      if (init?.method === 'POST') published = true;
+      return publishing({
+        connected: false,
+        savedSourceAvailable: url.includes(`sourceVersionId=${sourceA}`) || published,
+        history: published
+          ? [{ conversationId: 'logical', sourceVersionId: sourceA, url: 'https://public.example.app/' }]
+          : [],
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    fireEvent.click(sourceCard(1).getByRole('button', { name: 'preview.preview' }));
+    expect(openPreview).toHaveBeenCalledWith(
+      window.location.origin + source().previewUrl,
+      'url',
+      expect.objectContaining({ editable: false })
+    );
+    fireEvent.click(sourceCard(1).getByRole('button', { name: key('details') }));
+    expect(sourceCard(1).queryByRole('button', { name: key('revert') })).not.toBeInTheDocument();
+    expect(sourceCard(1).getByText(key('selected'))).toBeVisible();
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    const button = await screen.findByRole('button', { name: 'conversation.publishing.publishApp' });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.getByRole('link', { name: 'preview.preview' })).toHaveAttribute(
+      'href',
+      window.location.origin + source().previewUrl
+    );
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(
+        fetcher.mock.calls.some(
+          ([input, init]) =>
+            String(input) === '/api/platform/publishing/publish' &&
+            init?.body === `{"conversationId":"logical","sourceVersionId":"${sourceA}"}`
+        )
+      ).toBe(true)
+    );
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([input]) => String(input).includes('/restore'))).toBe(false);
+    expect(
+      fetcher.mock.calls
+        .filter(([input]) => String(input).includes('/publishing'))
+        .every(([input]) => !String(input).includes('revisionId=') && !String(input).includes('logicalConversationId='))
+    ).toBe(true);
+    await waitFor(() => expect(sourceCard(1).getByText(key('published'))).toBeVisible());
+  });
+
+  it('shows a busy capture failure and retries only current work without creating an old-turn card', async () => {
+    let current: SourceHistory = { configured: true, versions: [], cards: [] };
+    let attempts = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/platform/source-versions/snapshot') {
+        if (++attempts === 1) return new Response(null, { status: 409 });
+        current = { configured: true, versions: [source()], cards: [], latestSavedVersionId: sourceA };
+        return Response.json({ ...current, versionId: sourceA });
+      }
+      if (url.includes('/source-versions?')) return Response.json(current);
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    await waitFor(() => expect(turnListeners.size).toBe(1));
+    await emitCompleted();
+    await screen.findByText(key('snapshot.busy'));
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    const retry = await screen.findByRole('button', { name: key('saveCurrent') });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body)).toEqual([
+      '{"conversationId":"logical","messageId":"done-b"}',
+      '{"conversationId":"logical"}',
+    ]);
+  });
+
+  it('keeps current live preview available and names the saved Node preview limitation', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/source-versions?'))
+        return Response.json({ ...sourceHistory(), versions: [source(sourceA, 'node')] });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    expect(sourceCard(1).getByRole('button', { name: 'preview.preview' })).toBeDisabled();
+    expect(sourceCard(1).getByText(key('dynamicPreviewUnavailable'))).toBeVisible();
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    const panel = within(await screen.findByRole('tooltip'));
+    const currentPreview = panel.getByRole('button', { name: 'preview.preview' });
+    expect(currentPreview.closest('form')).toHaveAttribute('action', '/api/platform/preview');
+    expect(currentPreview).toBeEnabled();
+    fireEvent.click(sourceCard(1).getByRole('button', { name: key('details') }));
+    fireEvent.click(sourceCard(1).getByRole('button', { name: key('select') }));
+    await waitFor(() =>
+      expect(within(screen.getByRole('tooltip')).getByRole('button', { name: 'preview.preview' })).toBeDisabled()
+    );
+    expect(openPreview).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  it('closes the previous Preview when a different saved source is selected for Publish', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes('/source-versions?'))
+          return Response.json({ ...sourceHistory(), versions: [source(), source(sourceB)] });
+        if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+        return publishing();
+      })
+    );
+    view(true);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 2` });
+    fireEvent.click(sourceCard(1).getByRole('button', { name: 'preview.preview' }));
+    closePreview.mockClear();
+    fireEvent.click(sourceCard(2).getByRole('button', { name: key('details') }));
+    fireEvent.click(sourceCard(2).getByRole('button', { name: key('select') }));
+    expect(closePreview).toHaveBeenCalledOnce();
+    expect(sourceCard(2).getByText(key('selected'))).toBeVisible();
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    expect(await screen.findByRole('link', { name: 'preview.preview' })).toHaveAttribute(
+      'href',
+      window.location.origin + source(sourceB).previewUrl
+    );
+    expect(openPreview).toHaveBeenCalledOnce();
+  });
+
+  it('states unavailable version saving and never captures when it is not configured', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/source-versions?')) return Response.json({ configured: false, versions: [], cards: [] });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    await screen.findByText(key('snapshot.notConfigured'));
+    expect(screen.getByRole('button', { name: key('saveCurrent') })).toBeDisabled();
+    await emitCompleted();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  it('keeps source cards and explicit saved Preview available while unresolved native history blocks current-work capture', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/source-versions/snapshot')) return Response.json({ ...sourceHistory(), versionId: sourceA });
+      if (url.includes('/source-versions?')) return Response.json(sourceHistory());
+      if (url.includes('/conversations/')) return new Response(null, { status: 503 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    expect(screen.getByRole('combobox')).toHaveTextContent(key('currentWork'));
+    const save = screen.getByRole('button', { name: key('saveCurrent') });
+    await waitFor(() => expect(save).toBeDisabled());
+    fireEvent.click(save);
+    await emitCompleted();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    fireEvent.click(sourceCard(1).getByRole('button', { name: 'preview.preview' }));
+    expect(openPreview).toHaveBeenCalledWith(
+      window.location.origin + source().previewUrl,
+      'url',
+      expect.objectContaining({ editable: false })
+    );
+    expect(sourceCard(1).getByText(key('selected'))).toBeVisible();
+    expect(fetcher.mock.calls.some(([input]) => String(input).includes('/restore'))).toBe(false);
+  });
+
+  it('accepts the matching source-version handoff under its workspace project, distinct from the widget app identity', () => {
+    const version = source();
+    expect(versionPreviewUrl(version)).toBe(window.location.origin + version.previewUrl);
+    expect(version.appId).not.toBe(sourceApp);
+    for (const previewUrl of [
+      version.previewUrl.replace(sourceA, sourceB),
+      version.previewUrl + '&redirect=/live',
+      window.location.origin + '/live',
+      `https://foreign.example${version.previewUrl}`,
+      `https://isolated.example/`,
+      `/platform/projects/${sourceApp}/revisions/logical/${sourceA}/preview?embed=1`,
+    ])
+      expect(versionPreviewUrl({ ...version, previewUrl })).toBeUndefined();
+    expect(versionPreviewUrl({ ...version, sourceKind: 'node' })).toBeUndefined();
   });
 });

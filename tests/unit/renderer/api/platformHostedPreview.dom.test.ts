@@ -32,6 +32,20 @@ function enableHostedPreview() {
 }
 
 describe('historical preview handoff', () => {
+  it('loads a saved source version through GET and reloads the same immutable selector', () => {
+    enableHostedPreview();
+    setCurrentConversation('different-active-core');
+    const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
+    const url = window.location.origin + `/platform/projects/${project}/source-versions/${revision}/preview?embed=1`;
+    render(React.createElement(WebviewHost, { url }));
+    expect(screen.getByTitle('preview.preview')).toHaveAttribute('src', url);
+    fireEvent.click(screen.getByRole('button', { name: 'common.reload' }));
+    expect(screen.getByTitle('preview.preview')).toHaveAttribute('src', url);
+    expect(submit).not.toHaveBeenCalled();
+    expect(isHistoricalPreviewUrl(url, revision, 'source')).toBe(true);
+    expect(isHistoricalPreviewUrl(url, revision, 'native')).toBe(false);
+  });
+
   it('loads the selected revision through the iframe GET without submitting the live conversation form', () => {
     enableHostedPreview();
     window.location.hash = '#/conversation/logical';

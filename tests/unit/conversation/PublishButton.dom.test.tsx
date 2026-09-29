@@ -5,6 +5,7 @@ import { SWRConfig } from 'swr';
 
 const platform = vi.hoisted(() => ({ desktop: false }));
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('@/common', () => ({ ipcBridge: { conversation: { turnCompleted: { on: vi.fn() } } } }));
 vi.mock('@/renderer/utils/platform', () => ({ isElectronDesktop: () => platform.desktop }));
 vi.mock('@/renderer/utils/ui/clipboard', () => ({ copyText: copy }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));

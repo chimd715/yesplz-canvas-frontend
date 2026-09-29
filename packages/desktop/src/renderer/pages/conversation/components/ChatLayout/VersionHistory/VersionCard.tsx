@@ -4,36 +4,58 @@ import React, { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import { useVersionHistory } from './context';
-import { versionPreviewUrl, type SavedVersion } from './api';
+import { isSourceVersion, versionPreviewUrl, type SavedVersion, type SourceVersion } from './api';
 import RevertedMessages from './RevertedMessages';
 import styles from './VersionHistory.module.css';
 
-export const VersionCard: React.FC<{ version: SavedVersion }> = ({ version }) => {
+export const VersionCard: React.FC<{ version: SavedVersion | SourceVersion }> = ({ version }) => {
   const { t } = useTranslation();
   const history = useVersionHistory();
   const { openPreview } = usePreviewContext();
   const [details, setDetails] = useState(false);
   const detailsId = useId();
-  if (!history?.data) return null;
-  const number = history.data.versions.findIndex((item) => item.id === version.id) + 1;
+  const source = isSourceVersion(version);
+  if (!history || (!source && !history.data)) return null;
+  const number =
+    ((source ? history.sourceHistory?.versions : history.data?.versions)?.findIndex((item) => item.id === version.id) ??
+      -1) + 1;
   const previewUrl = versionPreviewUrl(version);
-  const active = history.data.activeRevisionId === version.id;
+  const active = source
+    ? history.sourceHistory?.latestSavedVersionId === version.id
+    : history.data?.activeRevisionId === version.id;
+  const selected = source
+    ? history.selection.kind === 'source' && history.selection.sourceVersionId === version.id
+    : history.selectedVersion?.id === version.id;
+  const published = source ? history.sourceHistory?.publishedSourceVersionId === version.id : version.published;
   return (
-    <section className={styles.card} aria-label={t('conversation.versions.version', { number })}>
+    <section
+      className={`${styles.card}${selected ? ` ${styles.selected}` : ''}`}
+      aria-label={t(source ? 'conversation.versions.sourceVersion' : 'conversation.versions.version', { number })}
+    >
       <div className={styles.heading}>
         <History size={17} aria-hidden />
-        <div className={styles.title}>{version.label || t('conversation.versions.version', { number })}</div>
+        <div className={styles.title}>
+          {source
+            ? t('conversation.versions.sourceSummary')
+            : version.label || t('conversation.versions.version', { number })}
+        </div>
       </div>
       <div className={styles.meta}>
         <span>{t('conversation.versions.version', { number })}</span>
-        <span>{t(`conversation.versions.status.${version.status}`)}</span>
-        {active && <span>{t('conversation.versions.current')}</span>}
-        {version.published && <span>{t('conversation.versions.published')}</span>}
+        <span>
+          {source ? t('conversation.versions.status.saved') : t(`conversation.versions.status.${version.status}`)}
+        </span>
+        {active && (
+          <span className={styles.state}>
+            {t(source ? 'conversation.versions.latestSaved' : 'conversation.versions.current')}
+          </span>
+        )}
+        {selected && <span className={styles.state}>{t('conversation.versions.selected')}</span>}
+        {published && <span className={styles.state}>{t('conversation.versions.published')}</span>}
       </div>
       <div className={styles.actions}>
         <Button
           size='small'
-          type='text'
           aria-expanded={details}
           aria-controls={detailsId}
           onClick={() => setDetails((value) => !value)}
@@ -46,28 +68,57 @@ export const VersionCard: React.FC<{ version: SavedVersion }> = ({ version }) =>
           disabled={!previewUrl}
           onClick={() => {
             if (!previewUrl) return;
-            history.selectVersion(version.id);
-            openPreview(previewUrl, 'url', { title: t('conversation.versions.version', { number }), editable: false });
+            if (source) history.selectSourceVersion(version.id);
+            else history.selectVersion(version.id);
+            openPreview(previewUrl, 'url', {
+              title: t('conversation.versions.version', { number }),
+              editable: false,
+            });
           }}
         >
           {t('preview.preview')}
         </Button>
       </div>
+      {source && version.sourceKind === 'node' && (
+        <p className={styles.meta}>{t('conversation.versions.dynamicPreviewUnavailable')}</p>
+      )}
+      {source && version.sourceKind === 'static' && !previewUrl && (
+        <p className={styles.meta}>{t('conversation.versions.previewUnavailable')}</p>
+      )}
       {details && (
         <div id={detailsId} className={styles.details}>
           <time dateTime={new Date(version.createdAt).toISOString()}>
             {new Date(version.createdAt).toLocaleString()}
           </time>
           {!previewUrl && <p>{t('conversation.versions.previewUnavailable')}</p>}
-          <p>{t('conversation.versions.restoreDescription')}</p>
-          <Button
-            size='small'
-            disabled={active || !!history.error || history.restoring || version.status === 'building'}
-            loading={history.restoring}
-            onClick={() => void history.restore(version.id)}
-          >
-            {t('conversation.versions.revert')}
-          </Button>
+          {source ? (
+            <>
+              <p>{t('conversation.versions.sourceDescription')}</p>
+              <div className={styles.identity}>
+                {t('conversation.versions.versionId')}: {version.id}
+              </div>
+              <Button
+                size='small'
+                aria-pressed={selected}
+                disabled={history.saving || !!history.sourceError}
+                onClick={() => history.selectSourceVersion(version.id)}
+              >
+                {t('conversation.versions.select')}
+              </Button>
+            </>
+          ) : (
+            <>
+              <p>{t('conversation.versions.restoreDescription')}</p>
+              <Button
+                size='small'
+                disabled={active || !!history.error || history.restoring || version.status === 'building'}
+                loading={history.restoring}
+                onClick={() => void history.restore(version.id)}
+              >
+                {t('conversation.versions.revert')}
+              </Button>
+            </>
+          )}
         </div>
       )}
     </section>
@@ -80,13 +131,13 @@ export const VersionTimelineItems: React.FC<{ messageIds?: string[]; visibleMess
   visibleMessageIds = [],
 }) => {
   const history = useVersionHistory();
-  if (!history?.data) return null;
-  const { data } = history;
+  if (!history) return null;
+  const { data, sourceHistory } = history;
   const matches = (anchor: string | undefined): boolean =>
     messageIds ? !!anchor && messageIds.includes(anchor) : !anchor || !visibleMessageIds.includes(anchor);
   return (
     <>
-      {data.versions
+      {data?.versions
         .filter((version) => {
           const archived = data.reverted.some((group) =>
             group.revisionIds
@@ -101,11 +152,31 @@ export const VersionTimelineItems: React.FC<{ messageIds?: string[]; visibleMess
         .map((version) => (
           <VersionCard key={version.id} version={version} />
         ))}
-      {data.reverted
+      {data?.reverted
         .filter((group) => matches(group.afterActiveMessageId))
         .map((group) => (
           <RevertedMessages key={group.id} group={group} />
         ))}
+      {sourceHistory?.cards
+        .filter((card) => matches(card.messageId))
+        .map((card) => {
+          const version = sourceHistory.versions.find((item) => item.id === card.sourceVersionId);
+          return version ? <VersionCard key={`${card.messageId}/${version.id}`} version={version} /> : null;
+        })}
+      {!messageIds &&
+        sourceHistory?.versions
+          .filter((version) => !sourceHistory.cards.some((card) => card.sourceVersionId === version.id))
+          .map((version) => <VersionCard key={version.id} version={version} />)}
+      {!messageIds && (history.saving || history.snapshotError) && (
+        <div className={styles.notice} role={history.snapshotError ? 'alert' : 'status'} aria-live='polite'>
+          {history.saving ? <SnapshotText state='saving' /> : <SnapshotText state={history.snapshotError!} />}
+        </div>
+      )}
     </>
   );
+};
+
+const SnapshotText: React.FC<{ state: 'saving' | 'busy' | 'missing' | 'unavailable' }> = ({ state }) => {
+  const { t } = useTranslation();
+  return <>{t(`conversation.versions.snapshot.${state}`)}</>;
 };

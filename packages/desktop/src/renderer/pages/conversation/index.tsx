@@ -142,7 +142,7 @@ const ChatConversationIndex: React.FC = () => {
                   ? 'conversation.versions.restoreConflict'
                   : versions.restoreError
                     ? 'conversation.versions.restoreUnavailable'
-                    : 'conversation.versions.unavailable'
+                    : 'conversation.versions.restoreHistoryUnavailable'
               )}
             </span>
             <Button size='mini' loading={versions.isValidating} onClick={() => void versions.refresh()}>
