@@ -19,11 +19,9 @@ vi.mock('@/common', () => ({
   ipcBridge: {
     database: {
       getUserConversations: {
-        invoke: vi
-          .fn()
-          .mockResolvedValue({
-            items: [{ id: 'active-core', logical_conversation_id: 'logical-chat', project_id: 'project-1' }],
-          }),
+        invoke: vi.fn().mockResolvedValue({
+          items: [{ id: 'active-core', logical_conversation_id: 'logical-chat', project_id: 'project-1' }],
+        }),
       },
     },
     conversation: {
