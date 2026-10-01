@@ -189,17 +189,20 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
       if (
         event.session_id !== conversationId ||
         event.status !== 'finished' ||
-        !messageId ||
         event.runtime.state !== 'idle' ||
         event.runtime.is_processing ||
         event.runtime.pending_confirmations !== 0
       )
         return;
       const key = event.turn_id || messageId;
-      if (capturedTurns.current.has(key)) return;
+      if (!key || capturedTurns.current.has(key)) return;
       capturedTurns.current.add(key);
       // Only a new completed-turn event captures source. Loading history never backfills old turns.
-      void versions.saveSourceVersion(messageId);
+      const turns = capturedTurns.current;
+      void versions.saveSourceVersion(messageId, true).then((saved) => {
+        // Suppress concurrent duplicates, but a failed capture must remain retryable.
+        if (!saved) turns.delete(key);
+      });
     });
   }, [
     enabled,

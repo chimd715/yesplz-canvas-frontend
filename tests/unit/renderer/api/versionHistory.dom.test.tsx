@@ -15,7 +15,13 @@ const turnCompleted = vi.hoisted(() =>
     };
   })
 );
-vi.mock('@/common', () => ({ ipcBridge: { conversation: { turnCompleted: { on: turnCompleted } } } }));
+const latestMessages = vi.hoisted(() => vi.fn());
+vi.mock('@/common', () => ({
+  ipcBridge: {
+    conversation: { turnCompleted: { on: turnCompleted } },
+    database: { getConversationMessages: { invoke: latestMessages } },
+  },
+}));
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({ openPreview, closePreview }),
 }));
@@ -109,6 +115,7 @@ beforeEach(() => {
   openPreview.mockClear();
   closePreview.mockClear();
   turnCompleted.mockClear();
+  latestMessages.mockReset();
   turnListeners.clear();
 });
 afterEach(() => {
@@ -386,11 +393,115 @@ const completed = (overrides: Partial<IConversationTurnCompletedEvent> = {}): IC
   ...overrides,
 });
 const emitCompleted = (event = completed()) =>
-  act(() => {
+  act(async () => {
     turnListeners.forEach((listener) => listener(event));
   });
 
 describe('saved widget source versions', () => {
+  it('resolves the latest persisted completion when Core omits last_message and displays its saved Preview card', async () => {
+    latestMessages.mockResolvedValue({
+      items: [
+        {
+          id: 'done-b',
+          conversation_id: 'logical',
+          type: 'text',
+          position: 'left',
+          status: 'finish',
+          hidden: false,
+          created_at: 1780000000000,
+        },
+      ],
+    });
+    const current = { ...sourceHistory(), cards: [{ messageId: 'done-b', sourceVersionId: sourceA }] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/platform/source-versions/snapshot')
+        return Response.json({ ...current, versionId: sourceA, messageId: 'done-b' });
+      if (url.includes('/source-versions?')) return Response.json({ configured: true, versions: [], cards: [] });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    const nativeEvent = completed({ last_message: { content: null, created_at: 1780000000000 } });
+    await emitCompleted(nativeEvent);
+    expect(
+      await within(screen.getByTestId('completed-message')).findByRole('region', {
+        name: `${key('sourceVersion')} 1`,
+      })
+    ).toBeVisible();
+    await emitCompleted(nativeEvent);
+    expect(latestMessages).toHaveBeenCalledWith({ conversation_id: 'logical', limit: 1 });
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body)).toEqual([
+      '{"conversationId":"logical","messageId":"done-b"}',
+    ]);
+  });
+
+  it.each([{ position: 'right' }, { status: 'work' }, { hidden: true }, { conversation_id: 'other' }])(
+    'does not attach current files to an invalid completion (%j)',
+    async (overrides) => {
+      latestMessages.mockResolvedValue({
+        items: [
+          {
+            id: 'done-b',
+            conversation_id: 'logical',
+            type: 'text',
+            position: 'left',
+            status: 'finish',
+            hidden: false,
+            ...overrides,
+          },
+        ],
+      });
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes('/source-versions?')) return Response.json({ configured: true, versions: [], cards: [] });
+        if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+        return publishing();
+      });
+      vi.stubGlobal('fetch', fetcher);
+      view(true);
+      await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+      await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+      await screen.findByText(key('snapshot.busy'));
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    }
+  );
+
+  it('allows a repeated completion to retry after capture fails, without a polling loop', async () => {
+    let failed = true;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/platform/source-versions/snapshot')
+        return failed
+          ? new Response(null, { status: 409 })
+          : Response.json({
+              ...sourceHistory(),
+              versionId: sourceA,
+              messageId: 'done-b',
+              cards: [{ messageId: 'done-b', sourceVersionId: sourceA }],
+            });
+      if (url.includes('/source-versions?')) return Response.json({ configured: true, versions: [], cards: [] });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    await emitCompleted();
+    await screen.findByText(key('snapshot.busy'));
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    failed = false;
+    await emitCompleted();
+    expect(
+      await within(screen.getByTestId('completed-message')).findByRole('region', {
+        name: `${key('sourceVersion')} 1`,
+      })
+    ).toBeVisible();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+  });
+
   it('captures one new idle completion, renders its persisted card beside the message, and reloads without backfill', async () => {
     let current = sourceHistory();
     let finish!: (response: Response) => void;

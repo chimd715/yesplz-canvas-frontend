@@ -89,7 +89,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
   }, [data?.activeCoreConversationId, mutate]);
 
   const saveSourceVersion = useCallback(
-    async (messageId?: string) => {
+    async (messageId?: string, completedTurn = false) => {
       if (
         !enabled ||
         !isNativeRuntimeActive() ||
@@ -100,18 +100,47 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
         !sources.data?.configured ||
         sourceRequest.current
       )
-        return;
+        return false;
       const controller = new AbortController();
       sourceRequest.current = controller;
       setSaving(true);
       setSnapshotError(null);
       try {
+        // Core's turn.completed event may omit last_message. Resolve only the
+        // current persisted completion; the snapshot endpoint rechecks this ID,
+        // runtime idleness and file timestamps before assigning any saved card.
+        if (completedTurn && !messageId) {
+          const page = await ipcBridge.database.getConversationMessages.invoke({
+            conversation_id: activeConversationId,
+            limit: 1,
+          });
+          const latest = page?.items.length === 1 ? page.items[0] : undefined;
+          if (
+            !latest?.id ||
+            latest.conversation_id !== activeConversationId ||
+            latest.type !== 'text' ||
+            latest.position !== 'left' ||
+            latest.status !== 'finish' ||
+            latest.hidden !== false
+          ) {
+            throw new VersionRequestError(409);
+          }
+          messageId = latest.id;
+        }
+        controller.signal.throwIfAborted();
+        if (
+          !isNativeRuntimeActive() ||
+          (getBuilderWorkspace() && getActiveNativeRuntimeContext()?.coreId !== activeConversationId)
+        )
+          return false;
         const next = await captureSourceVersion(
           activeConversationId,
           AbortSignal.any([controller.signal, AbortSignal.timeout(180000)]),
           messageId
         );
-        if (!controller.signal.aborted) await sources.mutate(next, { revalidate: false });
+        if (controller.signal.aborted) return false;
+        await sources.mutate(next, { revalidate: false });
+        return true;
       } catch (failure) {
         if (!controller.signal.aborted) {
           setSnapshotError(
@@ -124,6 +153,7 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
           // A lost response may follow a successful capture. Reconcile once without recapturing.
           void sources.mutate();
         }
+        return false;
       } finally {
         if (sourceRequest.current === controller) sourceRequest.current = null;
         if (!controller.signal.aborted) setSaving(false);
