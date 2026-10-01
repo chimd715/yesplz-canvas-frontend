@@ -838,7 +838,14 @@ describe('creation mode user request display', () => {
         value={{
           conversation_id: 'research',
           type,
-          creationMode: { ...widgetModeFixture, id: 'research', outputType: 'report', instructions, revision: 2 },
+          creationMode: {
+            ...widgetModeFixture,
+            interactionContract: 'explicit-actions-v1',
+            id: 'research',
+            outputType: 'report',
+            instructions,
+            revision: 2,
+          },
         }}
       >
         <MessageText message={message} />
@@ -862,7 +869,7 @@ describe('creation mode user request display', () => {
           conversation_id: 'research',
           type: 'aionrs',
           isWidget: true,
-          creationMode: { ...widgetModeFixture, revision: 2 },
+          creationMode: { ...widgetModeFixture, interactionContract: 'explicit-actions-v1', revision: 2 },
         }}
       >
         <MessageText message={message} />
@@ -876,7 +883,7 @@ describe('creation mode user request display', () => {
           conversation_id: 'research',
           type: 'aionrs',
           isWidget: true,
-          creationMode: { ...widgetModeFixture, revision: 2 },
+          creationMode: { ...widgetModeFixture, interactionContract: 'explicit-actions-v1', revision: 2 },
         }}
       >
         <MessageText message={{ ...message, position: 'right', content: { content } }} />

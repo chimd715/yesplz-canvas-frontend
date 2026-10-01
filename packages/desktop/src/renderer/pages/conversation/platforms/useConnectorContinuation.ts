@@ -60,7 +60,8 @@ async function answerShopifyQuestion(conversationId: string, shop: string, signa
   if (!question && pending.some((item) => hasConnector(item, true))) {
     const current = await conversation.get.invoke({ id: conversationId });
     if (signal?.aborted) throw new Error('Connection cancelled');
-    allowLegacy = current?.id === conversationId && !current.extra?.creationMode;
+    allowLegacy =
+      current?.id === conversationId && current.extra?.creationMode?.interactionContract !== 'explicit-actions-v1';
     if (allowLegacy) question = pending.find((item) => hasConnector(item, true));
   }
   if (!question) return pending.some((item) => item.questions?.length);

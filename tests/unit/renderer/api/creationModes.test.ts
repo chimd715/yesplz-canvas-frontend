@@ -24,6 +24,7 @@ describe('creation mode catalog', () => {
   it('pins the published instructions and skill revisions independently of later catalog edits', () => {
     const mode = { ...widgetModeFixture, skillRefs: [{ id: 'widget', revision: 3 }], mcpRefs: ['products'] };
     const pinned = creationModeSnapshot(mode, 3);
+    expect(pinned.interactionContract).toBe('explicit-actions-v1');
     mode.instructions = 'Changed draft';
     mode.skillRefs[0].revision = 4;
     mode.mcpRefs.push('orders');

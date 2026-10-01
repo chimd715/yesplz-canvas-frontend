@@ -95,6 +95,7 @@ export async function fetchCreationModes(path: string): Promise<CreationCatalog 
 /** Freeze the published instructions used to start this conversation. */
 export function creationModeSnapshot(mode: CreationMode, catalogRevision: number | null): TCreationModeSnapshot {
   return {
+    interactionContract: 'explicit-actions-v1',
     id: mode.id,
     revision: catalogRevision,
     name: mode.name,

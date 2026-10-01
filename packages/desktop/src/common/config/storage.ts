@@ -160,6 +160,8 @@ export type TConversationAssistantIdentity = {
 };
 
 export type TCreationModeSnapshot = {
+  /** Absent on historical snapshots that still require legacy question adapters. */
+  interactionContract?: 'explicit-actions-v1';
   id: string;
   revision: number | null;
   name: string;

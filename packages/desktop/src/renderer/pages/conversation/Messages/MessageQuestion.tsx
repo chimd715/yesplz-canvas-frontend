@@ -84,7 +84,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
   const { t } = useTranslation();
   const context = useConversationContextSafe();
   const readOnly = !!context?.readOnly || !isNativeRuntimeActive();
-  const allowLegacy = !context?.creationMode;
+  const allowLegacy = context?.creationMode?.interactionContract !== 'explicit-actions-v1';
   const content = message.content || ({} as IMessageAsk['content']);
   const questions = useMemo<IAskQuestion[]>(
     () => (Array.isArray(content.questions) ? content.questions : []),

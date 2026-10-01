@@ -133,34 +133,44 @@ it('keeps the return available when queue admission fails and ignores an unreque
   expect(accept).toHaveBeenCalledTimes(1);
 });
 
-it('answers the pending platform question after OAuth rather than leaving a continuation stuck behind it', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
-  );
-  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
-    {
-      id: 'pending',
-      call_id: 'widget-data',
-      questions: [
-        { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
-      ],
-    },
-  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
-  const accept = vi.fn(() => true);
-  renderHook(() => useConnectorContinuation('current', true, accept));
-  await waitFor(() =>
-    expect(conversation.answerAsk.invoke).toHaveBeenCalledExactlyOnceWith({
-      conversation_id: 'current',
-      request_id: 'widget-data',
-      answers: [
-        { question: 'Which platform is your store on?', labels: ['Shopify (selected store: selected.myshopify.com)'] },
-      ],
-    })
-  );
-  expect(accept).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
-});
+it.each([undefined, { ...widgetModeFixture, revision: 3 }])(
+  'answers a historical pending question after OAuth, including older pinned catalog snapshots (%j)',
+  async (creationMode) => {
+    vi.mocked(conversation.get.invoke).mockResolvedValue({
+      id: 'current',
+      extra: { creationMode },
+    } as TChatConversation);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+    );
+    vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+      {
+        id: 'pending',
+        call_id: 'widget-data',
+        questions: [
+          { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+    const accept = vi.fn(() => true);
+    renderHook(() => useConnectorContinuation('current', true, accept));
+    await waitFor(() =>
+      expect(conversation.answerAsk.invoke).toHaveBeenCalledExactlyOnceWith({
+        conversation_id: 'current',
+        request_id: 'widget-data',
+        answers: [
+          {
+            question: 'Which platform is your store on?',
+            labels: ['Shopify (selected store: selected.myshopify.com)'],
+          },
+        ],
+      })
+    );
+    expect(accept).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
+  }
+);
 
 it('keeps a failed question answer available for retry and never sends a second task', async () => {
   vi.stubGlobal(
@@ -221,7 +231,7 @@ it('does not apply historical text inference to a catalog mode or fabricate anot
   );
   vi.mocked(conversation.get.invoke).mockResolvedValue({
     id: 'current',
-    extra: { creationMode: { ...widgetModeFixture, revision: 2 } },
+    extra: { creationMode: { ...widgetModeFixture, interactionContract: 'explicit-actions-v1', revision: 2 } },
   } as TChatConversation);
   vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
     {

@@ -187,7 +187,7 @@ const MessageText: React.FC<{
     !isTeammateMessage &&
     !conversationContext?.hideSendBox &&
     conversationContext?.type === 'aionrs' &&
-    !conversationContext.creationMode &&
+    conversationContext.creationMode?.interactionContract !== 'explicit-actions-v1' &&
     conversationContext.isWidget === true &&
     typeof renderedText === 'string' &&
     hasWidgetPlatformPrompt(renderedText);

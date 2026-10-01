@@ -102,13 +102,19 @@ describe('permission message adapters', () => {
     answerAskInvoke.mockResolvedValue(undefined);
   });
 
-  const renderCatalogQuestion = (options: IAskQuestion['options']) =>
+  const renderCatalogQuestion = (options: IAskQuestion['options'], legacy = false) =>
     render(
       <ConversationProvider
         value={{
           conversation_id: 'conversation-1',
           type: 'aionrs',
-          creationMode: { ...widgetModeFixture, id: 'catalog-browser', outputType: 'app', revision: 2 },
+          creationMode: {
+            ...widgetModeFixture,
+            interactionContract: legacy ? undefined : 'explicit-actions-v1',
+            id: 'catalog-browser',
+            outputType: 'app',
+            revision: 2,
+          },
         }}
       >
         <MessageQuestion
@@ -120,7 +126,9 @@ describe('permission message adapters', () => {
             content: {
               session_id: 'conversation-1',
               request_id: 'connector-question',
-              questions: [{ question: 'Pick a source for this feature', options }],
+              questions: [
+                { question: legacy ? 'Which platform is your store on?' : 'Pick a source for this feature', options },
+              ],
             },
           }}
         />
@@ -143,6 +151,26 @@ describe('permission message adapters', () => {
       request_id: 'connector-question',
       answers: [
         { question: 'Pick a source for this feature', labels: ['My shop (selected store: verified.myshopify.com)'] },
+      ],
+    });
+  });
+
+  it('preserves legacy connection selection for an older pinned catalog snapshot', async () => {
+    const emit = vi.spyOn(emitter, 'emit');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ connected: true, shop: 'verified.myshopify.com' }) })
+    );
+    renderCatalogQuestion([{ label: 'Shopify' }, { label: 'Other' }], true);
+    fireEvent.click(screen.getByTestId('message-question-option-0-Shopify'));
+    expect(emit).toHaveBeenCalledWith('connectors.shopify.open', true, 'conversation-1');
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(answerAskInvoke).toHaveBeenCalledWith({
+      conversation_id: 'conversation-1',
+      request_id: 'connector-question',
+      answers: [
+        { question: 'Which platform is your store on?', labels: ['Shopify (selected store: verified.myshopify.com)'] },
       ],
     });
   });
