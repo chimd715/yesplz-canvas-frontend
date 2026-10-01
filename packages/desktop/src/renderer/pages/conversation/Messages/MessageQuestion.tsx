@@ -61,6 +61,16 @@ export const isStorePlatformQuestion = (q: IAskQuestion) =>
   !q.multiSelect &&
   !q.multi_select;
 
+/** Only registered connector actions can open product-owned connection UI. */
+export const isShopifyConnectorOption = (q: IAskQuestion, label: string, allowLegacy = false): boolean => {
+  const option = q.options.find((item) => item.label === label);
+  if (!option) return false;
+  if (option.action !== undefined) {
+    return option.action?.type === 'connect' && option.action?.connector === 'shopify';
+  }
+  return allowLegacy && label === 'Shopify' && isStorePlatformQuestion(q);
+};
+
 /**
  * Structured question card (`ask` frame — claude AskUserQuestion).
  *
@@ -72,7 +82,9 @@ export const isStorePlatformQuestion = (q: IAskQuestion) =>
  */
 const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, onAnswer }) => {
   const { t } = useTranslation();
-  const readOnly = !!useConversationContextSafe()?.readOnly || !isNativeRuntimeActive();
+  const context = useConversationContextSafe();
+  const readOnly = !!context?.readOnly || !isNativeRuntimeActive();
+  const allowLegacy = !context?.creationMode;
   const content = message.content || ({} as IMessageAsk['content']);
   const questions = useMemo<IAskQuestion[]>(
     () => (Array.isArray(content.questions) ? content.questions : []),
@@ -98,14 +110,20 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
     setConnectionError(false);
     try {
       let shop: string | undefined;
-      if (questions.some((q, i) => isStorePlatformQuestion(q) && drafts[i]?.labels[0] === 'Shopify')) {
+      if (
+        questions.some((q, i) => drafts[i]?.labels.some((label) => isShopifyConnectorOption(q, label, allowLegacy)))
+      ) {
         const response = await fetch(
           '/api/platform/connectors/shopify?conversationId=' + encodeURIComponent(message.conversation_id),
           { credentials: 'same-origin' }
         );
         if (!response.ok) throw new Error('Connection status unavailable');
         const data = await response.json();
-        if (data.connected !== true || typeof data.shop !== 'string' || !data.shop) {
+        if (
+          data.connected !== true ||
+          typeof data.shop !== 'string' ||
+          !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(data.shop)
+        ) {
           emitter.emit('connectors.shopify.open', true, message.conversation_id);
           return;
         }
@@ -117,9 +135,9 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
       // DEDICATED ask channel, not the permission confirm endpoint.
       const answers = questions.map((q, i) => {
         const d = drafts[i];
-        const labels = [...d.labels];
-        if (shop && isStorePlatformQuestion(q) && labels[0] === 'Shopify')
-          labels[0] = `Shopify (selected store: ${shop})`;
+        const labels = d.labels.map((label) =>
+          shop && isShopifyConnectorOption(q, label, allowLegacy) ? `${label} (selected store: ${shop})` : label
+        );
         if (d.otherSelected && d.other.trim()) labels.push(d.other.trim());
         return { question: q.question, labels };
       });
@@ -136,7 +154,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
     } finally {
       setSubmitting(false);
     }
-  }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer, readOnly]);
+  }, [drafts, questions, message.conversation_id, requestId, submitting, onAnswer, readOnly, allowLegacy]);
 
   const handleDecline = useCallback(async () => {
     if (readOnly || !isNativeRuntimeActive() || submitting) return;
@@ -208,7 +226,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                   value={d.otherSelected ? OTHER_VALUE : d.labels[0]}
                   onChange={(value) => {
                     if (readOnly || !isNativeRuntimeActive()) return;
-                    if (value === 'Shopify' && isStorePlatformQuestion(q))
+                    if (isShopifyConnectorOption(q, String(value), allowLegacy))
                       emitter.emit('connectors.shopify.open', true, message.conversation_id);
                     if (value === OTHER_VALUE) updateDraft(qi, { labels: [], otherSelected: true });
                     else updateDraft(qi, { labels: [value], otherSelected: false });
@@ -228,7 +246,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
                       </span>
                     </Radio>
                   ))}
-                  {!isStorePlatformQuestion(q) && (
+                  {!(allowLegacy && isStorePlatformQuestion(q)) && (
                     <Radio
                       className={own.optionRow}
                       value={OTHER_VALUE}

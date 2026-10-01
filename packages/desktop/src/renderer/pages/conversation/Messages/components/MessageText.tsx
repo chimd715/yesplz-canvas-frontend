@@ -115,7 +115,16 @@ const MessageText: React.FC<{
     let content = message.content.content;
     if (typeof content === 'string') {
       // Keep product instructions in the model history, out of the merchant's message bubble.
-      if (isUserMessage && conversationContext?.isWidget && content.startsWith('---\nname: shop-widget\n')) {
+      const instructions = conversationContext?.creationMode?.instructions.trim();
+      const prefix = instructions ? `${instructions}\n\n## User request\n\n` : undefined;
+      if (isUserMessage && prefix && content.startsWith(prefix)) {
+        content = content.slice(prefix.length);
+      } else if (
+        isUserMessage &&
+        !conversationContext?.creationMode &&
+        conversationContext?.isWidget &&
+        content.startsWith('---\nname: shop-widget\n')
+      ) {
         const separator = '\n\n## User request\n\n';
         const index = content.indexOf(separator);
         if (index !== -1) content = content.slice(index + separator.length);
@@ -130,7 +139,7 @@ const MessageText: React.FC<{
       return content;
     }
     return content;
-  }, [message.content.content, isUserMessage, conversationContext?.isWidget]);
+  }, [message.content.content, isUserMessage, conversationContext?.isWidget, conversationContext?.creationMode]);
 
   const { t } = useTranslation();
   const [showCopyAlert, setShowCopyAlert] = useState(false);
@@ -178,6 +187,7 @@ const MessageText: React.FC<{
     !isTeammateMessage &&
     !conversationContext?.hideSendBox &&
     conversationContext?.type === 'aionrs' &&
+    !conversationContext.creationMode &&
     conversationContext.isWidget === true &&
     typeof renderedText === 'string' &&
     hasWidgetPlatformPrompt(renderedText);

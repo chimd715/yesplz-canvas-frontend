@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { IConversationMcpStatus } from '@/common/config/storage';
+import type { IConversationMcpStatus, TCreationModeSnapshot } from '@/common/config/storage';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
 import ConversationPlanBar from '@renderer/pages/conversation/PlanBar/ConversationPlanBar';
@@ -32,6 +32,7 @@ const AcpChat: React.FC<{
   conversation_id: string;
   workspace?: string;
   backend: string;
+  creationMode?: TCreationModeSnapshot;
   session_mode?: string;
   agent_name?: string;
   cron_job_id?: string;
@@ -49,6 +50,7 @@ const AcpChat: React.FC<{
   conversation_id,
   workspace,
   backend,
+  creationMode,
   session_mode,
   agent_name,
   cron_job_id,
@@ -77,6 +79,7 @@ const AcpChat: React.FC<{
       value={{
         conversation_id: conversation_id,
         workspace,
+        creationMode,
         type: 'acp',
         cron_job_id,
         hideSendBox,

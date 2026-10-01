@@ -267,6 +267,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
       <AionrsChat
         conversation_id={conversation.id}
         isWidget={chatLayoutProps.isWidget}
+        creationMode={conversation.extra?.creationMode}
         workspace={conversation.extra.workspace}
         emptySlot={emptySlot}
         modelSelection={modelSelection}
@@ -344,6 +345,7 @@ const NativeChatConversation: React.FC<{
             key={conversation.id}
             conversation_id={conversation.id}
             workspace={conversation.extra?.workspace}
+            creationMode={conversation.extra?.creationMode}
             backend={resolvedConversationBackend || 'claude'}
             session_mode={conversation.extra?.session_mode}
             agent_name={assistantDisplayName}

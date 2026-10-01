@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { IConversationMcpStatus } from '@/common/config/storage';
+import type { IConversationMcpStatus, TCreationModeSnapshot } from '@/common/config/storage';
 import React, { createContext, useContext } from 'react';
 
 /**
@@ -24,6 +24,7 @@ export interface ConversationContextValue {
    */
   workspace?: string;
   isWidget?: boolean;
+  creationMode?: TCreationModeSnapshot;
 
   /**
    * Conversation type

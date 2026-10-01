@@ -30,6 +30,7 @@ const LegacyReadOnlyConversation: React.FC<{
       value={{
         conversation_id: conversation.id,
         workspace: conversation.extra?.workspace,
+        creationMode: conversation.extra?.creationMode,
         type: centralReadOnly && conversation.type === 'aionrs' ? 'aionrs' : 'acp',
         isWidget:
           centralReadOnly && (conversation.extra as { outputType?: string } | undefined)?.outputType === 'widget',

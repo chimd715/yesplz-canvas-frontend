@@ -309,7 +309,11 @@ export interface IAskQuestion {
    *  wire spelling is multi_select; multiSelect kept for direct payloads. */
   multiSelect?: boolean;
   multi_select?: boolean;
-  options: Array<{ label: string; description?: string }>;
+  options: Array<{
+    label: string;
+    description?: string;
+    action?: { type: 'connect'; connector: 'shopify' };
+  }>;
 }
 
 /** Structured question card (AgentStreamEvent::Ask, wire tag `ask`). Answered via

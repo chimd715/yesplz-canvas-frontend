@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import { conversation } from '@/common/adapter/ipcBridge';
-import { isStorePlatformQuestion } from '../Messages/MessageQuestion';
+import { isShopifyConnectorOption } from '../Messages/MessageQuestion';
 
 export const shopifyPendingKey = (conversationId: string) => `shopify_pending_${conversationId}`;
 
@@ -53,12 +53,27 @@ export async function submitConnectorPrompt(input: string, conversationId: strin
 async function answerShopifyQuestion(conversationId: string, shop: string, signal?: AbortSignal) {
   const pending = await conversation.confirmation.list.invoke({ conversation_id: conversationId });
   if (signal?.aborted) throw new Error('Connection cancelled');
-  const question = pending.find((item) => item.questions?.length === 1 && isStorePlatformQuestion(item.questions[0]));
-  if (!question) return false;
+  const hasConnector = (item: (typeof pending)[number], allowLegacy: boolean) =>
+    item.questions?.some((q) => q.options.some((option) => isShopifyConnectorOption(q, option.label, allowLegacy)));
+  let allowLegacy = false;
+  let question = pending.find((item) => hasConnector(item, false));
+  if (!question && pending.some((item) => hasConnector(item, true))) {
+    const current = await conversation.get.invoke({ id: conversationId });
+    if (signal?.aborted) throw new Error('Connection cancelled');
+    allowLegacy = current?.id === conversationId && !current.extra?.creationMode;
+    if (allowLegacy) question = pending.find((item) => hasConnector(item, true));
+  }
+  if (!question) return pending.some((item) => item.questions?.length);
+  // OAuth cannot supply unrelated answers or choose between multiple connector options.
+  // Keep the existing question card active instead of queuing another task behind it.
+  if (question.questions!.length !== 1) return true;
+  const target = question.questions![0];
+  const options = target.options.filter((option) => isShopifyConnectorOption(target, option.label, allowLegacy));
+  if (options.length !== 1 || target.multiSelect || target.multi_select) return true;
   await conversation.answerAsk.invoke({
     conversation_id: conversationId,
     request_id: question.call_id,
-    answers: [{ question: question.questions![0].question, labels: [`Shopify (selected store: ${shop})`] }],
+    answers: [{ question: target.question, labels: [`${options[0].label} (selected store: ${shop})`] }],
   });
   return true;
 }

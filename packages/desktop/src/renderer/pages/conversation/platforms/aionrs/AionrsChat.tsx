@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { IConversationMcpStatus } from '@/common/config/storage';
+import type { IConversationMcpStatus, TCreationModeSnapshot } from '@/common/config/storage';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { ConversationContextValue } from '@/renderer/hooks/context/ConversationContext';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
@@ -31,6 +31,7 @@ const AionrsChat: React.FC<{
   conversation_id: string;
   workspace: string;
   isWidget?: boolean;
+  creationMode?: TCreationModeSnapshot;
   modelSelection: AionrsModelSelection;
   session_mode?: string;
   cron_job_id?: string;
@@ -47,6 +48,7 @@ const AionrsChat: React.FC<{
   conversation_id,
   workspace,
   isWidget,
+  creationMode,
   modelSelection,
   session_mode,
   cron_job_id,
@@ -68,6 +70,7 @@ const AionrsChat: React.FC<{
       conversation_id: conversation_id,
       workspace,
       isWidget,
+      creationMode,
       type: 'aionrs',
       cron_job_id,
       loadedSkills,
@@ -80,6 +83,7 @@ const AionrsChat: React.FC<{
     conversation_id,
     workspace,
     isWidget,
+    creationMode,
     cron_job_id,
     loadedSkills,
     loadedMcpServers,

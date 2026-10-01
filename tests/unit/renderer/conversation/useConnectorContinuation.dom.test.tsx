@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Message } from '@arco-design/web-react';
 import { conversation } from '@/common/adapter/ipcBridge';
+import type { TChatConversation } from '@/common/config/storage';
+import { widgetModeFixture } from '../../../fixtures/creationMode';
 import {
   shopifyPendingKey,
   submitConnectorPrompt,
@@ -13,10 +15,11 @@ import {
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }));
 vi.mock('@arco-design/web-react', () => ({ Message: { error: vi.fn() } }));
 vi.mock('@/common/adapter/ipcBridge', () => ({
-  conversation: { confirmation: { list: { invoke: vi.fn() } }, answerAsk: { invoke: vi.fn() } },
-}));
-vi.mock('@/renderer/pages/conversation/Messages/MessageQuestion', () => ({
-  isStorePlatformQuestion: (q: { question: string }) => q.question === 'Which platform is your store on?',
+  conversation: {
+    confirmation: { list: { invoke: vi.fn() } },
+    answerAsk: { invoke: vi.fn() },
+    get: { invoke: vi.fn() },
+  },
 }));
 const translate = (key: string, values?: { shop?: string }) => (values?.shop ? `Connected to ${values.shop}` : key);
 const entry = 'n'.repeat(43);
@@ -24,6 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([]);
   vi.mocked(conversation.answerAsk.invoke).mockResolvedValue(undefined);
+  vi.mocked(conversation.get.invoke).mockResolvedValue({ id: 'current', extra: {} } as TChatConversation);
   sessionStorage.clear();
   window.history.replaceState({}, '', '/#/conversation/current?shopify_connected=' + entry);
   sessionStorage.setItem(shopifyPendingKey('current'), entry);
@@ -178,4 +182,79 @@ it('keeps a failed question answer available for retry and never sends a second 
   await waitFor(() => expect(Message.error).toHaveBeenCalled());
   expect(accept).not.toHaveBeenCalled();
   expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBe(entry);
+});
+
+it('answers an explicit connector option regardless of its mode, question or label', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+  );
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'source',
+      questions: [
+        {
+          question: 'Pick your catalog',
+          options: [{ label: 'My catalog', action: { type: 'connect', connector: 'shopify' } }],
+        },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  const accept = vi.fn(() => true);
+  renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() =>
+    expect(conversation.answerAsk.invoke).toHaveBeenCalledWith({
+      conversation_id: 'current',
+      request_id: 'source',
+      answers: [{ question: 'Pick your catalog', labels: ['My catalog (selected store: selected.myshopify.com)'] }],
+    })
+  );
+  expect(accept).not.toHaveBeenCalled();
+  expect(conversation.get.invoke).not.toHaveBeenCalled();
+});
+
+it('does not apply historical text inference to a catalog mode or fabricate another question answer', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+  );
+  vi.mocked(conversation.get.invoke).mockResolvedValue({
+    id: 'current',
+    extra: { creationMode: { ...widgetModeFixture, revision: 2 } },
+  } as TChatConversation);
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'source',
+      questions: [
+        { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  const accept = vi.fn(() => true);
+  const hook = renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() => expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull());
+  expect(conversation.answerAsk.invoke).not.toHaveBeenCalled();
+  expect(accept).not.toHaveBeenCalled();
+  hook.unmount();
+  sessionStorage.setItem(shopifyPendingKey('current'), entry);
+  window.history.replaceState({}, '', '/#/conversation/current?shopify_connected=' + entry);
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'source',
+      questions: [
+        {
+          question: 'Pick your catalog',
+          options: [{ label: 'My catalog', action: { type: 'connect', connector: 'shopify' } }],
+        },
+        { question: 'Which color?', options: [] },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() => expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull());
+  expect(conversation.answerAsk.invoke).not.toHaveBeenCalled();
+  expect(accept).not.toHaveBeenCalled();
 });

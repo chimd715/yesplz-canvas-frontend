@@ -6,11 +6,14 @@
 
 import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IMessageAcpPermission, IMessagePermission } from '@/common/chat/chatLib';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { IAskQuestion, IMessageAcpPermission, IMessagePermission } from '@/common/chat/chatLib';
 import MessageAcpPermission from '@/renderer/pages/conversation/Messages/acp/MessageAcpPermission';
 import MessagePermission from '@/renderer/pages/conversation/Messages/components/MessagePermission';
 import MessageQuestion, { hasWidgetPlatformPrompt } from '@/renderer/pages/conversation/Messages/MessageQuestion';
+import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
+import { emitter } from '@/renderer/utils/emitter';
+import { widgetModeFixture } from '../../../fixtures/creationMode';
 
 const { genericInvoke, acpInvoke, answerAskInvoke } = vi.hoisted(() => ({
   genericInvoke: vi.fn(),
@@ -88,10 +91,84 @@ const makeAcpMessage = (): IMessageAcpPermission => ({
 });
 
 describe('permission message adapters', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     genericInvoke.mockResolvedValue(undefined);
     acpInvoke.mockResolvedValue(undefined);
+    answerAskInvoke.mockResolvedValue(undefined);
+  });
+
+  const renderCatalogQuestion = (options: IAskQuestion['options']) =>
+    render(
+      <ConversationProvider
+        value={{
+          conversation_id: 'conversation-1',
+          type: 'aionrs',
+          creationMode: { ...widgetModeFixture, id: 'catalog-browser', outputType: 'app', revision: 2 },
+        }}
+      >
+        <MessageQuestion
+          message={{
+            id: 'connector-question',
+            conversation_id: 'conversation-1',
+            type: 'ask',
+            position: 'left',
+            content: {
+              session_id: 'conversation-1',
+              request_id: 'connector-question',
+              questions: [{ question: 'Pick a source for this feature', options }],
+            },
+          }}
+        />
+      </ConversationProvider>
+    );
+
+  it('opens a supported explicit connector action with any label and submits only verified store context', async () => {
+    const emit = vi.spyOn(emitter, 'emit');
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ connected: true, shop: 'verified.myshopify.com' }) });
+    vi.stubGlobal('fetch', fetcher);
+    renderCatalogQuestion([{ label: 'My shop', action: { type: 'connect', connector: 'shopify' } }]);
+    fireEvent.click(screen.getByTestId('message-question-option-0-My shop'));
+    expect(emit).toHaveBeenCalledWith('connectors.shopify.open', true, 'conversation-1');
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(answerAskInvoke).toHaveBeenCalledWith({
+      conversation_id: 'conversation-1',
+      request_id: 'connector-question',
+      answers: [
+        { question: 'Pick a source for this feature', labels: ['My shop (selected store: verified.myshopify.com)'] },
+      ],
+    });
+  });
+
+  it.each([undefined, { type: 'connect', connector: 'unknown' }, { type: 'open', url: 'https://untrusted.example' }])(
+    'does not derive connector actions from a label or unsupported metadata (%j)',
+    async (action) => {
+      const emit = vi.spyOn(emitter, 'emit');
+      const fetcher = vi.fn();
+      vi.stubGlobal('fetch', fetcher);
+      renderCatalogQuestion([{ label: 'Shopify', action } as IAskQuestion['options'][number]]);
+      fireEvent.click(screen.getByTestId('message-question-option-0-Shopify'));
+      fireEvent.click(screen.getByTestId('message-question-submit'));
+      expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalledWith('connectors.shopify.open', true, 'conversation-1');
+    }
+  );
+
+  it('keeps an explicit connector question pending when store verification fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    renderCatalogQuestion([{ label: 'My shop', action: { type: 'connect', connector: 'shopify' } }]);
+    fireEvent.click(screen.getByTestId('message-question-option-0-My shop'));
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByText('messages.askSubmitError')).toBeInTheDocument();
+    expect(answerAskInvoke).not.toHaveBeenCalled();
   });
 
   it('reuses the question card for a native store prompt without calling the unsupported ask endpoint', async () => {

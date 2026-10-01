@@ -14,6 +14,7 @@ import MessageText, {
   parseTeamContextResetNotice,
 } from '@/renderer/pages/conversation/Messages/components/MessageText';
 import { copyText } from '@/renderer/utils/ui/clipboard';
+import { widgetModeFixture } from '../../fixtures/creationMode';
 
 const previewMocks = vi.hoisted(() => ({
   openPreview: vi.fn(),
@@ -820,7 +821,70 @@ describe('MessageText fork entry point', () => {
   });
 });
 
-describe('Shop Widget user request display', () => {
+describe('creation mode user request display', () => {
+  it.each(['aionrs', 'acp'] as const)('hides only exact pinned instructions for a new non-widget mode (%s)', (type) => {
+    const instructions = '# Research\nAsk before choosing a source.\n\n## User request\n\nAn instruction heading.';
+    const request = 'Compare two sources.\n\n## User request\n\nKeep this heading.';
+    const content = `${instructions}\n\n## User request\n\n${request}`;
+    const message: IMessageText = {
+      id: 'research-input',
+      conversation_id: 'research',
+      type: 'text',
+      position: 'right',
+      content: { content },
+    };
+    render(
+      <ConversationProvider
+        value={{
+          conversation_id: 'research',
+          type,
+          creationMode: { ...widgetModeFixture, id: 'research', outputType: 'report', instructions, revision: 2 },
+        }}
+      >
+        <MessageText message={message} />
+      </ConversationProvider>
+    );
+    expect(screen.getByTestId('message-text-content').textContent).toBe(request);
+    expect(message.content.content).toBe(content);
+  });
+
+  it('preserves mismatched instructions and does not infer a connector card from new-mode prose', () => {
+    const message: IMessageText = {
+      id: 'research-result',
+      conversation_id: 'research',
+      type: 'text',
+      position: 'left',
+      content: { content: 'Which platform is your store on?\nShopify / Other\n[SHOP_WIDGET_PLATFORM]' },
+    };
+    const { rerender } = render(
+      <ConversationProvider
+        value={{
+          conversation_id: 'research',
+          type: 'aionrs',
+          isWidget: true,
+          creationMode: { ...widgetModeFixture, revision: 2 },
+        }}
+      >
+        <MessageText message={message} />
+      </ConversationProvider>
+    );
+    expect(screen.queryByTestId('message-question')).toBeNull();
+    const content = '---\nname: shop-widget\n---\nDifferent instructions\n\n## User request\n\nKeep all of this';
+    rerender(
+      <ConversationProvider
+        value={{
+          conversation_id: 'research',
+          type: 'aionrs',
+          isWidget: true,
+          creationMode: { ...widgetModeFixture, revision: 2 },
+        }}
+      >
+        <MessageText message={{ ...message, position: 'right', content: { content } }} />
+      </ConversationProvider>
+    );
+    expect(screen.getByTestId('message-text-content').textContent).toBe(content);
+  });
+
   it('hides product instructions without changing history or truncating the user request', () => {
     const request = 'Make a similar-product carousel.\n\n## User request\n\nKeep this heading.';
     const content = '---\nname: shop-widget\n---\nInternal product rules\n\n## User request\n\n' + request;
