@@ -6,7 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
-import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
+import type { IMcpServer, TCreationModeSnapshot, TProviderWithModel } from '@/common/config/storage';
 import { toSessionMcpServer } from '@/renderer/hooks/mcp/catalog';
 import { emitter } from '@/renderer/utils/emitter';
 import { updateWorkspaceTime } from '@/renderer/utils/workspace/workspaceHistory';
@@ -16,12 +16,12 @@ import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
-import shopWidgetSkill from '../utils/shop-widget.md?raw';
 
 export type GuidSendDeps = {
   // Input state
   input: string;
-  shopWidgetSelected?: boolean;
+  creationMode?: TCreationModeSnapshot | null;
+  creationModesReady?: boolean;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   files: ChatFileRef[];
   setFiles: React.Dispatch<React.SetStateAction<ChatFileRef[]>>;
@@ -71,7 +71,8 @@ export type GuidSendResult = {
 export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const {
     input,
-    shopWidgetSelected = false,
+    creationMode,
+    creationModesReady = true,
     setInput,
     files,
     setFiles,
@@ -103,11 +104,16 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const sendingRef = useRef(false);
 
   const handleSend = useCallback(async () => {
-    if (!selectedAssistantId || (shopWidgetSelected && !input.trim())) {
+    if (!creationModesReady || !selectedAssistantId || (creationMode && !input.trim())) {
       return;
     }
 
-    const initialInput = shopWidgetSelected ? `${shopWidgetSkill.trim()}\n\n## User request\n\n${input}` : input;
+    const initialInput = creationMode?.instructions.trim()
+      ? `${creationMode.instructions.trim()}\n\n## User request\n\n${input}`
+      : input;
+    const creationExtra = creationMode
+      ? { creationMode, ...(creationMode.outputType === 'widget' ? { outputType: 'widget' as const } : {}) }
+      : {};
 
     const isCustomWorkspace = !!dir;
     const finalWorkspace = dir || '';
@@ -193,7 +199,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             conversation_overrides: assistantOverrides,
           },
           extra: {
-            ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
+            ...creationExtra,
             default_files: files.map(chatFileRefPath),
             workspace: finalWorkspace,
             custom_workspace: isCustomWorkspace,
@@ -248,7 +254,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           conversation_overrides: assistantOverrides,
         },
         extra: {
-          ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
+          ...creationExtra,
           workspace: finalWorkspace,
           custom_workspace: isCustomWorkspace,
           default_files: files.map(chatFileRefPath),
@@ -293,7 +299,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     }
   }, [
     input,
-    shopWidgetSelected,
+    creationMode,
+    creationModesReady,
     files,
     dir,
     selectedAssistantId,
@@ -350,8 +357,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     t,
   ]);
 
-  // Ordinary chat can start empty; widget mode needs a feature description.
-  const isButtonDisabled = loading || !selectedAssistantId || (shopWidgetSelected && !input.trim());
+  // Ordinary chat can start empty; a creation mode needs a feature description.
+  const isButtonDisabled = loading || !creationModesReady || !selectedAssistantId || (!!creationMode && !input.trim());
 
   return {
     handleSend,

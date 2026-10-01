@@ -159,6 +159,17 @@ export type TConversationAssistantIdentity = {
   backend: string;
 };
 
+export type TCreationModeSnapshot = {
+  id: string;
+  revision: number | null;
+  name: string;
+  instructions: string;
+  skillRefs: Array<{ id: string; revision: number }>;
+  runtimeSkillRefs: string[];
+  mcpRefs: string[];
+  outputType: string;
+};
+
 interface IChatConversation<T, Extra> {
   created_at: number;
   modified_at: number;
@@ -171,7 +182,7 @@ interface IChatConversation<T, Extra> {
   /** Authoritative central detail generation, assigned by the durable runtime store. */
   runtime_generation?: string;
   type: T;
-  extra: Extra;
+  extra: Extra & { creationMode?: TCreationModeSnapshot };
   model: TProviderWithModel;
   status?: TChatConversationStatus | undefined;
   runtime?: TConversationRuntimeSummary;

@@ -19,5 +19,10 @@
     "clear": "Clear ecommerce widget selection",
     "placeholder": "Describe the widget you want to add to your store",
     "output": "Embeddable widget, live preview, and installation code."
+  },
+  "creationModes": {
+    "clear": "Clear {{name}} selection",
+    "loadError": "Creation modes could not be loaded. Retry to continue.",
+    "loading": "Loading creation modes…"
   }
 }

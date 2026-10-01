@@ -10,6 +10,7 @@ import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { standaloneWidgetMode } from '@/renderer/pages/guid/utils/creationModes';
 
 const {
   modelSelectionMock,
@@ -303,19 +304,72 @@ const guidInputCardProps = {
 };
 
 describe('GuidPage', () => {
+  it('renders published modes and example cards, filling the draft without sending', () => {
+    const catalog = {
+      revision: 8,
+      modes: [
+        {
+          ...standaloneWidgetMode,
+          id: 'report',
+          name: 'Report',
+          placeholder: 'Describe your report',
+          outputType: 'report',
+          prompts: [
+            {
+              id: 'stock',
+              title: 'Stock report',
+              description: 'Compare stock by size',
+              prompt: 'Create a stock report by size',
+              icon: null,
+            },
+          ],
+        },
+      ],
+    };
+    swrMock.useSWRMock.mockImplementation((key) => ({ data: key === '/api/platform/creation-modes' ? catalog : null }));
+    render(<GuidPage />);
+    guidInputMock.setInput.mockClear();
+    sendMock.sendMessageHandler.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Stock report\. Compare stock by size/ }));
+    expect(guidInputMock.setInput).toHaveBeenCalledWith('Create a stock report by size');
+    expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
+    expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'report', revision: 8 });
+  });
+
+  it('keeps a published empty catalog empty and allows ordinary chat', () => {
+    swrMock.useSWRMock.mockImplementation((key) => ({
+      data: key === '/api/platform/creation-modes' ? { revision: 9, modes: [] } : null,
+    }));
+    render(<GuidPage />);
+    expect(screen.queryByRole('button', { name: 'guid.shopWidget.label' })).not.toBeInTheDocument();
+    expect(capturedGuidSendDeps.at(-1)).toMatchObject({ creationMode: null, creationModesReady: true });
+  });
+
+  it('offers retry after a catalog failure without silently falling back to Shop Widget', () => {
+    const retry = vi.fn();
+    swrMock.useSWRMock.mockImplementation((key) =>
+      key === '/api/platform/creation-modes' ? { error: new Error('Offline'), mutate: retry } : { data: null }
+    );
+    render(<GuidPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(capturedGuidSendDeps.at(-1)).toMatchObject({ creationMode: null, creationModesReady: false });
+    expect(screen.queryByRole('button', { name: 'guid.shopWidget.label' })).not.toBeInTheDocument();
+  });
+
   it('defaults to Shop Widget and supports clearing and reselecting without changing the draft or starting a conversation', () => {
     render(<GuidPage />);
     guidInputMock.setInput.mockClear();
     sendMock.sendMessageHandler.mockClear();
     const button = screen.getByRole('button', { name: 'guid.shopWidget.label' });
     expect(button).toHaveAttribute('aria-pressed', 'true');
-    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(true);
+    expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'shop-widget' });
     fireEvent.click(button);
     expect(button).toHaveAttribute('aria-pressed', 'false');
-    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(false);
+    expect(capturedGuidSendDeps.at(-1)?.creationMode).toBeNull();
     fireEvent.click(button);
     expect(button).toHaveAttribute('aria-pressed', 'true');
-    expect(capturedGuidSendDeps.at(-1)?.shopWidgetSelected).toBe(true);
+    expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'shop-widget' });
     expect(guidInputMock.setInput).not.toHaveBeenCalled();
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });

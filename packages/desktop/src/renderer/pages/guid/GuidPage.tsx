@@ -29,13 +29,14 @@ import { useGuidSend } from './hooks/useGuidSend';
 import { useTypewriterPlaceholder } from './hooks/useTypewriterPlaceholder';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { resolveGuidAssistantDefaults } from './utils/assistantDefaults';
+import { creationModeSnapshot, fetchCreationModes, standaloneWidgetMode } from './utils/creationModes';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
 import { chatFileRefPath, uploadFileRef } from '@/common/types/chatFile';
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
-import { ArrowRightUp, Close, Shop } from '@icon-park/react';
-import { Button, ConfigProvider } from '@arco-design/web-react';
+import { Application, ArrowRightUp, Close, Shop } from '@icon-park/react';
+import { Alert, Button, ConfigProvider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -62,7 +63,36 @@ const GuidPage: React.FC = () => {
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [shopWidgetSelected, setShopWidgetSelected] = useState(true);
+  const [selectedCreationModeId, setSelectedCreationModeId] = useState<string | null | undefined>(undefined);
+  const {
+    data: creationCatalog,
+    error: creationCatalogError,
+    mutate: reloadCreationCatalog,
+  } = useSWR('/api/platform/creation-modes', fetchCreationModes, {
+    shouldRetryOnError: false,
+    revalidateOnFocus: false,
+  });
+  const creationModes = useMemo(
+    () =>
+      creationCatalog === null
+        ? [
+            {
+              ...standaloneWidgetMode,
+              name: t('guid.shopWidget.label'),
+              description: t('guid.shopWidget.output'),
+              placeholder: t('guid.shopWidget.placeholder'),
+            },
+          ]
+        : (creationCatalog?.modes ?? []),
+    [creationCatalog, t]
+  );
+  const selectedCreationMode = creationModes.find((mode) =>
+    selectedCreationModeId === undefined ? mode.isDefault : mode.id === selectedCreationModeId
+  );
+  const selectedCreationSnapshot = useMemo(
+    () => (selectedCreationMode ? creationModeSnapshot(selectedCreationMode, creationCatalog?.revision ?? null) : null),
+    [selectedCreationMode, creationCatalog?.revision]
+  );
 
   // Open external link
   const openLink = useCallback(async (url: string) => {
@@ -157,10 +187,12 @@ const GuidPage: React.FC = () => {
       guidEnabledSkills ?? [
         ...new Set([
           ...resolvedAssistantDefaults.skillIds,
-          ...(shopWidgetSelected && allSkills.some((skill) => skill.name === 'yesplz-api') ? ['yesplz-api'] : []),
+          ...(selectedCreationMode?.runtimeSkillRefs ?? []).filter((ref) =>
+            allSkills.some((skill) => skill.name === ref)
+          ),
         ]),
       ],
-    [guidEnabledSkills, resolvedAssistantDefaults.skillIds, shopWidgetSelected, allSkills]
+    [guidEnabledSkills, resolvedAssistantDefaults.skillIds, selectedCreationMode, allSkills]
   );
   const effectiveMcpIds = useMemo(
     () =>
@@ -168,12 +200,21 @@ const GuidPage: React.FC = () => {
         ...new Set([
           ...resolvedAssistantDefaults.mcpIds,
           ...availableMcpServers
-            .filter((server) => shopWidgetSelected && server.enabled && server.name === 'yesplz-api-reference')
+            .filter(
+              (server) =>
+                server.enabled && selectedCreationMode?.mcpRefs.some((ref) => ref === server.name || ref === server.id)
+            )
             .map((server) => server.id),
         ]),
       ],
-    [guidSelectedMcpServerIds, resolvedAssistantDefaults.mcpIds, shopWidgetSelected, availableMcpServers]
+    [guidSelectedMcpServerIds, resolvedAssistantDefaults.mcpIds, selectedCreationMode, availableMcpServers]
   );
+
+  const selectCreationMode = useCallback((id: string | null) => {
+    setSelectedCreationModeId(id);
+    setGuidEnabledSkills(undefined);
+    setGuidSelectedMcpServerIds(undefined);
+  }, []);
 
   const handleToggleSkill = useCallback(
     (skillName: string, isAuto: boolean) => {
@@ -278,7 +319,8 @@ const GuidPage: React.FC = () => {
   const send = useGuidSend({
     // Input state
     input: guidInput.input,
-    shopWidgetSelected,
+    creationMode: selectedCreationSnapshot,
+    creationModesReady: creationCatalog !== undefined,
     setInput: guidInput.setInput,
     files: guidInput.files,
     setFiles: guidInput.setFiles,
@@ -574,7 +616,7 @@ const GuidPage: React.FC = () => {
     } else {
       guidInput.setInput('');
       guidInput.setFiles([]);
-      setShopWidgetSelected(true);
+      setSelectedCreationModeId(undefined);
     }
     guidInput.setLoading(false);
     if (!preserveCurrentDraft && !(location.state as { workspace?: string } | null)?.workspace) {
@@ -647,16 +689,20 @@ const GuidPage: React.FC = () => {
   const actionRowNode = (
     <GuidActionRow
       creationModeNode={
-        shopWidgetSelected ? (
+        selectedCreationMode ? (
           <Button
             type='text'
             className={styles.widgetChip}
-            aria-label={t('guid.shopWidget.clear')}
+            aria-label={t('guid.creationModes.clear', { name: selectedCreationMode.name })}
             disabled={guidInput.loading}
-            onClick={() => setShopWidgetSelected(false)}
+            onClick={() => selectCreationMode(null)}
           >
-            <Shop theme='outline' size='16' fill='currentColor' aria-hidden='true' />
-            <span>{t('guid.shopWidget.label')}</span>
+            {selectedCreationMode.icon ? (
+              <img src={selectedCreationMode.icon} width='16' height='16' alt='' />
+            ) : (
+              <Application theme='outline' size='16' fill='currentColor' aria-hidden='true' />
+            )}
+            <span>{selectedCreationMode.name}</span>
             <Close theme='outline' size='12' fill='currentColor' aria-hidden='true' />
           </Button>
         ) : undefined
@@ -735,9 +781,7 @@ const GuidPage: React.FC = () => {
             onFocus={guidInput.handleTextareaFocus}
             onBlur={guidInput.handleTextareaBlur}
             placeholder={
-              shopWidgetSelected
-                ? t('guid.shopWidget.placeholder')
-                : typewriterPlaceholder || t('conversation.welcome.placeholder')
+              selectedCreationMode?.placeholder || typewriterPlaceholder || t('conversation.welcome.placeholder')
             }
             isInputActive={guidInput.isInputFocused}
             isFileDragging={guidInput.isFileDragging}
@@ -754,21 +798,80 @@ const GuidPage: React.FC = () => {
             onClearWorkspace={() => guidInput.setDir('')}
           />
 
-          <div className={styles.widgetEntry}>
-            <Button
-              type='outline'
-              className={styles.widgetTile}
-              aria-pressed={shopWidgetSelected}
-              title={t('guid.shopWidget.output')}
-              disabled={guidInput.loading}
-              onClick={() => setShopWidgetSelected((selected) => !selected)}
-            >
-              <Shop theme='outline' size='16' fill='currentColor' aria-hidden='true' />
-              <span>{t('guid.shopWidget.label')}</span>
-            </Button>
-          </div>
+          {creationCatalogError ? (
+            <Alert
+              type='warning'
+              className='mt-18px'
+              content={t('guid.creationModes.loadError')}
+              action={
+                <Button size='small' onClick={() => void reloadCreationCatalog()}>
+                  {t('common.retry')}
+                </Button>
+              }
+            />
+          ) : creationCatalog === undefined ? (
+            <p role='status' className='mt-18px text-center text-t-secondary'>
+              {t('guid.creationModes.loading')}
+            </p>
+          ) : null}
 
-          {!shopWidgetSelected && selectedAssistantPrompts.length > 0 ? (
+          {creationModes.length > 0 ? (
+            <div className={styles.widgetEntry}>
+              {creationModes.map((mode) => (
+                <Button
+                  key={mode.id}
+                  type='outline'
+                  className={styles.widgetTile}
+                  aria-pressed={selectedCreationMode?.id === mode.id}
+                  title={mode.description}
+                  disabled={guidInput.loading}
+                  onClick={() => selectCreationMode(selectedCreationMode?.id === mode.id ? null : mode.id)}
+                >
+                  {mode.icon ? (
+                    <img src={mode.icon} width='20' height='20' alt='' />
+                  ) : mode.outputType === 'widget' ? (
+                    <Shop theme='outline' size='20' fill='currentColor' aria-hidden='true' />
+                  ) : (
+                    <Application theme='outline' size='20' fill='currentColor' aria-hidden='true' />
+                  )}
+                  <span>{mode.name}</span>
+                </Button>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedCreationMode && selectedCreationMode.prompts.length > 0 ? (
+            <section className={styles.promptSection}>
+              <p className={styles.assistantPromptHint}>{t('guid.promptExamplesHint')}</p>
+              <div className={styles.promptGrid}>
+                {selectedCreationMode.prompts.map((prompt) => (
+                  <Button
+                    key={prompt.id}
+                    type='text'
+                    className={styles.promptCard}
+                    aria-label={prompt.description ? `${prompt.title}. ${prompt.description}` : prompt.title}
+                    disabled={guidInput.loading}
+                    onClick={() => {
+                      guidInput.setInput(prompt.prompt);
+                      guidInput.handleTextareaFocus();
+                    }}
+                  >
+                    <span className={styles.promptArtwork} aria-hidden='true'>
+                      {prompt.icon ? (
+                        <img src={prompt.icon} width='40' height='40' alt='' />
+                      ) : (
+                        <Application theme='outline' size='32' fill='currentColor' />
+                      )}
+                    </span>
+                    <span className={styles.promptTitle}>{prompt.title}</span>
+                    {prompt.description ? <span className={styles.promptDescription}>{prompt.description}</span> : null}
+                  </Button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {!selectedCreationMode && selectedAssistantPrompts.length > 0 ? (
             <div className='mt-18px w-full animate-fade-in ps-20px'>
               <div className={`${styles.assistantPromptHint} mb-10px text-start`}>
                 {t('guid.promptExamplesHint', { defaultValue: 'Try these example prompts:' })}

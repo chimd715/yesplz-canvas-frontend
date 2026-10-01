@@ -8,6 +8,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
+import { creationModeSnapshot, standaloneWidgetMode } from '@/renderer/pages/guid/utils/creationModes';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -75,6 +76,47 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it.each(['aionrs', 'claude'])(
+    'pins a published custom mode and injects its instructions once through %s',
+    async (backend) => {
+      const deps = createDeps();
+      deps.selectedAssistantBackend = backend;
+      deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<
+        GuidSendDeps['current_model']
+      >;
+      deps.creationMode = {
+        id: 'report',
+        revision: 7,
+        name: 'Report',
+        instructions: 'Use the selected dataset. Explain missing data.',
+        skillRefs: [{ id: 'report-writing', revision: 7 }],
+        runtimeSkillRefs: [],
+        mcpRefs: [],
+        outputType: 'report',
+      };
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend();
+      });
+      expect(createConversationInvokeMock.mock.calls[0][0].extra).toMatchObject({ creationMode: deps.creationMode });
+      expect(createConversationInvokeMock.mock.calls[0][0].extra.outputType).toBeUndefined();
+      const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
+      expect(JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_conv-1`)!).input).toBe(
+        `${deps.creationMode.instructions}\n\n## User request\n\nhello`
+      );
+    }
+  );
+
+  it('waits for catalog resolution before creating a conversation', async () => {
+    const deps = { ...createDeps(), creationModesReady: false };
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(result.current.isButtonDisabled).toBe(true);
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+  });
+
   it.each(['aionrs', 'claude'])('passes an Extension transport to %s without a fake DB row ID', async (backend) => {
     const deps = createDeps();
     deps.selectedAssistantBackend = backend;
@@ -101,7 +143,7 @@ describe('useGuidSend', () => {
     'adds widget engineering instructions to a plain feature request through %s without changing its title',
     async (backend) => {
       const deps = createDeps();
-      deps.shopWidgetSelected = true;
+      deps.creationMode = creationModeSnapshot(standaloneWidgetMode, null);
       deps.selectedAssistantBackend = backend;
       deps.input = '상품 상세 페이지에 배송·반품 FAQ 위젯 만들어줘';
       deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<
@@ -144,7 +186,7 @@ describe('useGuidSend', () => {
   it('waits for a widget description while retaining ordinary empty-chat behavior', async () => {
     const deps = createDeps();
     deps.input = '  ';
-    deps.shopWidgetSelected = true;
+    deps.creationMode = creationModeSnapshot(standaloneWidgetMode, null);
     const { result, rerender } = renderHook(() => useGuidSend(deps));
     expect(result.current.isButtonDisabled).toBe(true);
     await act(async () => {
@@ -152,7 +194,7 @@ describe('useGuidSend', () => {
     });
     expect(createConversationInvokeMock).not.toHaveBeenCalled();
 
-    deps.shopWidgetSelected = false;
+    deps.creationMode = null;
     rerender();
     expect(result.current.isButtonDisabled).toBe(false);
   });

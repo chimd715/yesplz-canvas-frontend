@@ -23,6 +23,7 @@ import type {
   IProvider,
   ISessionMcpServer,
   TChatConversation,
+  TCreationModeSnapshot,
   TConversationRuntimeSummary,
   TProviderWithModel,
 } from '../config/storage';
@@ -1835,6 +1836,7 @@ export interface ICreateConversationParams {
   };
   extra: {
     outputType?: 'widget';
+    creationMode?: TCreationModeSnapshot;
     workspace?: string;
     custom_workspace?: boolean;
     default_files?: string[];
