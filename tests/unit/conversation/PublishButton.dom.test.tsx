@@ -287,11 +287,13 @@ describe('conversation publishing', () => {
     expect(input).toHaveValue(shopify);
   });
 
-  it('supports dynamic collection and page context without a product ID', async () => {
-    const marked = embedCode.replace(
-      '<shop-widget>',
-      `<shop-widget collection-id="987654321" page-path="/collections/example" data-shopify-bindings='{"collection-id":"collection.id","page-path":"request.path"}'>`
-    );
+  it('preserves ordered script dependencies when binding collection and page context', async () => {
+    const marked =
+      '<script src="https://current.example.app/source.js" defer></script>\n' +
+      embedCode.replace(
+        '<shop-widget>',
+        `<shop-widget collection-id="987654321" page-path="/collections/example" data-shopify-bindings='{"collection-id":"collection.id","page-path":"request.path"}'>`
+      );
     vi.stubGlobal(
       'fetch',
       vi
@@ -303,7 +305,7 @@ describe('conversation publishing', () => {
     view();
     fireEvent.click(await screen.findByRole('button', { name: embedKey('embed'), exact: true }));
     expect(await screen.findByLabelText(embedKey('installationCode'))).toHaveValue(
-      '<script src="https://current.example.app/widget.js" defer=""></script>\n<shop-widget collection-id="{{ collection.id | escape }}" page-path="{{ request.path | escape }}"></shop-widget>'
+      '<script src="https://current.example.app/source.js" defer=""></script>\n<script src="https://current.example.app/widget.js" defer=""></script>\n<shop-widget collection-id="{{ collection.id | escape }}" page-path="{{ request.path | escape }}"></shop-widget>'
     );
   });
 

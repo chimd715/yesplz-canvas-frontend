@@ -11,8 +11,8 @@ function installationCode(code: string | undefined, platform: string): string | 
   if (!code) return code;
   const document = new DOMParser().parseFromString(code, 'text/html');
   const widget = document.querySelector('[data-shopify-bindings]');
-  const script = document.querySelector('script[src]');
-  if (!widget?.localName.includes('-') || !script) return code;
+  const scripts = [...document.querySelectorAll('script[src]')];
+  if (!widget?.localName.includes('-') || !scripts.length) return code;
   let bindings: unknown;
   try {
     bindings = JSON.parse(widget.getAttribute('data-shopify-bindings') ?? '');
@@ -38,7 +38,7 @@ function installationCode(code: string | undefined, platform: string): string | 
   if (platform === 'shopify') {
     for (const [name, path] of entries) widget.setAttribute(name, `{{ ${String(path)} | escape }}`);
   }
-  return `${script.outerHTML}\n${widget.outerHTML}`;
+  return [...scripts.map((script) => script.outerHTML), widget.outerHTML].join('\n');
 }
 
 /** Installation help for the published artifact; opening this panel never deploys or modifies a shop. */
