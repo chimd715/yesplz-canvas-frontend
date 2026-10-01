@@ -21,31 +21,57 @@ const icon = z
   .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
   .nullable();
 const revision = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const creationModeSchema = z.object({
-  id,
-  name: requiredText(120),
-  description: text(2000),
-  placeholder: text(2000),
-  instructions: text(MAX_CATALOG_BYTES),
-  prompts: z
-    .array(
-      z.object({
-        id,
-        type: z.literal('prompt').default('prompt'),
-        title: requiredText(120),
-        description: text(2000),
-        prompt: requiredText(32000),
-        icon,
-      })
-    )
-    .max(20),
-  runtimeSkillRefs: z.array(toolRef).max(100),
-  mcpRefs: z.array(toolRef).max(100),
-  outputType: requiredText(64).refine((value) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)),
-  isDefault: z.boolean(),
-  icon,
-  skillRefs: z.array(z.object({ id, revision })).max(100),
-});
+// Add future item types as explicit union members with their own content schema.
+// Only prompts have a supported interaction today.
+export const creationItemSchema = z
+  .object({
+    id,
+    type: z.literal('prompt').default('prompt'),
+    title: requiredText(120),
+    description: text(2000),
+    icon,
+    showInSuggestions: z.boolean().default(true),
+    showInGallery: z.boolean().default(true),
+    content: z.object({ text: requiredText(32000) }).strict(),
+  })
+  .strict();
+export type TCreationItem = z.infer<typeof creationItemSchema>;
+
+// Accept the previous published wire format during a rolling platform upgrade.
+// The renderer always receives the canonical items/content representation.
+function normalizeLegacyMode(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const mode = value as Record<string, unknown>;
+  if ('items' in mode || !Array.isArray(mode.prompts)) return value;
+  const { prompts, ...rest } = mode;
+  return {
+    ...rest,
+    items: (prompts as unknown[]).map((legacyItem) => {
+      if (!legacyItem || typeof legacyItem !== 'object' || Array.isArray(legacyItem)) return legacyItem;
+      const { prompt, ...item } = legacyItem as Record<string, unknown>;
+      item.content = { text: prompt };
+      return item;
+    }),
+  };
+}
+
+const creationModeSchema = z.preprocess(
+  normalizeLegacyMode,
+  z.object({
+    id,
+    name: requiredText(120),
+    description: text(2000),
+    placeholder: text(2000),
+    instructions: text(MAX_CATALOG_BYTES),
+    items: z.array(creationItemSchema).max(20),
+    runtimeSkillRefs: z.array(toolRef).max(100),
+    mcpRefs: z.array(toolRef).max(100),
+    outputType: requiredText(64).refine((value) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)),
+    isDefault: z.boolean(),
+    icon,
+    skillRefs: z.array(z.object({ id, revision })).max(100),
+  })
+);
 export const creationCatalogSchema = z.object({
   revision: revision.nullable(),
   modes: z.array(creationModeSchema).max(50),

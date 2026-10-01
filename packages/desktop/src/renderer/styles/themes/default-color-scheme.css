@@ -52,6 +52,9 @@
   --brand: #7583b2; /* 品牌色 */
   --brand-light: #eff0f6; /* 品牌浅色背景 */
   --brand-hover: #b5bcd6; /* 品牌色悬停 */
+  --builder-accent: #ff5733;
+  --builder-selected-surface: #ffece8;
+  --builder-example-surface: #fff6f3;
 
   /* Message & UI Component Colors - Light Mode */
   --message-user-bg: #e9efff; /* 用户消息背景（浅蓝） */
@@ -125,6 +128,9 @@
   --brand: #a1aacb; /* 品牌色 */
   --brand-light: #3d4150; /* 品牌深色背景 */
   --brand-hover: #6a749b; /* 品牌色悬停 */
+  --builder-accent: #ff8d72;
+  --builder-selected-surface: #482b25;
+  --builder-example-surface: #2d2220;
 
   /* Message & UI Component Colors - Dark Mode */
   --message-user-bg: #1e2a3a; /* 用户消息背景（深蓝灰） */

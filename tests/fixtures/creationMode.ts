@@ -7,7 +7,7 @@ export const widgetModeFixture: CreationMode = {
   description: 'An installable store widget',
   placeholder: 'Describe your widget',
   instructions: 'Published widget instructions from the platform catalog.',
-  prompts: [],
+  items: [],
   runtimeSkillRefs: ['yesplz-api'],
   mcpRefs: ['yesplz-api-reference'],
   outputType: 'widget',

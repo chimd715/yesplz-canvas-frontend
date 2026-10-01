@@ -303,6 +303,22 @@ const guidInputCardProps = {
   onClearWorkspace: vi.fn(),
 };
 
+function clearSelectedMode() {
+  const chip = capturedGuidActionRowProps.at(-1)?.creationModeNode as React.ReactElement<{ onClick: () => void }>;
+  act(() => chip.props.onClick());
+}
+
+const creationItemFixture = (id: string, showInSuggestions: boolean, showInGallery: boolean) => ({
+  id,
+  type: 'prompt',
+  title: `Example ${id}`,
+  description: '',
+  icon: null,
+  content: { text: `Create ${id}` },
+  showInSuggestions,
+  showInGallery,
+});
+
 describe('GuidPage', () => {
   it('renders published modes and example cards, filling the draft without sending', () => {
     const catalog = {
@@ -314,13 +330,13 @@ describe('GuidPage', () => {
           name: 'Report',
           placeholder: 'Describe your report',
           outputType: 'report',
-          prompts: [
+          items: [
             {
               id: 'stock',
               type: 'prompt',
               title: 'Stock report',
               description: 'Compare stock by size',
-              prompt: 'Create a stock report by size',
+              content: { text: 'Create a stock report by size' },
               icon: null,
             },
           ],
@@ -331,6 +347,7 @@ describe('GuidPage', () => {
     render(<GuidPage />);
     guidInputMock.setInput.mockClear();
     sendMock.sendMessageHandler.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
     fireEvent.click(screen.getByRole('button', { name: /Stock report\. Compare stock by size/ }));
     expect(guidInputMock.setInput).toHaveBeenCalledWith('Create a stock report by size');
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
@@ -343,8 +360,15 @@ describe('GuidPage', () => {
       modes: [
         {
           ...widgetModeFixture,
-          prompts: [
-            { id: 'faq', type: 'prompt', title: 'Store FAQ', description: '', prompt: 'Build a store FAQ', icon: null },
+          items: [
+            {
+              id: 'faq',
+              type: 'prompt',
+              title: 'Store FAQ',
+              description: '',
+              content: { text: 'Build a store FAQ' },
+              icon: null,
+            },
           ],
         },
         {
@@ -352,13 +376,13 @@ describe('GuidPage', () => {
           id: 'report',
           name: 'Report',
           isDefault: false,
-          prompts: [
+          items: [
             {
               id: 'sales',
               type: 'prompt',
               title: 'Sales report',
               description: 'Show sales by month',
-              prompt: 'Build a monthly sales report',
+              content: { text: 'Build a monthly sales report' },
               icon: null,
             },
           ],
@@ -370,14 +394,49 @@ describe('GuidPage', () => {
     guidInputMock.setInput.mockClear();
     sendMock.sendMessageHandler.mockClear();
     expect(screen.queryByRole('button', { name: /Sales report/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Store FAQ' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build a store FAQ' }));
     expect(guidInputMock.setInput).toHaveBeenCalledWith('Build a store FAQ');
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
-    expect(screen.queryByRole('button', { name: 'Store FAQ' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Build a store FAQ' })).not.toBeInTheDocument();
     guidInputMock.setInput.mockClear();
     fireEvent.click(screen.getByRole('button', { name: /Sales report/ }));
     expect(guidInputMock.setInput).toHaveBeenCalledWith('Build a monthly sales report');
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
+  });
+
+  it('filters suggestions and gallery separately, pages examples, and keeps the selection on Back', () => {
+    const catalog = {
+      revision: 11,
+      modes: [
+        {
+          ...widgetModeFixture,
+          items: [
+            creationItemFixture('list', true, false),
+            creationItemFixture('gallery', false, true),
+            creationItemFixture('both', true, true),
+            creationItemFixture('third', false, true),
+            creationItemFixture('fourth', false, true),
+            creationItemFixture('hidden', false, false),
+          ],
+        },
+      ],
+    };
+    swrMock.useSWRMock.mockImplementation((key) => ({ data: key === '/api/platform/creation-modes' ? catalog : null }));
+    render(<GuidPage />);
+    expect(screen.getByRole('button', { name: 'Create list' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create both' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create gallery' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Shop Widget' }));
+    expect(screen.getByRole('button', { name: 'Example gallery' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Example list' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Example fourth' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'guid.creationModes.moreExamples' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Example fourth' }));
+    expect(guidInputMock.setInput).toHaveBeenCalledWith('Create fourth');
+    fireEvent.click(screen.getByRole('button', { name: 'guid.creationModes.back' }));
+    expect(screen.getByRole('button', { name: 'Shop Widget' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Create list' })).toBeInTheDocument();
+    expect(screen.queryByText('Create hidden')).not.toBeInTheDocument();
   });
 
   it('keeps a published empty catalog empty and allows ordinary chat', () => {
@@ -415,7 +474,7 @@ describe('GuidPage', () => {
     const button = screen.getByRole('button', { name: 'Shop Widget' });
     expect(button).toHaveAttribute('aria-pressed', 'true');
     expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'shop-widget' });
-    fireEvent.click(button);
+    clearSelectedMode();
     expect(button).toHaveAttribute('aria-pressed', 'false');
     expect(capturedGuidSendDeps.at(-1)?.creationMode).toBeNull();
     fireEvent.click(button);
@@ -689,7 +748,7 @@ describe('GuidPage', () => {
     });
 
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Shop Widget' }));
+    clearSelectedMode();
 
     const promptButton = screen.getByRole('button', {
       name: /Create a three-page financial dashboard with profit/i,
@@ -701,7 +760,7 @@ describe('GuidPage', () => {
 
   it('falls back to default instruction prompts outside widget mode when the assistant has no recommendations', () => {
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Shop Widget' }));
+    clearSelectedMode();
 
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.understand' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.cleanup' })).toBeInTheDocument();

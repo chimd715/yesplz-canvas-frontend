@@ -44,25 +44,60 @@ describe('creation mode catalog', () => {
     const mode = {
       ...widgetModeFixture,
       instructions: Array.from({ length: 8 }, () => 'x'.repeat(32000)).join('\n\n'),
-      prompts: [{ id: 'example', title: 'Example', description: '', prompt: 'x'.repeat(32000), icon: null }],
+      items: [
+        {
+          id: 'example',
+          type: 'prompt',
+          title: 'Example',
+          description: '',
+          content: { text: 'x'.repeat(32000) },
+          icon: null,
+        },
+      ],
       runtimeSkillRefs: ['native_skill.v2'],
     };
     expect(creationCatalogSchema.safeParse({ revision: 1, modes: [mode] }).success).toBe(true);
-    mode.prompts[0].prompt += 'x';
+    mode.items[0].content.text += 'x';
     expect(creationCatalogSchema.safeParse({ revision: 1, modes: [mode] }).success).toBe(false);
   });
 
-  it('defaults legacy cards to prompt and rejects unsupported types', () => {
+  it('normalizes legacy cards into typed items and defaults both display flags', () => {
+    const { items: _items, ...mode } = widgetModeFixture;
     const card = { id: 'example', title: 'Example', description: '', prompt: 'Build a widget', icon: null };
-    const parse = (type?: string) =>
+    const legacy = creationCatalogSchema.parse({ revision: 1, modes: [{ ...mode, prompts: [card] }] });
+    expect(legacy.modes[0].items[0]).toEqual({
+      id: 'example',
+      type: 'prompt',
+      title: 'Example',
+      description: '',
+      icon: null,
+      content: { text: 'Build a widget' },
+      showInSuggestions: true,
+      showInGallery: true,
+    });
+    expect(legacy.modes[0]).not.toHaveProperty('prompts');
+  });
+
+  it('accepts canonical typed content and flags, rejecting unsupported actions and payloads', () => {
+    const item = {
+      id: 'example',
+      type: 'prompt',
+      title: 'Example',
+      description: '',
+      content: { text: 'Build a widget' },
+      icon: null,
+      showInSuggestions: false,
+      showInGallery: true,
+    };
+    const parse = (changes: Record<string, unknown> = {}) =>
       creationCatalogSchema.safeParse({
         revision: 1,
-        modes: [{ ...widgetModeFixture, prompts: [{ ...card, ...(type ? { type } : {}) }] }],
+        modes: [{ ...widgetModeFixture, items: [{ ...item, ...changes }] }],
       });
-    const legacy = parse();
-    const prompt = parse('prompt');
-    expect(legacy.success && legacy.data.modes[0].prompts[0].type).toBe('prompt');
-    expect(prompt.success && prompt.data.modes[0].prompts[0].type).toBe('prompt');
-    expect(parse('remix').success).toBe(false);
+    const result = parse();
+    expect(result.success && result.data.modes[0].items[0]).toEqual(item);
+    expect(parse({ type: 'skill' }).success).toBe(false);
+    expect(parse({ type: 'remix' }).success).toBe(false);
+    expect(parse({ content: { text: 'Prompt', skillId: 'other' } }).success).toBe(false);
   });
 });

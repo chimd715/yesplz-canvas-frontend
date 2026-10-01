@@ -19,29 +19,110 @@
   line-height: 20px;
 }
 
-.widgetEntry {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 18px;
-}
-
+.modeOverview,
 .promptSection {
   margin-top: 28px;
 }
 
+.widgetEntry {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.widgetTile:global(.arco-btn) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.modeArtwork {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1.25;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-2);
+  border-radius: 16px;
+  background: var(--bg-base);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.widgetTile:global(.arco-btn:hover),
+.promptCard:global(.arco-btn:hover) {
+  background: transparent;
+  color: var(--color-text-1);
+}
+
+.widgetTile[aria-pressed='true']:global(.arco-btn) {
+  color: var(--color-text-1);
+}
+
+.widgetTile[aria-pressed='true'] .modeArtwork {
+  border: 2px solid var(--builder-accent);
+  background: var(--builder-selected-surface);
+  color: var(--builder-accent);
+}
+
+.widgetTile:global(.arco-btn:hover) .modeArtwork {
+  border-color: var(--builder-accent);
+}
+
+.galleryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.galleryBack:global(.arco-btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 6px 8px 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-1);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.galleryTrack {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .promptGrid {
   display: grid;
+  flex: 1;
+  min-width: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .promptCard:global(.arco-btn) {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: 2px;
   height: auto;
   min-width: 0;
   padding: 0 0 8px;
@@ -57,23 +138,38 @@
   align-items: center;
   justify-content: center;
   aspect-ratio: 4 / 3;
-  margin-bottom: 4px;
-  border: 1px solid var(--color-border-2);
-  border-radius: 14px;
-  background: var(--color-fill-1);
-  color: var(--color-text-2);
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border-1);
+  border-radius: 16px;
+  background: var(--builder-example-surface);
+  color: var(--builder-accent);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
 }
 
-.promptCard:global(.arco-btn:hover) {
-  background: transparent;
+.promptIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: var(--bg-base);
 }
 
 .promptCard:global(.arco-btn:hover) .promptArtwork {
-  border-color: var(--aou-7);
-  color: var(--aou-7);
+  border-color: var(--builder-accent);
+}
+
+.promptCard[aria-pressed='true'] .promptArtwork {
+  border: 2px solid var(--builder-accent);
+  background: var(--builder-selected-surface);
 }
 
 .promptTitle {
+  padding: 0 2px;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -81,9 +177,65 @@
 }
 
 .promptDescription {
+  padding: 0 2px;
   font-size: 12px;
   line-height: 18px;
   color: var(--color-text-3);
+}
+
+.galleryNext:global(.arco-btn) {
+  flex-shrink: 0;
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 44px;
+  padding: 0;
+  border: 1px solid var(--color-border-2);
+  background: var(--bg-base);
+  color: var(--color-text-1);
+}
+
+.modeSuggestions {
+  margin-top: 44px;
+  padding: 0 4px;
+}
+
+.modeSuggestions .assistantPromptHint {
+  margin: 0 0 6px;
+}
+
+.suggestionItem:global(.arco-btn) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-1);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 15px;
+  line-height: 22px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.suggestionItem:global(.arco-btn) > :last-child {
+  flex-shrink: 0;
+}
+
+.suggestionItem:global(.arco-btn:hover) {
+  background: transparent;
+  color: var(--color-text-1);
+}
+
+.suggestionItem:global(.arco-btn:hover) > :last-child {
+  color: var(--builder-accent);
 }
 
 .promptArtwork img,
@@ -93,35 +245,6 @@
   flex-shrink: 0;
 }
 
-.widgetTile:global(.arco-btn) {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--color-border-3);
-  border-radius: 999px;
-  color: var(--color-text-2);
-  background: var(--bg-base);
-  font-size: 14px;
-  font-weight: 400;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
-}
-
-.widgetTile:global(.arco-btn:hover) {
-  background: var(--color-fill-1);
-  color: var(--color-text-1);
-  border-color: var(--color-text-3);
-}
-
-.widgetTile[aria-pressed='true']:global(.arco-btn) {
-  color: var(--aou-7) !important;
-  border-color: var(--aou-7);
-  background: var(--color-primary-light-1);
-}
-
 .widgetChip:global(.arco-btn) {
   display: inline-flex;
   align-items: center;
@@ -129,41 +252,57 @@
   flex-shrink: 0;
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--color-primary-light-3);
+  border: 1px solid var(--builder-accent);
   border-radius: 16px;
-  background: var(--color-primary-light-1);
-  color: var(--aou-7);
+  background: var(--builder-selected-surface);
+  color: var(--color-text-1);
   font-size: 12px;
 }
 
 .widgetChip:global(.arco-btn:hover) {
-  background: var(--color-primary-light-2);
-  color: var(--aou-7);
+  background: var(--builder-example-surface);
+  color: var(--color-text-1);
 }
 
 .widgetTile:focus-visible,
 .widgetChip:focus-visible,
-.promptCard:focus-visible {
-  outline: 2px solid var(--aou-7);
+.promptCard:focus-visible,
+.galleryBack:focus-visible,
+.galleryNext:focus-visible,
+.suggestionItem:focus-visible {
+  outline: 2px solid var(--builder-accent);
   outline-offset: 3px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
+  .widgetEntry {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .promptGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
   }
-}
 
-@media (max-width: 768px) {
-  .widgetTile:global(.arco-btn),
+  .galleryHeader {
+    align-items: flex-start;
+  }
+
+  .galleryHeader .assistantPromptHint {
+    padding-top: 8px;
+    text-align: end;
+  }
+
+  .galleryNext:global(.arco-btn),
+  .galleryBack:global(.arco-btn),
   .widgetChip:global(.arco-btn) {
-    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .widgetTile {
+  .modeArtwork,
+  .promptArtwork {
     transition: none;
   }
 }

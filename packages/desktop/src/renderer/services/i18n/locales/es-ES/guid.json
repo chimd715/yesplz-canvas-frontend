@@ -35,6 +35,11 @@
   "creationModes": {
     "clear": "Clear {{name}} selection",
     "loadError": "Creation modes could not be loaded. Retry to continue.",
-    "loading": "Loading creation modes…"
+    "loading": "Loading creation modes…",
+    "back": "Back to modes",
+    "examples": "Start with an example",
+    "suggestions": "Try these for {{name}}",
+    "moreExamples": "More examples",
+    "firstExamples": "Back to first examples"
   }
 }

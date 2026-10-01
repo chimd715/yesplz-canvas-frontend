@@ -21,6 +21,7 @@ import GuidActionRow from './components/GuidActionRow';
 import GuidInputCard from './components/GuidInputCard';
 import GuidModelSelector from './components/GuidModelSelector';
 import QuickActionButtons from './components/QuickActionButtons';
+import CreationModePicker from './components/CreationModePicker';
 import FeedbackReportModal from '@/renderer/components/settings/SettingsModal/contents/FeedbackReportModal';
 import { useGuidAssistantSelection } from './hooks/useGuidAssistantSelection';
 import { useGuidInput } from './hooks/useGuidInput';
@@ -35,7 +36,7 @@ import { chatFileRefPath, uploadFileRef } from '@/common/types/chatFile';
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
-import { Application, ArrowRightUp, Close, Shop } from '@icon-park/react';
+import { Application, ArrowRightUp, Close } from '@icon-park/react';
 import { Alert, Button, ConfigProvider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -803,59 +804,18 @@ const GuidPage: React.FC = () => {
           ) : null}
 
           {creationModes.length > 0 ? (
-            <div className={styles.widgetEntry}>
-              {creationModes.map((mode) => (
-                <Button
-                  key={mode.id}
-                  type='outline'
-                  className={styles.widgetTile}
-                  aria-pressed={selectedCreationMode?.id === mode.id}
-                  title={mode.description}
-                  disabled={guidInput.loading}
-                  onClick={() => selectCreationMode(selectedCreationMode?.id === mode.id ? null : mode.id)}
-                >
-                  {mode.icon ? (
-                    <img src={mode.icon} width='20' height='20' alt='' />
-                  ) : mode.outputType === 'widget' ? (
-                    <Shop theme='outline' size='20' fill='currentColor' aria-hidden='true' />
-                  ) : (
-                    <Application theme='outline' size='20' fill='currentColor' aria-hidden='true' />
-                  )}
-                  <span>{mode.name}</span>
-                </Button>
-              ))}
-            </div>
-          ) : null}
-
-          {selectedCreationMode && selectedCreationMode.prompts.length > 0 ? (
-            <section className={styles.promptSection}>
-              <p className={styles.assistantPromptHint}>{t('guid.promptExamplesHint')}</p>
-              <div className={styles.promptGrid}>
-                {selectedCreationMode.prompts.map((prompt) => (
-                  <Button
-                    key={prompt.id}
-                    type='text'
-                    className={styles.promptCard}
-                    aria-label={prompt.description ? `${prompt.title}. ${prompt.description}` : prompt.title}
-                    disabled={guidInput.loading}
-                    onClick={() => {
-                      guidInput.setInput(prompt.prompt);
-                      guidInput.handleTextareaFocus();
-                    }}
-                  >
-                    <span className={styles.promptArtwork} aria-hidden='true'>
-                      {prompt.icon ? (
-                        <img src={prompt.icon} width='40' height='40' alt='' />
-                      ) : (
-                        <Application theme='outline' size='32' fill='currentColor' />
-                      )}
-                    </span>
-                    <span className={styles.promptTitle}>{prompt.title}</span>
-                    {prompt.description ? <span className={styles.promptDescription}>{prompt.description}</span> : null}
-                  </Button>
-                ))}
-              </div>
-            </section>
+            <CreationModePicker
+              key={location.key}
+              modes={creationModes}
+              selectedMode={selectedCreationMode}
+              input={guidInput.input}
+              loading={guidInput.loading}
+              onSelectMode={selectCreationMode}
+              onSelectPrompt={(prompt) => {
+                guidInput.setInput(prompt);
+                guidInput.handleTextareaFocus();
+              }}
+            />
           ) : null}
 
           {!selectedCreationMode && selectedAssistantPrompts.length > 0 ? (
