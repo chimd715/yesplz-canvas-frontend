@@ -317,6 +317,7 @@ describe('GuidPage', () => {
           prompts: [
             {
               id: 'stock',
+              type: 'prompt',
               title: 'Stock report',
               description: 'Compare stock by size',
               prompt: 'Create a stock report by size',
@@ -334,6 +335,49 @@ describe('GuidPage', () => {
     expect(guidInputMock.setInput).toHaveBeenCalledWith('Create a stock report by size');
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
     expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'report', revision: 8 });
+  });
+
+  it("shows each mode's own typed prompt cards without sending automatically", () => {
+    const catalog = {
+      revision: 10,
+      modes: [
+        {
+          ...widgetModeFixture,
+          prompts: [
+            { id: 'faq', type: 'prompt', title: 'Store FAQ', description: '', prompt: 'Build a store FAQ', icon: null },
+          ],
+        },
+        {
+          ...widgetModeFixture,
+          id: 'report',
+          name: 'Report',
+          isDefault: false,
+          prompts: [
+            {
+              id: 'sales',
+              type: 'prompt',
+              title: 'Sales report',
+              description: 'Show sales by month',
+              prompt: 'Build a monthly sales report',
+              icon: null,
+            },
+          ],
+        },
+      ],
+    };
+    swrMock.useSWRMock.mockImplementation((key) => ({ data: key === '/api/platform/creation-modes' ? catalog : null }));
+    render(<GuidPage />);
+    guidInputMock.setInput.mockClear();
+    sendMock.sendMessageHandler.mockClear();
+    expect(screen.queryByRole('button', { name: /Sales report/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Store FAQ' }));
+    expect(guidInputMock.setInput).toHaveBeenCalledWith('Build a store FAQ');
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    expect(screen.queryByRole('button', { name: 'Store FAQ' })).not.toBeInTheDocument();
+    guidInputMock.setInput.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Sales report/ }));
+    expect(guidInputMock.setInput).toHaveBeenCalledWith('Build a monthly sales report');
+    expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
   it('keeps a published empty catalog empty and allows ordinary chat', () => {

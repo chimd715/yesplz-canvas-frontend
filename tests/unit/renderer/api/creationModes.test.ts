@@ -51,4 +51,18 @@ describe('creation mode catalog', () => {
     mode.prompts[0].prompt += 'x';
     expect(creationCatalogSchema.safeParse({ revision: 1, modes: [mode] }).success).toBe(false);
   });
+
+  it('defaults legacy cards to prompt and rejects unsupported types', () => {
+    const card = { id: 'example', title: 'Example', description: '', prompt: 'Build a widget', icon: null };
+    const parse = (type?: string) =>
+      creationCatalogSchema.safeParse({
+        revision: 1,
+        modes: [{ ...widgetModeFixture, prompts: [{ ...card, ...(type ? { type } : {}) }] }],
+      });
+    const legacy = parse();
+    const prompt = parse('prompt');
+    expect(legacy.success && legacy.data.modes[0].prompts[0].type).toBe('prompt');
+    expect(prompt.success && prompt.data.modes[0].prompts[0].type).toBe('prompt');
+    expect(parse('remix').success).toBe(false);
+  });
 });

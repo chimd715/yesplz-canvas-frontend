@@ -31,6 +31,7 @@ const creationModeSchema = z.object({
     .array(
       z.object({
         id,
+        type: z.literal('prompt').default('prompt'),
         title: requiredText(120),
         description: text(2000),
         prompt: requiredText(32000),
