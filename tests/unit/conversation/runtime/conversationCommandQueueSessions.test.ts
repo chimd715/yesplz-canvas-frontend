@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createQueuedCommandItem,
+  validateQueuedCommandItem,
   normalizeQueueState,
   restoreQueuedCommand,
   updateQueuedCommand,
@@ -105,5 +106,22 @@ describe('command queue session references', () => {
     const [front] = restoreQueuedCommand([other, failed], failed);
     expect(front.id).toBe(failed.id);
     expect(front.sessions).toEqual([{ id: 'conv_target' }]);
+  });
+});
+
+describe('command queue authored instructions', () => {
+  it('retains a composed mode and skill prompt above the old 20,000 character limit', () => {
+    const input = '# Mode and reusable skill instructions\n' + 'Guide. '.repeat(3000) + '\nCreate a product carousel.';
+    const item = createQueuedCommandItem({ input, files: [] });
+    const state = { items: [], isPaused: false, mode: 'auto' as const };
+    expect(validateQueuedCommandItem(item, state).ok).toBe(true);
+    expect(normalizeQueueState({ ...state, items: [item] }).items[0]?.input).toBe(input);
+  });
+
+  it('still rejects a multibyte prompt exceeding the serialized queue byte budget', () => {
+    const item = createQueuedCommandItem({ input: '한'.repeat(90_000), files: [] });
+    const state = { items: [], isPaused: false, mode: 'auto' as const };
+    expect(validateQueuedCommandItem(item, state)).toEqual({ ok: false, reason: 'queueTooLarge' });
+    expect(normalizeQueueState({ ...state, items: [item] }).items).toEqual([]);
   });
 });

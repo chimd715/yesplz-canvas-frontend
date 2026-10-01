@@ -38,7 +38,10 @@ export type ConversationCommandQueueState = {
 };
 
 export const MAX_QUEUED_COMMANDS = 20;
-export const MAX_QUEUED_COMMAND_INPUT_LENGTH = 20_000;
+// The platform accepts 256 KiB of UTF-8 prompt content. The serialized queue
+// byte guard below includes that content plus metadata, so composed mode/skill
+// instructions can pass without allowing a request larger than the server bound.
+export const MAX_QUEUED_COMMAND_INPUT_LENGTH = 256 * 1024;
 export const MAX_QUEUED_COMMAND_FILES = 50;
 export const MAX_QUEUED_COMMAND_STATE_BYTES = 256 * 1024;
 
