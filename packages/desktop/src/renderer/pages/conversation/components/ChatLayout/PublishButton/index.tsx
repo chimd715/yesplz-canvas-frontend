@@ -119,7 +119,8 @@ const fetchStatus = async (url: string): Promise<PublishingStatus> =>
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      // Source readiness can include waking the owned runtime and inspecting its files.
+      signal: AbortSignal.timeout(45000),
     })
   );
 
