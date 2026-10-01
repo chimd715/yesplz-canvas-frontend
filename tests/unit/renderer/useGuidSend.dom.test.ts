@@ -8,7 +8,8 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
-import { creationModeSnapshot, standaloneWidgetMode } from '@/renderer/pages/guid/utils/creationModes';
+import { creationModeSnapshot } from '@/renderer/pages/guid/utils/creationModes';
+import { widgetModeFixture } from '../../fixtures/creationMode';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -143,7 +144,7 @@ describe('useGuidSend', () => {
     'adds widget engineering instructions to a plain feature request through %s without changing its title',
     async (backend) => {
       const deps = createDeps();
-      deps.creationMode = creationModeSnapshot(standaloneWidgetMode, null);
+      deps.creationMode = creationModeSnapshot(widgetModeFixture, 1);
       deps.selectedAssistantBackend = backend;
       deps.input = '상품 상세 페이지에 배송·반품 FAQ 위젯 만들어줘';
       deps.current_model = { id: 'test-provider', use_model: 'test-model' } as NonNullable<
@@ -160,10 +161,7 @@ describe('useGuidSend', () => {
       expect(createConversationInvokeMock.mock.calls[0][0].extra.outputType).toBe('widget');
       const prefix = backend === 'aionrs' ? 'aionrs' : 'acp';
       const message = JSON.parse(sessionStorage.getItem(`${prefix}_initial_message_widget-handoff`)!);
-      expect(message.input).toContain('installation code');
-      expect(message.input).toContain('Shadow DOM');
-      expect(message.input).toContain('Choose implementation details yourself');
-      expect(message.input).toContain('Do not invent a deployment URL');
+      expect(message.input).toContain(widgetModeFixture.instructions);
       expect(message.input).toMatch(new RegExp(`${deps.input}$`));
     }
   );
@@ -186,7 +184,7 @@ describe('useGuidSend', () => {
   it('waits for a widget description while retaining ordinary empty-chat behavior', async () => {
     const deps = createDeps();
     deps.input = '  ';
-    deps.creationMode = creationModeSnapshot(standaloneWidgetMode, null);
+    deps.creationMode = creationModeSnapshot(widgetModeFixture, 1);
     const { result, rerender } = renderHook(() => useGuidSend(deps));
     expect(result.current.isButtonDisabled).toBe(true);
     await act(async () => {

@@ -14,12 +14,6 @@
     "searchPlaceholder": "搜尋專案…",
     "noProject": "不使用專案"
   },
-  "shopWidget": {
-    "label": "Build ecommerce widget",
-    "clear": "Clear ecommerce widget selection",
-    "placeholder": "Describe the widget you want to add to your store",
-    "output": "Embeddable widget, live preview, and installation code."
-  },
   "creationModes": {
     "clear": "Clear {{name}} selection",
     "loadError": "Creation modes could not be loaded. Retry to continue.",

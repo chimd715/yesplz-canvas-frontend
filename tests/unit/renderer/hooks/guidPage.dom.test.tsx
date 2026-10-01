@@ -10,7 +10,7 @@ import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
-import { standaloneWidgetMode } from '@/renderer/pages/guid/utils/creationModes';
+import { catalogFixture, widgetModeFixture } from '../../../fixtures/creationMode';
 
 const {
   modelSelectionMock,
@@ -309,7 +309,7 @@ describe('GuidPage', () => {
       revision: 8,
       modes: [
         {
-          ...standaloneWidgetMode,
+          ...widgetModeFixture,
           id: 'report',
           name: 'Report',
           placeholder: 'Describe your report',
@@ -341,7 +341,14 @@ describe('GuidPage', () => {
       data: key === '/api/platform/creation-modes' ? { revision: 9, modes: [] } : null,
     }));
     render(<GuidPage />);
-    expect(screen.queryByRole('button', { name: 'guid.shopWidget.label' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shop Widget' })).not.toBeInTheDocument();
+    expect(capturedGuidSendDeps.at(-1)).toMatchObject({ creationMode: null, creationModesReady: true });
+  });
+
+  it('offers ordinary chat without a hardcoded mode when the standalone catalog is absent', () => {
+    swrMock.useSWRMock.mockReturnValue({ data: null });
+    render(<GuidPage />);
+    expect(screen.queryByRole('button', { name: 'Shop Widget' })).not.toBeInTheDocument();
     expect(capturedGuidSendDeps.at(-1)).toMatchObject({ creationMode: null, creationModesReady: true });
   });
 
@@ -354,14 +361,14 @@ describe('GuidPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
     expect(retry).toHaveBeenCalledOnce();
     expect(capturedGuidSendDeps.at(-1)).toMatchObject({ creationMode: null, creationModesReady: false });
-    expect(screen.queryByRole('button', { name: 'guid.shopWidget.label' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shop Widget' })).not.toBeInTheDocument();
   });
 
   it('defaults to Shop Widget and supports clearing and reselecting without changing the draft or starting a conversation', () => {
     render(<GuidPage />);
     guidInputMock.setInput.mockClear();
     sendMock.sendMessageHandler.mockClear();
-    const button = screen.getByRole('button', { name: 'guid.shopWidget.label' });
+    const button = screen.getByRole('button', { name: 'Shop Widget' });
     expect(button).toHaveAttribute('aria-pressed', 'true');
     expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'shop-widget' });
     fireEvent.click(button);
@@ -408,7 +415,7 @@ describe('GuidPage', () => {
       mcpIds: ['user-mcp'],
     });
     render(<GuidPage />);
-    expect(screen.getByRole('button', { name: 'guid.shopWidget.label' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Shop Widget' })).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => {
       expect(capturedGuidSendDeps.at(-1)?.guidEnabledSkills).toEqual(['existing', 'yesplz-api']);
       expect(capturedGuidSendDeps.at(-1)?.selectedMcpServerIds).toEqual(['user-mcp', 'ext-yesplz']);
@@ -435,7 +442,9 @@ describe('GuidPage', () => {
     locationMock.state = null;
     locationMock.key = 'guid-location';
     navigateMock.mockReset();
-    swrMock.useSWRMock.mockReturnValue({ data: null });
+    swrMock.useSWRMock.mockImplementation((key) => ({
+      data: key === '/api/platform/creation-modes' ? catalogFixture : null,
+    }));
     capturedGuidActionRowProps.length = 0;
     capturedAssistantSelectionAreaProps.length = 0;
     capturedGuidInputCardProps.length = 0;
@@ -626,6 +635,7 @@ describe('GuidPage', () => {
     ];
 
     swrMock.useSWRMock.mockImplementation((key: string | null) => {
+      if (key === '/api/platform/creation-modes') return { data: catalogFixture };
       if (key?.startsWith('guid.assistant.detail.')) {
         return {
           data: assistantDetailFixture,
@@ -635,7 +645,7 @@ describe('GuidPage', () => {
     });
 
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shop Widget' }));
 
     const promptButton = screen.getByRole('button', {
       name: /Create a three-page financial dashboard with profit/i,
@@ -647,7 +657,7 @@ describe('GuidPage', () => {
 
   it('falls back to default instruction prompts outside widget mode when the assistant has no recommendations', () => {
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'guid.shopWidget.label' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shop Widget' }));
 
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.understand' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'guid.defaultPrompts.cleanup' })).toBeInTheDocument();

@@ -29,7 +29,7 @@ import { useGuidSend } from './hooks/useGuidSend';
 import { useTypewriterPlaceholder } from './hooks/useTypewriterPlaceholder';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { resolveGuidAssistantDefaults } from './utils/assistantDefaults';
-import { creationModeSnapshot, fetchCreationModes, standaloneWidgetMode } from './utils/creationModes';
+import { creationModeSnapshot, fetchCreationModes } from './utils/creationModes';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
 import { chatFileRefPath, uploadFileRef } from '@/common/types/chatFile';
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
@@ -72,20 +72,7 @@ const GuidPage: React.FC = () => {
     shouldRetryOnError: false,
     revalidateOnFocus: false,
   });
-  const creationModes = useMemo(
-    () =>
-      creationCatalog === null
-        ? [
-            {
-              ...standaloneWidgetMode,
-              name: t('guid.shopWidget.label'),
-              description: t('guid.shopWidget.output'),
-              placeholder: t('guid.shopWidget.placeholder'),
-            },
-          ]
-        : (creationCatalog?.modes ?? []),
-    [creationCatalog, t]
-  );
+  const creationModes = creationCatalog?.modes ?? [];
   const selectedCreationMode = creationModes.find((mode) =>
     selectedCreationModeId === undefined ? mode.isDefault : mode.id === selectedCreationModeId
   );
