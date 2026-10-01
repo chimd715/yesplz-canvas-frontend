@@ -128,6 +128,35 @@ const {
   navigateMock: vi.fn(),
 }));
 
+const workspaceMock = vi.hoisted(() => ({
+  active: true,
+  prepare: vi.fn(),
+  initialize: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/common/adapter/httpBridge', async () => {
+  const actual = await vi.importActual<typeof import('@/common/adapter/httpBridge')>('@/common/adapter/httpBridge');
+  return {
+    ...actual,
+    getBuilderWorkspace: () => (workspaceMock.active ? null : { ownerId: 'owner', projectId: 'project' }),
+    isNativeRuntimeActive: () => workspaceMock.active,
+    nativeRuntimeActivationEpoch: () => 0,
+    subscribeNativeRuntimeActivation: () => () => {},
+    activateNativeWorkspace: () => {
+      workspaceMock.active = true;
+    },
+  };
+});
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/durableAdmission', () => ({
+  prepareNativeWorkspace: () => workspaceMock.prepare(),
+}));
+vi.mock('@/common/config/configService', async () => {
+  const actual = await vi.importActual<typeof import('@/common/config/configService')>('@/common/config/configService');
+  return {
+    ...actual,
+    configService: Object.create(actual.configService, { initialize: { value: () => workspaceMock.initialize() } }),
+  };
+});
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; [key: string]: unknown }) => options?.defaultValue || key,
@@ -320,6 +349,24 @@ const creationItemFixture = (id: string, showInSuggestions: boolean, showInGalle
 });
 
 describe('GuidPage', () => {
+  it('keeps the draft and mode when explicit workspace preparation fails, then retries', async () => {
+    workspaceMock.active = false;
+    workspaceMock.prepare.mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValueOnce({ activationEpoch: 0 });
+    const catalog = catalogFixture;
+    swrMock.useSWRMock.mockImplementation((key) => ({ data: key === '/api/platform/creation-modes' ? catalog : null }));
+    const { rerender } = render(<GuidPage />);
+    guidInputMock.setInput.mockClear();
+    expect(workspaceMock.prepare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'guid.workspace.start' }));
+    await screen.findByText('guid.workspace.error');
+    expect(guidInputMock.setInput).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    await waitFor(() => expect(workspaceMock.initialize).toHaveBeenCalled());
+    rerender(<GuidPage />);
+    expect(screen.queryByText('guid.workspace.error')).not.toBeInTheDocument();
+    expect(capturedGuidSendDeps.at(-1)?.creationMode).toMatchObject({ id: 'shop-widget' });
+  });
+
   it('renders published modes and example cards, filling the draft without sending', () => {
     const catalog = {
       revision: 8,
@@ -535,6 +582,8 @@ describe('GuidPage', () => {
   });
 
   beforeEach(() => {
+    workspaceMock.active = true;
+    workspaceMock.prepare.mockReset();
     vi.mocked(ipcBridge.fs.listAvailableSkills.invoke).mockResolvedValue([]);
     vi.mocked(ensureBackendMcpCatalog).mockResolvedValue({
       userServers: [],

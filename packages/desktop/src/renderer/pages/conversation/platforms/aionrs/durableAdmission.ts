@@ -94,6 +94,31 @@ export async function listPendingNativeRequests(coreId: string, logicalId: strin
   return items;
 }
 
+/** Explicitly prepare an owned workspace before choosing an engine or creating its first conversation. */
+export async function prepareNativeWorkspace() {
+  const workspace = getBuilderWorkspace();
+  const epoch = nativeRuntimeActivationEpoch();
+  if (!workspace) throw new NativeAdmissionError(503);
+  const response = await request('/api/platform/workspace/activate', 'POST', {});
+  if (!response.ok) throw new NativeAdmissionError(response.status);
+  const prepared = z
+    .object({ ownerId: uuid, projectId: uuid, runtimeGeneration: uuid })
+    .strict()
+    .parse(await response.json());
+  if (
+    prepared.ownerId !== workspace.ownerId ||
+    prepared.projectId !== workspace.projectId ||
+    nativeRuntimeActivationEpoch() !== epoch
+  )
+    throw new NativeAdmissionError(409);
+  return {
+    ownerId: prepared.ownerId!,
+    projectId: prepared.projectId!,
+    runtimeGeneration: prepared.runtimeGeneration!,
+    activationEpoch: epoch,
+  };
+}
+
 /** Resume is explicit and fenced to the same owned continuation that the transcript resolved. */
 export async function resumeNativeRuntime(expected: {
   logicalId: string;

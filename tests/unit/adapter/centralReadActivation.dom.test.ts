@@ -61,6 +61,42 @@ afterEach(() => {
 });
 
 describe('central read native activation', () => {
+  it('starts workspace metadata and creation without granting an existing conversation runtime', async () => {
+    const gate = await loadGate();
+    const { prepareNativeWorkspace } = await import('@/renderer/pages/conversation/platforms/aionrs/durableAdmission');
+    const fetchMock = vi.fn(async () => Response.json({ ownerId, projectId, runtimeGeneration }));
+    vi.stubGlobal('fetch', fetchMock);
+    const prepared = await prepareNativeWorkspace();
+    gate.activateNativeWorkspace(prepared, prepared.activationEpoch);
+    expect(gate.getActiveNativeRuntimeContext()).toBeNull();
+    await gate.httpRequest('GET', '/api/providers');
+    await gate.httpRequest('POST', '/api/conversations', { name: 'New chat' });
+    await expect(gate.httpRequest('POST', '/api/conversations/old/runtime/ensure')).rejects.toMatchObject({
+      code: 'NATIVE_RUNTIME_INACTIVE',
+    });
+    gate.suspendNativeRuntime();
+    await expect(gate.httpRequest('GET', '/api/providers')).rejects.toMatchObject({ code: 'NATIVE_RUNTIME_INACTIVE' });
+  });
+
+  it('does not activate workspace access from a foreign or stale preparation response', async () => {
+    const gate = await loadGate();
+    const { prepareNativeWorkspace } = await import('@/renderer/pages/conversation/platforms/aionrs/durableAdmission');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ownerId: projectId, projectId, runtimeGeneration }))
+    );
+    await expect(prepareNativeWorkspace()).rejects.toMatchObject({ status: 409 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        gate.suspendNativeRuntime();
+        return Response.json({ ownerId, projectId, runtimeGeneration });
+      })
+    );
+    await expect(prepareNativeWorkspace()).rejects.toMatchObject({ status: 409 });
+    expect(gate.isNativeRuntimeActive()).toBe(false);
+  });
+
   it('reads central transcripts but rejects native settings, leases, ensure and mutations before fetch', async () => {
     const gate = await loadGate();
     const fetchMock = vi.fn(async () => Response.json({ success: true, data: { items: [] } }));

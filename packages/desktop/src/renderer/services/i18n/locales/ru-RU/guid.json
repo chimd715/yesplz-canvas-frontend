@@ -12,7 +12,10 @@
     "clearWorkspace": "Очистить",
     "specifyWorkspace": "Выбрать папку проекта",
     "searchPlaceholder": "Поиск проектов…",
-    "noProject": "Без проекта"
+    "noProject": "Без проекта",
+    "start": "Start workspace",
+    "description": "Start your workspace to choose a model and create a new conversation.",
+    "error": "Could not start your workspace. Your draft has been kept. Try again."
   },
   "creationModes": {
     "clear": "Clear {{name}} selection",

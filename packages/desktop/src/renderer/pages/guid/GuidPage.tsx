@@ -5,6 +5,17 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  activateNativeWorkspace,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
+import { configService } from '@/common/config/configService';
+import { prepareNativeWorkspace } from '@/renderer/pages/conversation/platforms/aionrs/durableAdmission';
+import { PROVIDERS_SWR_KEY } from '@/renderer/hooks/agent/useModelProviderList';
+import { MANAGED_AGENTS_SWR_KEY } from '@/renderer/utils/model/agentTypes';
 import { buildGuidSlashCommands } from '@/common/chat/slash/guidSlashCommands';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
@@ -38,10 +49,10 @@ import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
 import { Application, ArrowRightUp, Close } from '@icon-park/react';
 import { Alert, Button, ConfigProvider } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import useSWR from 'swr';
+import useSWR, { mutate as swrMutate } from 'swr';
 import styles from './index.module.css';
 
 type GuidNavigationState = {
@@ -61,6 +72,33 @@ const GuidPage: React.FC = () => {
   const location = useLocation();
   const guidContainerRef = useRef<HTMLDivElement>(null);
   const { activeBorderColor, inactiveBorderColor, activeShadow } = useInputFocusRing();
+
+  const activationEpoch = useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
+  const workspaceReady = isNativeRuntimeActive();
+  const [preparingWorkspace, setPreparingWorkspace] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState(false);
+  const preparationInFlight = useRef(false);
+  const prepareWorkspace = async () => {
+    if (preparationInFlight.current) return;
+    preparationInFlight.current = true;
+    setPreparingWorkspace(true);
+    setWorkspaceError(false);
+    try {
+      const prepared = await prepareNativeWorkspace();
+      activateNativeWorkspace(prepared, prepared.activationEpoch);
+      await configService.initialize(true);
+      await Promise.all([
+        swrMutate(PROVIDERS_SWR_KEY),
+        swrMutate('assistants.list'),
+        swrMutate(MANAGED_AGENTS_SWR_KEY),
+      ]);
+    } catch {
+      setWorkspaceError(true);
+    } finally {
+      preparationInFlight.current = false;
+      setPreparingWorkspace(false);
+    }
+  };
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -102,6 +140,7 @@ const GuidPage: React.FC = () => {
   const [guidSelectedMcpServerIds, setGuidSelectedMcpServerIds] = useState<string[] | undefined>(undefined);
 
   useEffect(() => {
+    if (!workspaceReady) return;
     ipcBridge.fs.listAvailableSkills
       .invoke()
       .then((availableSkills) => {
@@ -114,9 +153,10 @@ const GuidPage: React.FC = () => {
         );
       })
       .catch(() => setAllSkills([]));
-  }, []);
+  }, [workspaceReady, activationEpoch]);
 
   useEffect(() => {
+    if (!workspaceReady) return;
     void ensureBackendMcpCatalog()
       .then(({ allServers }) => {
         setAvailableMcpServers(allServers);
@@ -125,7 +165,7 @@ const GuidPage: React.FC = () => {
         console.error('[GuidPage] Failed to load MCP catalog:', error);
         setAvailableMcpServers([]);
       });
-  }, []);
+  }, [workspaceReady, activationEpoch]);
 
   // --- Hooks ---
   // Only aionrs uses this provider-based model picker now (Gemini runs as a
@@ -308,7 +348,7 @@ const GuidPage: React.FC = () => {
     // Input state
     input: guidInput.input,
     creationMode: selectedCreationSnapshot,
-    creationModesReady: creationCatalog !== undefined,
+    creationModesReady: creationCatalog !== undefined && workspaceReady,
     setInput: guidInput.setInput,
     files: guidInput.files,
     setFiles: guidInput.setFiles,
@@ -723,7 +763,7 @@ const GuidPage: React.FC = () => {
         <SpeechInputButton onLiveTranscript={handleLiveTranscript} onTranscript={handleSpeechTranscript} />
       }
       loading={guidInput.loading}
-      isButtonDisabled={send.isButtonDisabled}
+      isButtonDisabled={send.isButtonDisabled || !workspaceReady || preparingWorkspace}
       onSend={send.sendMessageHandler}
     />
   );
@@ -752,6 +792,19 @@ const GuidPage: React.FC = () => {
           <div className={styles.heroHeader}>
             <p className='text-2xl font-semibold mb-0 text-t-primary text-center'>{t('conversation.welcome.title')}</p>
           </div>
+
+          {getBuilderWorkspace() && (!workspaceReady || workspaceError) ? (
+            <Alert
+              className='mb-18px'
+              type={workspaceError ? 'warning' : 'info'}
+              content={t(workspaceError ? 'guid.workspace.error' : 'guid.workspace.description')}
+              action={
+                <Button size='small' loading={preparingWorkspace} onClick={() => void prepareWorkspace()}>
+                  {t(workspaceError ? 'common.retry' : 'guid.workspace.start')}
+                </Button>
+              }
+            />
+          ) : null}
 
           <AssistantSelectionArea
             selectedAssistantId={agentSelection.selectedAssistantId}

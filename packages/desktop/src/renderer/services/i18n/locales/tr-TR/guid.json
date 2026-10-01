@@ -12,7 +12,10 @@
     "clearWorkspace": "Temizle",
     "specifyWorkspace": "Proje klasörü seç",
     "searchPlaceholder": "Proje ara…",
-    "noProject": "Proje Yok"
+    "noProject": "Proje Yok",
+    "start": "Start workspace",
+    "description": "Start your workspace to choose a model and create a new conversation.",
+    "error": "Could not start your workspace. Your draft has been kept. Try again."
   },
   "creationModes": {
     "clear": "Clear {{name}} selection",

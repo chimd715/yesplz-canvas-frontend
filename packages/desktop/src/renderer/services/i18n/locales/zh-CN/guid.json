@@ -12,7 +12,10 @@
     "clearWorkspace": "清除",
     "specifyWorkspace": "选择项目文件夹",
     "searchPlaceholder": "搜索项目…",
-    "noProject": "不使用项目"
+    "noProject": "不使用项目",
+    "start": "Start workspace",
+    "description": "Start your workspace to choose a model and create a new conversation.",
+    "error": "Could not start your workspace. Your draft has been kept. Try again."
   },
   "creationModes": {
     "clear": "Clear {{name}} selection",

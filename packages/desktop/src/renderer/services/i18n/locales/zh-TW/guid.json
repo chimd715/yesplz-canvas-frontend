@@ -12,7 +12,10 @@
     "clearWorkspace": "清除",
     "specifyWorkspace": "選擇專案資料夾",
     "searchPlaceholder": "搜尋專案…",
-    "noProject": "不使用專案"
+    "noProject": "不使用專案",
+    "start": "Start workspace",
+    "description": "Start your workspace to choose a model and create a new conversation.",
+    "error": "Could not start your workspace. Your draft has been kept. Try again."
   },
   "creationModes": {
     "clear": "Clear {{name}} selection",

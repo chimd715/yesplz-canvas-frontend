@@ -20,6 +20,7 @@ declare global {
 }
 
 export type BuilderWorkspace = { mode: 'central-read'; ownerId: string; projectId: string };
+export type NativeWorkspaceContext = { ownerId: string; projectId: string; runtimeGeneration: string };
 export type NativeRuntimeContext = {
   ownerId: string;
   projectId: string;
@@ -43,18 +44,40 @@ const workspace = (() => {
     : null;
 })();
 let activeRuntimeContext: Readonly<NativeRuntimeContext> | null = null;
+let activeWorkspaceContext: Readonly<NativeWorkspaceContext> | null = null;
 let activationEpoch = 0;
 const activationListeners = new Set<() => void>();
 
 /** Only authenticated shell metadata opts a hosted workspace into deferred native access. */
 export const getBuilderWorkspace = (): Readonly<BuilderWorkspace> | null => workspace;
-export const isNativeRuntimeActive = (): boolean => workspaceBoot === undefined || activeRuntimeContext !== null;
+export const isNativeRuntimeActive = (): boolean =>
+  workspaceBoot === undefined || activeRuntimeContext !== null || activeWorkspaceContext !== null;
 export const nativeRuntimeActivationEpoch = (): number => activationEpoch;
 export const getActiveNativeRuntimeContext = (): Readonly<NativeRuntimeContext> | null => activeRuntimeContext;
 export const subscribeNativeRuntimeActivation = (listener: () => void): (() => void) => {
   activationListeners.add(listener);
   return () => activationListeners.delete(listener);
 };
+
+/** Start metadata and new-conversation access without inventing a conversation continuation. */
+export function activateNativeWorkspace(context: NativeWorkspaceContext, expectedEpoch: number): void {
+  if (
+    !workspace ||
+    expectedEpoch !== activationEpoch ||
+    context.ownerId !== workspace.ownerId ||
+    context.projectId !== workspace.projectId ||
+    !UUID.test(context.runtimeGeneration)
+  )
+    throw new Error('Invalid workspace activation context');
+  activeRuntimeContext = null;
+  activeWorkspaceContext = Object.freeze({
+    ownerId: context.ownerId,
+    projectId: context.projectId,
+    runtimeGeneration: context.runtimeGeneration,
+  });
+  activationEpoch += 1;
+  activationListeners.forEach((listener) => listener());
+}
 
 /** Called only after a fresh, scope- and generation-validated server resume response. */
 export function activateNativeRuntime(context: NativeRuntimeContext, expectedEpoch: number): void {
@@ -79,6 +102,7 @@ export function activateNativeRuntime(context: NativeRuntimeContext, expectedEpo
 export function suspendNativeRuntime(): void {
   if (workspaceBoot === undefined) return;
   activeRuntimeContext = null;
+  activeWorkspaceContext = null;
   activationEpoch += 1;
   activationListeners.forEach((listener) => listener());
 }
@@ -299,7 +323,11 @@ export async function httpRequest<T>(
   body?: unknown,
   options?: HttpRequestOptions
 ): Promise<T> {
-  if (!isNativeRuntimeActive() && !isCentralConversationRead(method, path)) {
+  const conversationRuntime = path.split('?')[0].startsWith('/api/conversations/');
+  if (
+    (!isNativeRuntimeActive() || (workspaceBoot !== undefined && !activeRuntimeContext && conversationRuntime)) &&
+    !isCentralConversationRead(method, path)
+  ) {
     throw new BackendHttpError({
       method,
       path,

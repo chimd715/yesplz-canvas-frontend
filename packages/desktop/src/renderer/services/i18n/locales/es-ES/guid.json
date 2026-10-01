@@ -15,7 +15,10 @@
     "clearWorkspace": "Limpiar",
     "specifyWorkspace": "Seleccionar carpeta del proyecto",
     "searchPlaceholder": "Buscar proyectos...",
-    "noProject": "Sin proyecto"
+    "noProject": "Sin proyecto",
+    "start": "Start workspace",
+    "description": "Start your workspace to choose a model and create a new conversation.",
+    "error": "Could not start your workspace. Your draft has been kept. Try again."
   },
   "scanning": {
     "initialMessage": "El agente actual no está disponible, detectando otros agentes disponibles...",
