@@ -16,7 +16,10 @@ export type ReplyQuote = {
   position: 'left' | 'right' | 'center' | 'pop';
 };
 
+export type BackendCapability = 'database' | 'auth' | 'files';
+
 interface EventTypes {
+  'publishing.backend.open': [string, BackendCapability[]];
   'connectors.shopify.open': [boolean, string?]; // waiting question, optional target conversation
   'sendbox.connector.submit': [string, string, (accepted: boolean) => void];
   // The 2nd arg is the target conversation id: only the send box whose

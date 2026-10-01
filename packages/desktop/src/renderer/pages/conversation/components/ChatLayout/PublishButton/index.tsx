@@ -8,7 +8,7 @@ import {
 } from '@/common/adapter/httpBridge';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { copyText } from '@/renderer/utils/ui/clipboard';
-import { Button, Input, Link, Message, Popover, Select } from '@arco-design/web-react';
+import { Button, Checkbox, Input, Link, Message, Popover, Select } from '@arco-design/web-react';
 import { Code, Copy, Rocket } from '@icon-park/react';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -17,8 +17,17 @@ import styles from './PublishButton.module.css';
 import { useVersionHistory } from '../VersionHistory/context';
 import { versionPreviewUrl } from '../VersionHistory/api';
 import EmbedGuide, { type EmbedNotice } from './EmbedGuide';
+import { useAddEventListener, type BackendCapability } from '@/renderer/utils/emitter';
+import { submitConnectorPrompt } from '../../../platforms/useConnectorContinuation';
 
 type Phase = 'unconfigured' | 'provisioning' | 'ready' | 'publishing' | 'failed' | 'interrupted';
+type BackendStatus = {
+  available: boolean;
+  ready: boolean;
+  conversationId?: string;
+  capabilities: BackendCapability[];
+};
+const backendCapabilities: BackendCapability[] = ['database', 'auth', 'files'];
 type PublishingStatus = {
   projectId: string;
   phase: Phase;
@@ -27,6 +36,8 @@ type PublishingStatus = {
   savedSourceAvailable?: boolean;
   workspaceMatches: boolean;
   conversationId?: string;
+  canPublish?: boolean;
+  backend?: BackendStatus;
   history: {
     url?: string;
     conversationId?: string;
@@ -62,6 +73,21 @@ async function readStatus(response: Response): Promise<PublishingStatus> {
   ) {
     throw new Error('Invalid publishing status');
   }
+  let backend: BackendStatus | undefined;
+  if (data.backend !== undefined) {
+    const value = data.backend;
+    if (
+      !object(value) ||
+      typeof value.available !== 'boolean' ||
+      typeof value.ready !== 'boolean' ||
+      !Array.isArray(value.capabilities) ||
+      !value.capabilities.every((item) => backendCapabilities.includes(item as BackendCapability)) ||
+      (value.conversationId !== undefined && typeof value.conversationId !== 'string') ||
+      (value.ready && !value.conversationId)
+    )
+      throw new Error('Invalid backend status');
+    backend = value as BackendStatus;
+  }
   return {
     projectId: data.projectId,
     phase: data.phase as Phase,
@@ -70,6 +96,8 @@ async function readStatus(response: Response): Promise<PublishingStatus> {
     savedSourceAvailable: typeof data.savedSourceAvailable === 'boolean' ? data.savedSourceAvailable : undefined,
     workspaceMatches: data.workspaceMatches,
     conversationId: typeof data.conversationId === 'string' ? data.conversationId : undefined,
+    canPublish: typeof data.canPublish === 'boolean' ? data.canPublish : undefined,
+    backend,
     history: data.history.map((entry: unknown) => {
       if (!object(entry)) return {};
       const url = publicUrl(entry.url);
@@ -145,17 +173,30 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
   );
   const [visible, setVisible] = useState(false);
   const [openEmbedAfterPublish, setOpenEmbedAfterPublish] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [operation, setOperation] = useState<'publish' | 'setup' | null>(null);
+  const submitting = operation !== null;
   const [publishFailed, setPublishFailed] = useState(false);
+  const [backendExpanded, setBackendExpanded] = useState(false);
+  const [selectedCapabilities, setSelectedCapabilities] = useState<BackendCapability[]>([]);
+  const [pendingSetup, setPendingSetup] = useState<BackendCapability[] | null>(null);
+  const [resumeCapabilities, setResumeCapabilities] = useState<BackendCapability[] | null>(null);
+  const [backendError, setBackendError] = useState<
+    'requestFailed' | 'notReady' | 'answerPending' | 'continuationFailed' | null
+  >(null);
   const request = useRef<AbortController | null>(null);
   const capturedTurns = useRef(new Set<string>());
   const refreshedPublication = useRef<string | undefined>(undefined);
   useEffect(() => {
     setVisible(false);
     setEmbedVisible(false);
-    setSubmitting(false);
+    setOperation(null);
     setPublishFailed(false);
     setOpenEmbedAfterPublish(false);
+    setBackendExpanded(false);
+    setSelectedCapabilities([]);
+    setPendingSetup(null);
+    setResumeCapabilities(null);
+    setBackendError(null);
     capturedTurns.current.clear();
     refreshedPublication.current = undefined;
     return () => {
@@ -166,14 +207,84 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
 
   useEffect(() => {
     setEmbedVisible(false);
-    setSubmitting(false);
+    setOperation(null);
     setPublishFailed(false);
     setOpenEmbedAfterPublish(false);
+    setPendingSetup(null);
+    setResumeCapabilities(null);
+    setBackendError(null);
     return () => {
       request.current?.abort();
       request.current = null;
     };
   }, [revisionId, sourceVersionId]);
+
+  useAddEventListener(
+    'publishing.backend.open',
+    (target, capabilities) => {
+      if (target !== conversationId || !currentWorkActive || revisionId || sourceVersionId) return;
+      setSelectedCapabilities(capabilities);
+      setBackendExpanded(true);
+      setVisible(true);
+      setEmbedVisible(false);
+      void mutate();
+    },
+    [conversationId, currentWorkActive, revisionId, sourceVersionId, mutate]
+  );
+
+  useEffect(() => {
+    if (
+      !pendingSetup ||
+      submitting ||
+      !data ||
+      pending(data.phase) ||
+      !currentWorkActive ||
+      revisionId ||
+      sourceVersionId ||
+      request.current
+    )
+      return;
+    setPendingSetup(null);
+    const backend = data.backend;
+    if (
+      data.phase !== 'ready' ||
+      !backend?.ready ||
+      backend.conversationId !== conversationId ||
+      !pendingSetup.every((capability) => backend.capabilities.includes(capability))
+    ) {
+      setBackendError('notReady');
+      return;
+    }
+    const controller = new AbortController();
+    request.current = controller;
+    setResumeCapabilities(pendingSetup);
+    void (async () => {
+      try {
+        const confirmations = await ipcBridge.conversation.confirmation.list.invoke({
+          conversation_id: conversationId,
+        });
+        if (controller.signal.aborted) return;
+        if (confirmations.length) {
+          setBackendError('answerPending');
+          return;
+        }
+        await submitConnectorPrompt(
+          t('conversation.publishing.backend.continuePrompt', {
+            capabilities: ['api', ...backend.capabilities].join(', '),
+          }),
+          conversationId
+        );
+        if (!controller.signal.aborted) {
+          setResumeCapabilities(null);
+          setBackendError(null);
+        }
+      } catch {
+        if (!controller.signal.aborted) setBackendError('continuationFailed');
+      } finally {
+        if (request.current === controller) request.current = null;
+      }
+    })();
+  }, [pendingSetup, submitting, data, currentWorkActive, conversationId, revisionId, sourceVersionId, t]);
 
   useEffect(() => {
     if (
@@ -251,7 +362,8 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
     )
     .at(-1)?.url;
   const unavailable =
-    (!data.connected && !data.savedRevisionAvailable && !data.savedSourceAvailable) || data.phase === 'unconfigured';
+    (!data.connected && !data.savedRevisionAvailable && !data.savedSourceAvailable) ||
+    (data.phase === 'unconfigured' && data.canPublish !== true);
   const savedSelectionReady =
     selection?.kind === 'source'
       ? !!versions?.selectedSourceVersion &&
@@ -263,6 +375,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
         : currentWorkActive && !versions?.restoring && versions?.continuationResolved !== false;
   const canPublish =
     data.workspaceMatches &&
+    data.canPublish !== false &&
     !unavailable &&
     !busy &&
     !error &&
@@ -295,7 +408,7 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
     if (!canPublish || request.current) return;
     const controller = new AbortController();
     request.current = controller;
-    setSubmitting(true);
+    setOperation('publish');
     setPublishFailed(false);
     try {
       const next = await readStatus(
@@ -325,7 +438,41 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
       }
     } finally {
       if (request.current === controller) request.current = null;
-      if (!controller.signal.aborted) setSubmitting(false);
+      if (!controller.signal.aborted) setOperation(null);
+    }
+  };
+
+  const prepareBackend = async () => {
+    if (!currentWorkActive || revisionId || sourceVersionId || busy || request.current || !data.backend?.available)
+      return;
+    const controller = new AbortController();
+    request.current = controller;
+    setOperation('setup');
+    setBackendError(null);
+    setResumeCapabilities(null);
+    try {
+      const next = await readStatus(
+        await fetch('/api/platform/publishing/setup', {
+          method: 'POST',
+          credentials: 'same-origin',
+          redirect: 'error',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId, capabilities: selectedCapabilities }),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(795000)]),
+        })
+      );
+      if (!controller.signal.aborted) {
+        await mutate(next, { revalidate: false });
+        setPendingSetup([...selectedCapabilities]);
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        setBackendError('requestFailed');
+        void mutate();
+      }
+    } finally {
+      if (request.current === controller) request.current = null;
+      if (!controller.signal.aborted) setOperation(null);
     }
   };
 
@@ -336,6 +483,75 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
         <span className='text-t-secondary'>{t('common.status')}</span>
         <span className='text-t-primary'>{t(`conversation.publishing.phase.${data.phase}`)}</span>
       </div>
+      {data.backend && !revisionId && !sourceVersionId && (
+        <div className='flex flex-col gap-8px'>
+          <Button
+            type='text'
+            size='small'
+            onClick={() => setBackendExpanded(!backendExpanded)}
+            aria-expanded={backendExpanded}
+          >
+            {t('conversation.publishing.backend.title')}
+          </Button>
+          {backendExpanded && (
+            <>
+              <p className='m-0 text-13px text-t-secondary'>{t('conversation.publishing.backend.description')}</p>
+              <div className='flex flex-col gap-8px'>
+                {backendCapabilities.map((capability) => (
+                  <Checkbox
+                    key={capability}
+                    disabled={!currentWorkActive || busy || !data.backend?.available}
+                    checked={selectedCapabilities.includes(capability)}
+                    onChange={(checked) =>
+                      setSelectedCapabilities((previous) =>
+                        checked ? [...previous, capability] : previous.filter((item) => item !== capability)
+                      )
+                    }
+                  >
+                    {t(`conversation.publishing.backend.${capability}`)}
+                  </Checkbox>
+                ))}
+              </div>
+              <p className='m-0 text-12px text-t-secondary'>{t('conversation.publishing.backend.dependencies')}</p>
+              {data.backend.ready && data.backend.conversationId === conversationId && (
+                <div role='status' className='text-13px text-t-secondary'>
+                  {t('conversation.publishing.backend.ready', {
+                    capabilities: [
+                      t('conversation.publishing.backend.functions'),
+                      ...data.backend.capabilities.map((capability) =>
+                        t(`conversation.publishing.backend.${capability}`)
+                      ),
+                    ].join(', '),
+                  })}
+                </div>
+              )}
+              {!data.backend.available && <div role='status'>{t('conversation.publishing.backend.unavailable')}</div>}
+              {backendError && (
+                <div role='alert' className='text-13px text-danger'>
+                  {t(`conversation.publishing.backend.${backendError}`)}
+                </div>
+              )}
+              <Button
+                long
+                disabled={!currentWorkActive || busy || !data.backend.available}
+                loading={operation === 'setup' || data.phase === 'provisioning'}
+                onClick={() => void prepareBackend()}
+              >
+                {t('conversation.publishing.backend.prepare')}
+              </Button>
+              {resumeCapabilities && (
+                <Button
+                  long
+                  disabled={!currentWorkActive || busy}
+                  onClick={() => setPendingSetup([...resumeCapabilities])}
+                >
+                  {t('conversation.publishing.backend.continue')}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {versions && (versions.data || versions.sourceHistory) && (
         <div className='flex flex-col gap-8px'>
           <label className='text-12px text-t-secondary' htmlFor='publish-revision'>
@@ -489,7 +705,9 @@ const PublishButton: React.FC<{ conversationId: string; isWidget?: boolean; read
       <Button className={styles.primary} long disabled={!canPublish} loading={busy} onClick={() => void publish()}>
         {t(
           busy
-            ? 'conversation.publishing.inProgress'
+            ? operation === 'setup' || data.phase === 'provisioning'
+              ? 'conversation.publishing.backend.preparing'
+              : 'conversation.publishing.inProgress'
             : url
               ? 'conversation.publishing.publishChanges'
               : 'conversation.publishing.publishApp'

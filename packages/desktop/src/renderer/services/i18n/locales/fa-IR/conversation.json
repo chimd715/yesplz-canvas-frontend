@@ -811,7 +811,26 @@
       "failed": "ناموفق",
       "interrupted": "متوقف شده"
     },
-    "requestFailed": "تأیید درخواست انتشار ممکن نیست. پیش از تلاش دوباره، وضعیت را بررسی کنید."
+    "requestFailed": "تأیید درخواست انتشار ممکن نیست. پیش از تلاش دوباره، وضعیت را بررسی کنید.",
+    "backend": {
+      "title": "Backend services",
+      "prepare": "Prepare backend",
+      "description": "API functions are included. Select additional services only if this app needs them. Static pages can publish directly.",
+      "database": "Saved data",
+      "auth": "User sign-in",
+      "files": "Private file uploads",
+      "dependencies": "Sign-in also prepares saved data. Private uploads also prepare sign-in and saved data.",
+      "ready": "Ready for this conversation: {{capabilities}}.",
+      "unavailable": "Backend setup is not configured for this project.",
+      "requestFailed": "The setup request could not be confirmed. Check the status, then try again.",
+      "notReady": "The requested services are not ready in this conversation. Try setup again.",
+      "answerPending": "Backend setup is ready. Answer the pending question before continuing creation.",
+      "continuationFailed": "Backend setup is ready, but creation could not resume. Try Continue creation.",
+      "continue": "Continue creation",
+      "continuePrompt": "The managed backend is ready in this conversation. Prepared services: {{capabilities}}. Read BUILDER_BACKEND.md and the existing app source, then continue my request using these prepared services. Preserve existing files and data. Do not print or expose credentials.",
+      "functions": "API functions",
+      "preparing": "Preparing backend…"
+    }
   },
   "embedding": {
     "embed": "Embed",

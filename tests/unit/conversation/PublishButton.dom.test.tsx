@@ -5,7 +5,18 @@ import { SWRConfig } from 'swr';
 
 const platform = vi.hoisted(() => ({ desktop: false }));
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock('@/common', () => ({ ipcBridge: { conversation: { turnCompleted: { on: vi.fn() } } } }));
+const backend = vi.hoisted(() => ({ confirmations: vi.fn(), continue: vi.fn() }));
+vi.mock('@/common', () => ({
+  ipcBridge: {
+    conversation: {
+      turnCompleted: { on: vi.fn() },
+      confirmation: { list: { invoke: backend.confirmations } },
+    },
+  },
+}));
+vi.mock('@/renderer/pages/conversation/platforms/useConnectorContinuation', () => ({
+  submitConnectorPrompt: backend.continue,
+}));
 vi.mock('@/renderer/utils/platform', () => ({ isElectronDesktop: () => platform.desktop }));
 vi.mock('@/renderer/utils/ui/clipboard', () => ({ copyText: copy }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -16,6 +27,7 @@ vi.mock('@arco-design/web-react', async (importOriginal) => ({
 }));
 
 import PublishButton from '@/renderer/pages/conversation/components/ChatLayout/PublishButton';
+import { emitter } from '@/renderer/utils/emitter';
 
 const key = (name: string) => `conversation.publishing.${name}`;
 const embedKey = (name: string) => `conversation.embedding.${name}`;
@@ -53,6 +65,8 @@ async function open() {
 beforeEach(() => {
   platform.desktop = false;
   copy.mockClear();
+  backend.confirmations.mockReset().mockResolvedValue([]);
+  backend.continue.mockReset().mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -60,6 +74,141 @@ afterEach(() => {
 });
 
 describe('conversation publishing', () => {
+  const backendStatus = { available: true, ready: false, capabilities: [] };
+
+  it.each([undefined, false, true])(
+    'allows first static publish only with server readiness (%s)',
+    async (canPublish) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>().mockImplementation(async () => status({ phase: 'unconfigured', canPublish }))
+      );
+      view();
+      await open();
+      const button = screen.getByRole('button', { name: key('publishApp') });
+      await waitFor(() => (canPublish === true ? expect(button).toBeEnabled() : expect(button).toBeDisabled()));
+    }
+  );
+
+  it('opens common backend setup without creating resources and resumes only the prepared conversation', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_input, init) =>
+      status({
+        backend:
+          init?.method === 'POST'
+            ? { available: true, ready: true, conversationId: 'first', capabilities: ['database', 'auth'] }
+            : backendStatus,
+      })
+    );
+    vi.stubGlobal('fetch', fetcher);
+    view();
+    await screen.findByRole('button', { name: key('publish'), exact: true });
+    act(() => emitter.emit('publishing.backend.open', 'other', ['auth']));
+    expect(screen.queryByText(key('backend.description'))).not.toBeInTheDocument();
+    act(() => emitter.emit('publishing.backend.open', 'first', ['auth']));
+    expect(await screen.findByLabelText(key('backend.auth'))).toBeChecked();
+    expect(fetcher.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: key('backend.prepare') }));
+    await waitFor(() =>
+      expect(backend.continue).toHaveBeenCalledExactlyOnceWith(key('backend.continuePrompt'), 'first')
+    );
+    expect(fetcher.mock.calls.find(([, init]) => init?.method === 'POST')).toEqual([
+      '/api/platform/publishing/setup',
+      expect.objectContaining({ body: JSON.stringify({ conversationId: 'first', capabilities: ['auth'] }) }),
+    ]);
+  });
+
+  it('can prepare API functions without requesting database, sign-in or files', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_input, init) =>
+      status({
+        backend:
+          init?.method === 'POST'
+            ? { available: true, ready: true, conversationId: 'first', capabilities: [] }
+            : backendStatus,
+      })
+    );
+    vi.stubGlobal('fetch', fetcher);
+    view();
+    await screen.findByRole('button', { name: key('publish'), exact: true });
+    act(() => emitter.emit('publishing.backend.open', 'first', []));
+    fireEvent.click(await screen.findByRole('button', { name: key('backend.prepare') }));
+    await waitFor(() => expect(backend.continue).toHaveBeenCalledOnce());
+    expect(fetcher.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body).toBe(
+      JSON.stringify({ conversationId: 'first', capabilities: [] })
+    );
+  });
+
+  it.each([
+    { available: true, ready: true, conversationId: 'other', capabilities: ['auth'] },
+    { available: true, ready: false, conversationId: 'first', capabilities: ['auth'] },
+    { available: true, ready: true, conversationId: 'first', capabilities: ['database'] },
+  ])('does not resume when requested services are not verified in this conversation (%j)', async (nextBackend) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (_input, init) =>
+          status({ backend: init?.method === 'POST' ? nextBackend : backendStatus })
+        )
+    );
+    view();
+    await screen.findByRole('button', { name: key('publish'), exact: true });
+    act(() => emitter.emit('publishing.backend.open', 'first', ['auth']));
+    fireEvent.click(await screen.findByRole('button', { name: key('backend.prepare') }));
+    expect(await screen.findByText(key('backend.notReady'))).toBeVisible();
+    expect(backend.continue).not.toHaveBeenCalled();
+  });
+
+  it('preserves an unanswered question after setup and allows explicit continuation once answered', async () => {
+    backend.confirmations
+      .mockResolvedValueOnce([{ questions: [{ question: 'Which account?' }] }])
+      .mockResolvedValue([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (_input, init) =>
+        status({
+          backend:
+            init?.method === 'POST'
+              ? { available: true, ready: true, conversationId: 'first', capabilities: ['database'] }
+              : backendStatus,
+        })
+      )
+    );
+    view();
+    await screen.findByRole('button', { name: key('publish'), exact: true });
+    act(() => emitter.emit('publishing.backend.open', 'first', ['database']));
+    fireEvent.click(await screen.findByRole('button', { name: key('backend.prepare') }));
+    expect(await screen.findByText(key('backend.answerPending'))).toBeVisible();
+    expect(backend.continue).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: key('backend.continue') }));
+    await waitFor(() => expect(backend.continue).toHaveBeenCalledOnce());
+  });
+
+  it('waits for setup status to become ready before continuing an accepted background operation', async () => {
+    let accepted = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+        if (init?.method === 'POST') {
+          accepted = true;
+          return status({ phase: 'provisioning', backend: backendStatus }, 202);
+        }
+        return status({
+          backend: accepted
+            ? { available: true, ready: true, conversationId: 'first', capabilities: ['database'] }
+            : backendStatus,
+        });
+      })
+    );
+    view();
+    await screen.findByRole('button', { name: key('publish'), exact: true });
+    act(() => emitter.emit('publishing.backend.open', 'first', ['database']));
+    fireEvent.click(await screen.findByRole('button', { name: key('backend.prepare') }));
+    expect(await screen.findByText(key('phase.provisioning'))).toBeVisible();
+    expect(backend.continue).not.toHaveBeenCalled();
+    act(() => emitter.emit('publishing.backend.open', 'first', ['database']));
+    await waitFor(() => expect(backend.continue).toHaveBeenCalledOnce());
+  });
+
   it('opens platform-specific installation help beside Publish and copies the published code without deploying', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
       status({

@@ -8,6 +8,8 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MarkdownView from '@/renderer/components/Markdown';
+import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
+import { emitter } from '@/renderer/utils/emitter';
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -205,4 +207,30 @@ describe('MarkdownView local file links', () => {
     expect(image).toHaveAttribute('src', 'https://example.com/generated.png');
     expect(image).toHaveAttribute('alt', '');
   });
+});
+
+describe('MarkdownView backend setup action', () => {
+  it('opens the current conversation setup with allowlisted intent without calling a URL', () => {
+    const emit = vi.spyOn(emitter, 'emit');
+    render(
+      <ConversationProvider value={{ conversation_id: 'current', type: 'aionrs' }}>
+        <MarkdownView>{'[Prepare](#prepare-backend?capabilities=auth,files)'}</MarkdownView>
+      </ConversationProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.publishing.backend.prepare' }));
+    expect(emit).toHaveBeenCalledWith('publishing.backend.open', 'current', ['auth', 'files']);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it.each(['#prepare-backend?capabilities=unknown', '#prepare-backend?url=https://untrusted.example'])(
+    'rejects unsupported setup intent (%s)',
+    (href) => {
+      render(
+        <ConversationProvider value={{ conversation_id: 'current', type: 'aionrs' }}>
+          <MarkdownView>{`[Prepare](${href})`}</MarkdownView>
+        </ConversationProvider>
+      );
+      expect(screen.getByRole('button', { name: 'conversation.publishing.backend.prepare' })).toBeDisabled();
+    }
+  );
 });

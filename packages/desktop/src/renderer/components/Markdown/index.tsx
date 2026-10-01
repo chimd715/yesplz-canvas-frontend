@@ -13,7 +13,8 @@ import rehypeRaw from 'rehype-raw';
 import 'katex/dist/katex.min.css';
 
 import { openExternalUrl } from '@/renderer/utils/platform';
-import { emitter } from '@/renderer/utils/emitter';
+import { emitter, type BackendCapability } from '@/renderer/utils/emitter';
+import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { Button } from '@arco-design/web-react';
 import { parseHttpUrl } from '@/renderer/utils/url';
 import { useOptionalPreviewContext } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
@@ -50,6 +51,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
   ({ hiddenCodeCopyButton, codeStyle, className, onRef, onLocalFileLink, allowHtml, children: childrenProp }) => {
     const { t } = useTranslation();
     const preview = useOptionalPreviewContext();
+    const { conversation_id: conversationId, readOnly: conversationReadOnly } = useConversationContextSafe() ?? {};
 
     const normalizedChildren = useMemo(() => {
       if (typeof childrenProp === 'string') {
@@ -101,6 +103,30 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         a: ({ node: _node, ...rest }: Record<string, unknown>) => {
           const anchorProps = rest as React.AnchorHTMLAttributes<HTMLAnchorElement>;
           const rawHref = typeof anchorProps.href === 'string' ? anchorProps.href : '';
+          if (rawHref === '#prepare-backend' || rawHref.startsWith('#prepare-backend?')) {
+            const params = new URLSearchParams(rawHref.split('?')[1] ?? '');
+            const capabilities = params.get('capabilities')?.split(',').filter(Boolean) ?? [];
+            const valid =
+              [...params.keys()].every((key) => key === 'capabilities') &&
+              params.getAll('capabilities').length <= 1 &&
+              capabilities.every((item) => ['database', 'auth', 'files'].includes(item));
+            return (
+              <Button
+                className='markdown-local-file-link'
+                size='small'
+                type='text'
+                disabled={!valid || !conversationId || conversationReadOnly}
+                onClick={() =>
+                  conversationId &&
+                  emitter.emit('publishing.backend.open', conversationId, [
+                    ...new Set(capabilities),
+                  ] as BackendCapability[])
+                }
+              >
+                {t('conversation.publishing.backend.prepare')}
+              </Button>
+            );
+          }
           if (rawHref === '#connect-shopify') {
             return (
               <Button
@@ -136,7 +162,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
           return <img {...imgProps} alt={imgProps.alt || ''} />;
         },
       }),
-      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink, t]
+      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink, t, conversationId, conversationReadOnly]
     );
 
     const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeKatex] : [rehypeKatex]), [allowHtml]);
