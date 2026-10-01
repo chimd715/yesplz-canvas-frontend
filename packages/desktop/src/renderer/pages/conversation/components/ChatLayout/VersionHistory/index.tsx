@@ -3,8 +3,14 @@ import {
   getActiveNativeRuntimeContext,
   getBuilderWorkspace,
   isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
   suspendNativeRuntime,
 } from '@/common/adapter/httpBridge';
+import {
+  getConversationRuntimeViewSnapshot,
+  subscribeConversationRuntimeView,
+} from '@/renderer/pages/conversation/runtime/conversationRuntimeViewStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
@@ -103,44 +109,105 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
         return false;
       const controller = new AbortController();
       sourceRequest.current = controller;
+      const epoch = nativeRuntimeActivationEpoch();
+      const explicitMessageId = !!messageId;
+      const cancelChangedCompletion = () => {
+        const runtime = getConversationRuntimeViewSnapshot(activeConversationId);
+        if (
+          nativeRuntimeActivationEpoch() !== epoch ||
+          !isNativeRuntimeActive() ||
+          (getBuilderWorkspace() && getActiveNativeRuntimeContext()?.coreId !== activeConversationId) ||
+          runtime.localSubmitting ||
+          runtime.localStopping ||
+          (runtime.hydrated &&
+            (runtime.isProcessing ||
+              runtime.state !== 'idle' ||
+              runtime.pendingConfirmations !== 0 ||
+              !!runtime.activeTurnId))
+        )
+          controller.abort();
+      };
+      const disposers = completedTurn
+        ? [
+            subscribeNativeRuntimeActivation(cancelChangedCompletion),
+            subscribeConversationRuntimeView(cancelChangedCompletion),
+          ]
+        : [];
+      const checkCompletion = () => {
+        if (completedTurn) cancelChangedCompletion();
+        controller.signal.throwIfAborted();
+      };
       setSaving(true);
       setSnapshotError(null);
       try {
-        // Core's turn.completed event may omit last_message. Resolve only the
-        // current persisted completion; the snapshot endpoint rechecks this ID,
-        // runtime idleness and file timestamps before assigning any saved card.
-        if (completedTurn && !messageId) {
-          const page = await ipcBridge.database.getConversationMessages.invoke({
-            conversation_id: activeConversationId,
-            limit: 1,
-          });
-          const latest = page?.items.length === 1 ? page.items[0] : undefined;
-          if (
-            !latest?.id ||
-            latest.conversation_id !== activeConversationId ||
-            latest.type !== 'text' ||
-            latest.position !== 'left' ||
-            latest.status !== 'finish' ||
-            latest.hidden !== false
-          ) {
-            throw new VersionRequestError(409);
+        // Finish delivering this completion to the runtime view before checking it.
+        if (completedTurn) await Promise.resolve();
+        for (let attempt = 0; ; attempt += 1) {
+          checkCompletion();
+          try {
+            // Core completion can precede its central mirror. Only this bounded
+            // completion flow retries; history loading never creates snapshots.
+            if (completedTurn && !messageId) {
+              const page = await ipcBridge.database.getConversationMessages.invoke({
+                conversation_id: activeConversationId,
+                limit: 1,
+              });
+              checkCompletion();
+              const latest = page?.items.length === 1 ? page.items[0] : undefined;
+              if (
+                !latest?.id ||
+                latest.conversation_id !== activeConversationId ||
+                latest.type !== 'text' ||
+                latest.position !== 'left' ||
+                latest.status !== 'finish' ||
+                latest.hidden !== false
+              ) {
+                throw new VersionRequestError(409, 'mirror_not_ready');
+              }
+              messageId = latest.id;
+            }
+            checkCompletion();
+            if (
+              !isNativeRuntimeActive() ||
+              (getBuilderWorkspace() && getActiveNativeRuntimeContext()?.coreId !== activeConversationId)
+            )
+              return false;
+            const next = await captureSourceVersion(
+              activeConversationId,
+              AbortSignal.any([controller.signal, AbortSignal.timeout(180000)]),
+              messageId
+            );
+            checkCompletion();
+            await sources.mutate(next, { revalidate: false });
+            return true;
+          } catch (failure) {
+            const retryable =
+              failure instanceof VersionRequestError &&
+              failure.status === 409 &&
+              ['mirror_not_ready', 'source_message_mismatch', 'source_busy'].includes(failure.code ?? '');
+            if (!completedTurn || !retryable || attempt >= 3) throw failure;
+            checkCompletion();
+            // An event's explicit ID never moves to a newer message. Only a
+            // rejected mirror inference can be resolved again.
+            if (!explicitMessageId && failure.code === 'source_message_mismatch') messageId = undefined;
+            await new Promise<void>((resolve) => {
+              const finish = () => {
+                clearTimeout(timer);
+                controller.signal.removeEventListener('abort', finish);
+                resolve();
+              };
+              const timer = setTimeout(finish, 1000);
+              controller.signal.addEventListener('abort', finish, { once: true });
+            });
+            checkCompletion();
+            // Reconcile before another POST. Unknown/lost responses do not enter
+            // this retry path and retain the one-shot reconciliation below.
+            const current = await sources.mutate();
+            checkCompletion();
+            if (explicitMessageId && messageId && current?.cards.some((card) => card.messageId === messageId))
+              return true;
           }
-          messageId = latest.id;
         }
-        controller.signal.throwIfAborted();
-        if (
-          !isNativeRuntimeActive() ||
-          (getBuilderWorkspace() && getActiveNativeRuntimeContext()?.coreId !== activeConversationId)
-        )
-          return false;
-        const next = await captureSourceVersion(
-          activeConversationId,
-          AbortSignal.any([controller.signal, AbortSignal.timeout(180000)]),
-          messageId
-        );
-        if (controller.signal.aborted) return false;
-        await sources.mutate(next, { revalidate: false });
-        return true;
       } catch (failure) {
         if (!controller.signal.aborted) {
           setSnapshotError(
@@ -155,8 +222,11 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
         }
         return false;
       } finally {
-        if (sourceRequest.current === controller) sourceRequest.current = null;
-        if (!controller.signal.aborted) setSaving(false);
+        disposers.forEach((dispose) => dispose());
+        if (sourceRequest.current === controller) {
+          sourceRequest.current = null;
+          setSaving(false);
+        }
       }
     },
     [enabled, continuationResolved, restoring, activeConversationId, sources.data?.configured, sources.mutate]

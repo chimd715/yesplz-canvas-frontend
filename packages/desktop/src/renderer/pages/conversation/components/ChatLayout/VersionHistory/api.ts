@@ -83,7 +83,14 @@ export async function captureSourceVersion(conversationId: string, signal: Abort
     body: JSON.stringify({ conversationId, ...(messageId ? { messageId } : {}) }),
     signal,
   });
-  if (!response.ok) throw new VersionRequestError(response.status);
+  if (!response.ok) {
+    const failure: unknown = await response.json().catch((): null => null);
+    const code =
+      failure && typeof failure === 'object' && 'code' in failure && typeof failure.code === 'string'
+        ? failure.code
+        : undefined;
+    throw new VersionRequestError(response.status, code);
+  }
   const result = sourceHistorySchema
     .extend({ versionId: z.string().uuid(), messageId: id.optional() })
     .parse(await response.json());
@@ -121,7 +128,10 @@ export const versionsPath = (conversationId: string): string =>
   `/api/platform/conversations/${encodeURIComponent(conversationId)}`;
 
 export class VersionRequestError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly code?: string
+  ) {
     super('Version request failed');
   }
 }

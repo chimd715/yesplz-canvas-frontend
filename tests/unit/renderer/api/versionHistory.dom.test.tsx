@@ -25,17 +25,24 @@ vi.mock('@/common', () => ({
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({ openPreview, closePreview }),
 }));
+vi.mock('@/renderer/pages/conversation/platforms/useConnectorContinuation', () => ({
+  submitConnectorPrompt: vi.fn(),
+}));
 vi.mock('@/renderer/components/Markdown', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-const nativeActive = vi.hoisted(() => ({ current: true }));
+const nativeActive = vi.hoisted(() => ({ current: true, epoch: 0 }));
+const activationListeners = vi.hoisted(() => new Set<() => void>());
 vi.mock('@/common/adapter/httpBridge', () => ({
   getBaseUrl: () => '',
   getBuilderWorkspace: () => null,
   getActiveNativeRuntimeContext: () => null,
   isNativeRuntimeActive: () => nativeActive.current,
-  nativeRuntimeActivationEpoch: () => 0,
-  subscribeNativeRuntimeActivation: () => () => {},
+  nativeRuntimeActivationEpoch: () => nativeActive.epoch,
+  subscribeNativeRuntimeActivation: (listener: () => void) => {
+    activationListeners.add(listener);
+    return () => activationListeners.delete(listener);
+  },
   suspendNativeRuntime: () => {},
 }));
 vi.mock('react-i18next', () => ({
@@ -62,6 +69,10 @@ import {
   type SourceVersion,
 } from '@/renderer/pages/conversation/components/ChatLayout/VersionHistory/api';
 import PublishButton from '@/renderer/pages/conversation/components/ChatLayout/PublishButton';
+import {
+  localSendStarted,
+  resetConversationRuntimeViewStoreForTest,
+} from '@/renderer/pages/conversation/runtime/conversationRuntimeViewStore';
 
 const saved = (id: string, sourceConversationId = 'core-1'): SavedVersion => ({
   id,
@@ -107,6 +118,9 @@ const view = (publish = false, anchor?: string) =>
 const card = (number: number) => within(screen.getByRole('region', { name: `${key('version')} ${number}` }));
 beforeEach(() => {
   nativeActive.current = true;
+  nativeActive.epoch = 0;
+  activationListeners.clear();
+  resetConversationRuntimeViewStoreForTest();
   vi.stubGlobal('electronAPI', undefined);
   const meta = document.createElement('meta');
   meta.name = 'ai-builder-preview';
@@ -120,6 +134,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   document.querySelector('meta[name="ai-builder-preview"]')?.remove();
   vi.unstubAllGlobals();
 });
@@ -398,6 +413,137 @@ const emitCompleted = (event = completed()) =>
   });
 
 describe('saved widget source versions', () => {
+  const mirroredCompletion = (id = 'done-b') => ({
+    items: [{ id, conversation_id: 'logical', type: 'text', position: 'left', status: 'finish', hidden: false }],
+  });
+  const autoSaveFixture = (snapshot: () => Response) => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/platform/source-versions/snapshot') return snapshot();
+      if (url.includes('/source-versions?')) return Response.json({ configured: true, versions: [], cards: [] });
+      if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    return fetcher;
+  };
+  const capturedCompletion = () =>
+    Response.json({
+      ...sourceHistory(),
+      versionId: sourceA,
+      messageId: 'done-b',
+      cards: [{ messageId: 'done-b', sourceVersionId: sourceA }],
+    });
+
+  it('waits briefly for the completed message to reach the central mirror before saving its card', async () => {
+    latestMessages.mockResolvedValueOnce({ items: [] }).mockResolvedValue(mirroredCompletion());
+    const fetcher = autoSaveFixture(capturedCompletion);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(latestMessages).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(within(screen.getByTestId('completed-message')).getByRole('region')).toBeVisible();
+  });
+
+  it('refreshes an inferred stale message after a confirmed mismatch and reconciles before retrying', async () => {
+    latestMessages.mockResolvedValueOnce(mirroredCompletion('previous')).mockResolvedValue(mirroredCompletion());
+    let attempts = 0;
+    const fetcher = autoSaveFixture(() =>
+      ++attempts === 1 ? Response.json({ code: 'source_message_mismatch' }, { status: 409 }) : capturedCompletion()
+    );
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    const calls = fetcher.mock.calls;
+    const posts = calls.map(([, init], index) => (init?.method === 'POST' ? index : -1)).filter((index) => index >= 0);
+    expect(posts.map((index) => calls[index][1]?.body)).toEqual([
+      '{"conversationId":"logical","messageId":"previous"}',
+      '{"conversationId":"logical","messageId":"done-b"}',
+    ]);
+    expect(calls.slice(posts[0] + 1, posts[1]).some(([input]) => String(input).includes('/source-versions?'))).toBe(
+      true
+    );
+  });
+
+  it('keeps an explicit completion ID pinned while retrying a known busy snapshot', async () => {
+    let attempts = 0;
+    const fetcher = autoSaveFixture(() =>
+      ++attempts === 1 ? Response.json({ code: 'source_busy' }, { status: 409 }) : capturedCompletion()
+    );
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(latestMessages).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body)).toEqual([
+      '{"conversationId":"logical","messageId":"done-b"}',
+      '{"conversationId":"logical","messageId":"done-b"}',
+    ]);
+  });
+
+  it('stops after three mirror-read retries without posting an unanchored snapshot', async () => {
+    latestMessages.mockResolvedValue({ items: [] });
+    const fetcher = autoSaveFixture(capturedCompletion);
+    view(true);
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    await act(async () => vi.advanceTimersByTimeAsync(10000));
+    expect(latestMessages).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(screen.getByText(key('snapshot.busy'))).toBeVisible();
+  });
+
+  it.each(['new turn', 'activation changed', 'unmounted'])('cancels an automatic retry when %s', async (reason) => {
+    latestMessages.mockResolvedValueOnce({ items: [] }).mockResolvedValue(mirroredCompletion());
+    const fetcher = autoSaveFixture(capturedCompletion);
+    const rendered = view(true);
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    await act(async () => {
+      if (reason === 'new turn') localSendStarted('logical');
+      else if (reason === 'unmounted') rendered.unmount();
+      else {
+        nativeActive.epoch += 1;
+        activationListeners.forEach((listener) => listener());
+      }
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(latestMessages).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(screen.queryByText(key('snapshot.busy'))).not.toBeInTheDocument();
+  });
+
+  it('reconciles a lost snapshot response without retrying the POST', async () => {
+    let captured = false;
+    const current = { ...sourceHistory(), cards: [{ messageId: 'done-b', sourceVersionId: sourceA }] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      if (init?.method === 'POST') {
+        captured = true;
+        throw new TypeError('Response was lost');
+      }
+      if (String(input).includes('/source-versions?'))
+        return Response.json(captured ? current : { configured: true, versions: [], cards: [] });
+      if (String(input).includes('/conversations/')) return new Response(null, { status: 404 });
+      return publishing();
+    });
+    vi.stubGlobal('fetch', fetcher);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted();
+    await act(async () => vi.advanceTimersByTimeAsync(10000));
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(within(screen.getByTestId('completed-message')).getByRole('region')).toBeVisible();
+  });
+
   it('resolves the latest persisted completion when Core omits last_message and displays its saved Preview card', async () => {
     latestMessages.mockResolvedValue({
       items: [
@@ -463,8 +609,10 @@ describe('saved widget source versions', () => {
       vi.stubGlobal('fetch', fetcher);
       view(true);
       await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+      vi.useFakeTimers();
       await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
-      await screen.findByText(key('snapshot.busy'));
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(screen.getByText(key('snapshot.busy'))).toBeVisible();
       expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
     }
   );
