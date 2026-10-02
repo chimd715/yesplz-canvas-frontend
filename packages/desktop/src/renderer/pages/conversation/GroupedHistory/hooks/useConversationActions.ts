@@ -17,7 +17,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { isConversationPinned } from '../utils/groupingHelpers';
-import { removeDeletedConversation } from './useConversationListSync';
+import {
+  isConversationListScopeCurrent,
+  reconcileSidebarArchive,
+  removeDeletedConversation,
+  useConversationListScope,
+} from './useConversationListSync';
 
 type UseConversationActionsParams = {
   batchMode: boolean;
@@ -50,6 +55,7 @@ export const useConversationActions = ({
   const [renameLoading, setRenameLoading] = useState(false);
   const [dropdownVisibleId, setDropdownVisibleId] = useState<string | null>(null);
   const { id } = useParams();
+  const scope = useConversationListScope();
   const activeIdRef = useRef(id);
   activeIdRef.current = id;
   const { t } = useTranslation();
@@ -84,8 +90,9 @@ export const useConversationActions = ({
 
   const removeConversation = useCallback(
     async (conversation_id: string) => {
+      if (!isConversationListScopeCurrent(scope)) return false;
       const success = await ipcBridge.conversation.remove.invoke({ id: conversation_id });
-      if (success === false) {
+      if (success === false || !isConversationListScopeCurrent(scope)) {
         return false;
       }
 
@@ -96,7 +103,7 @@ export const useConversationActions = ({
       }
       return true;
     },
-    [navigate]
+    [navigate, scope]
   );
 
   const handleDelete = useCallback(
@@ -109,8 +116,11 @@ export const useConversationActions = ({
         cancelText: t('common.cancel'),
         okButtonProps: { status: 'danger' },
         onOk: async () => {
+          if (!isConversationListScopeCurrent(scope)) return;
           try {
-            if (!(await removeConversation(conversation.id))) {
+            const removed = await removeConversation(conversation.id);
+            if (!isConversationListScopeCurrent(scope)) return;
+            if (!removed) {
               Message.error(t('conversation.history.deleteFailed'));
               return;
             }
@@ -121,6 +131,7 @@ export const useConversationActions = ({
             });
             Message.success(t('conversation.history.deleteSuccess'));
           } catch {
+            if (!isConversationListScopeCurrent(scope)) return;
             Message.error(t('conversation.history.deleteFailed'));
           }
         },
@@ -129,7 +140,25 @@ export const useConversationActions = ({
         getPopupContainer: () => document.body,
       });
     },
-    [removeConversation, setSelectedConversationIds, t]
+    [removeConversation, scope, setSelectedConversationIds, t]
+  );
+
+  const archiveConversation = useCallback(
+    async (conversation_id: string, conversation?: TChatConversation) => {
+      if (!isConversationListScopeCurrent(scope)) return false;
+      await ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: conversation_id });
+      if (!isConversationListScopeCurrent(scope)) return false;
+      reconcileSidebarArchive({
+        scope,
+        item_type: 'conversation',
+        item_id: conversation_id,
+        archived: true,
+        conversation,
+      });
+      if (activeIdRef.current === conversation_id) void navigate('/', { replace: true });
+      return true;
+    },
+    [navigate, scope]
   );
 
   const handleBatchArchive = useCallback(() => {
@@ -144,15 +173,15 @@ export const useConversationActions = ({
       okText: t('conversation.history.batchArchive'),
       cancelText: t('common.cancel'),
       onOk: async () => {
-        // No batch endpoint exists; archive each selected conversation on its
-        // own. The active list (both read models) drops archived rows, so the
-        // refresh clears the selection's rows and the archive page picks them up.
+        if (!isConversationListScopeCurrent(scope)) return;
         const selectedIds = Array.from(selectedConversationIds);
         try {
-          const results = await Promise.allSettled(
-            selectedIds.map((item_id) => ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id }))
-          );
-          const successCount = results.filter((r) => r.status === 'fulfilled').length;
+          const results = await Promise.allSettled(selectedIds.map((item_id) => archiveConversation(item_id)));
+          if (!isConversationListScopeCurrent(scope)) return;
+          const successCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
+          const failedIds = selectedIds.filter((_id, index) => results[index].status === 'rejected');
+          setSelectedConversationIds(new Set(failedIds));
+          onBatchModeChange?.(failedIds.length > 0);
           emitter.emit('chat.history.refresh');
           if (successCount > 0) {
             Message.success(t('conversation.history.batchArchiveSuccess', { count: successCount }));
@@ -160,18 +189,16 @@ export const useConversationActions = ({
             Message.error(t('conversation.history.archiveFailed'));
           }
         } catch (error) {
+          if (!isConversationListScopeCurrent(scope)) return;
           console.error('Failed to batch archive conversations:', error);
           Message.error(t('conversation.history.archiveFailed'));
-        } finally {
-          setSelectedConversationIds(new Set());
-          onBatchModeChange?.(false);
         }
       },
       style: { borderRadius: '12px' },
       alignCenter: true,
       getPopupContainer: () => document.body,
     });
-  }, [onBatchModeChange, selectedConversationIds, t, setSelectedConversationIds]);
+  }, [archiveConversation, onBatchModeChange, scope, selectedConversationIds, t, setSelectedConversationIds]);
 
   const handleEditStart = useCallback((conversation: TChatConversation) => {
     setRenameModalId(conversation.id);
@@ -310,15 +337,14 @@ export const useConversationActions = ({
   }, [archiveProjectLoading]);
 
   const handleArchiveProjectConfirm = useCallback(async () => {
-    if (!archiveProjectTarget) return;
+    if (!archiveProjectTarget || !isConversationListScopeCurrent(scope)) return;
     setArchiveProjectLoading(true);
     try {
       const results = await Promise.allSettled(
-        archiveProjectTarget.conversations.map((c) =>
-          ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: c.id })
-        )
+        archiveProjectTarget.conversations.map((c) => archiveConversation(c.id, c))
       );
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      if (!isConversationListScopeCurrent(scope)) return;
+      const successCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
       emitter.emit('chat.history.refresh');
       if (successCount > 0) {
         Message.success(t('conversation.history.batchArchiveSuccess', { count: successCount }));
@@ -327,30 +353,28 @@ export const useConversationActions = ({
       }
       setArchiveProjectTarget(null);
     } catch (error) {
+      if (!isConversationListScopeCurrent(scope)) return;
       console.error('Failed to archive project:', error);
       Message.error(t('conversation.history.archiveFailed'));
     } finally {
       setArchiveProjectLoading(false);
     }
-  }, [archiveProjectTarget, t]);
+  }, [archiveConversation, archiveProjectTarget, scope, t]);
 
   const handleArchive = useCallback(
     async (conversation: TChatConversation) => {
-      // Archiving moves the conversation into the archived slice (the backend
-      // also unpins it). Both the new sidebar read model and the legacy list
-      // exclude archived rows, so the refresh drops the row from the active
-      // list on its own; the archived management page picks it up.
       setDropdownVisibleId(null);
       try {
-        await ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: conversation.id });
+        if (!(await archiveConversation(conversation.id, conversation))) return;
         emitter.emit('chat.history.refresh');
         Message.success(t('conversation.history.archiveSuccess'));
       } catch (error) {
+        if (!isConversationListScopeCurrent(scope)) return;
         console.error('Failed to archive conversation:', error);
         Message.error(t('conversation.history.archiveFailed'));
       }
     },
-    [t]
+    [archiveConversation, scope, t]
   );
 
   return {

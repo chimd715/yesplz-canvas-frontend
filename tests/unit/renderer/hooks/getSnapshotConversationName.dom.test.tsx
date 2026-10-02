@@ -7,6 +7,10 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'user-a' }, status: 'authenticated' }),
+}));
+
 vi.mock('@/renderer/utils/emitter', () => ({
   addEventListener: vi.fn(),
 }));

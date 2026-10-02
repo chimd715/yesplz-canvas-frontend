@@ -9,7 +9,16 @@ import { scopeToToken } from '@/common/adapter/sidebarMapper';
 import type { SidebarItem } from '@/common/types/sidebar';
 import { useAgentLogos } from '@/renderer/utils/model/agentLogo';
 import { emitter } from '@/renderer/utils/emitter';
-import { removeDeletedConversation } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
+import {
+  acknowledgeSidebarArchiveRead,
+  getSidebarArchiveReadVersion,
+  isConversationListScopeCurrent,
+  reconcileSidebarArchive,
+  removeDeletedConversation,
+  useSidebarArchiveState,
+  useConversationListScope,
+} from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
+import type { TChatConversation } from '@/common/config/storage';
 import { Button, Checkbox, Empty, Message, Modal, Spin } from '@arco-design/web-react';
 import { DeleteOne, FolderClose, ListCheckbox, MessageOne, Peoples, Robot } from '@icon-park/react';
 import React from 'react';
@@ -47,6 +56,8 @@ type ArchivedRow = {
   name: string;
   icon: React.ReactElement;
   updatedAt?: number;
+  conversation?: TChatConversation;
+  memberConversationIds?: string[];
 };
 
 /** One archived project bucket. Ordinary chats are grouped into the synthetic no-project bucket. */
@@ -79,6 +90,8 @@ type ProjectBlock = {
 const ArchivedSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const logos = useAgentLogos();
+  const scope = useConversationListScope();
+  const archiveStates = useSidebarArchiveState();
   const [deletedKeys, setDeletedKeys] = React.useState<ReadonlySet<string>>(() => new Set());
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedKeys, setSelectedKeys] = React.useState<ReadonlySet<string>>(() => new Set<string>());
@@ -86,33 +99,54 @@ const ArchivedSettings: React.FC = () => {
   // (restore/delete) so paging restarts from the fresh first screen — the
   // keyset cursors and windows are stale once the underlying set changes.
   const [extraPages, setExtraPages] = React.useState<Record<string, ExtraPage>>({});
+  const [extraPagesScope, setExtraPagesScope] = React.useState(scope);
   const [loadingTokens, setLoadingTokens] = React.useState<ReadonlySet<string>>(() => new Set<string>());
+  const pagingGeneration = React.useRef(0);
+  const mounted = React.useRef(true);
+  const pagingOwner = React.useRef(scope);
+  if (pagingOwner.current !== scope) {
+    pagingOwner.current = scope;
+    ++pagingGeneration.current;
+  }
 
-  const { data, isLoading, mutate } = useSWR(ARCHIVED_SWR_KEY, () =>
-    ipcBridge.sidebar.get.invoke({ archived: true, limit: FIRST_SCREEN_LIMIT })
-  );
+  const { data, isLoading, mutate } = useSWR(scope.ownerId ? [ARCHIVED_SWR_KEY, scope.ownerId] : null, async () => {
+    const version = getSidebarArchiveReadVersion();
+    const response = await ipcBridge.sidebar.get.invoke({ archived: true, limit: FIRST_SCREEN_LIMIT });
+    acknowledgeSidebarArchiveRead(scope, version);
+    return response;
+  });
 
   // Refetch the first screen and drop appended windows in one step. Used after
   // every mutation so stale paged rows/cursors never linger.
   const refresh = React.useCallback(async () => {
+    ++pagingGeneration.current;
     setExtraPages({});
+    setLoadingTokens(new Set());
     await mutate();
   }, [mutate]);
 
-  // The active (left) sidebar is an event-driven singleton with no route/focus
-  // revalidation, so it only reflects a restore once `chat.history.refresh`
-  // fires. We don't fire it per action (that refetches the active list while
-  // it's hidden behind the settings route); instead we mark the page dirty on
-  // any *restore* — the only op that moves items back into the active list —
-  // and emit a single refresh on unmount ("Back to Chat"). Deletes/clear touch
-  // archived units only, so they never need to refresh the active list.
-  const restoredRef = React.useRef(false);
-  React.useEffect(
-    () => () => {
-      if (restoredRef.current) emitter.emit('chat.history.refresh');
-    },
-    []
-  );
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      ++pagingGeneration.current;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    setExtraPagesScope(scope);
+    setExtraPages({});
+    setLoadingTokens(new Set());
+    setDeletedKeys(new Set());
+    setSelectedKeys(new Set());
+  }, [scope]);
+
+  // A mutation invalidates all appended cursors, including pending page reads.
+  React.useEffect(() => {
+    ++pagingGeneration.current;
+    setExtraPages({});
+    setLoadingTokens(new Set());
+  }, [archiveStates]);
 
   const { archivedBlocks, total } = React.useMemo(() => {
     const seen = new Set<string>();
@@ -142,8 +176,8 @@ const ArchivedSettings: React.FC = () => {
     // double-render across groups is not expected).
     const toRow = (item: SidebarItem): ArchivedRow | null => {
       if (item.type === 'conversation') {
-        if (deletedKeys.has(`conversation:${item.conversation.id}`)) return null;
         const key = `conversation:${item.conversation.id}`;
+        if (deletedKeys.has(key) || archiveStates.get(key) === false) return null;
         if (seen.has(key)) return null;
         seen.add(key);
         return {
@@ -153,10 +187,11 @@ const ArchivedSettings: React.FC = () => {
           name: item.conversation.name || t('conversation.welcome.newConversation'),
           icon: renderConversationIcon(item),
           updatedAt: item.conversation.created_at,
+          conversation: item.conversation,
         };
       }
-      if (deletedKeys.has(`team:${item.team_id}`)) return null;
       const key = `team:${item.team_id}`;
+      if (deletedKeys.has(key) || archiveStates.get(key) === false) return null;
       if (seen.has(key)) return null;
       seen.add(key);
       return {
@@ -166,6 +201,7 @@ const ArchivedSettings: React.FC = () => {
         name: item.name,
         icon: <Peoples theme='outline' size='16' className='block leading-none text-t-secondary' />,
         updatedAt: item.updated_at,
+        memberConversationIds: item.member_conversation_ids,
       };
     };
 
@@ -176,7 +212,7 @@ const ArchivedSettings: React.FC = () => {
     let chatsPaging: { token: string; hasMore: boolean; cursor?: string } | null = null;
     for (const group of data?.groups ?? []) {
       const token = scopeToToken(group.scope);
-      const extra = extraPages[token];
+      const extra = extraPagesScope === scope ? extraPages[token] : undefined;
       // First-screen window + any appended pages, in keyset order. Cursors are
       // exclusive, so the appended items never overlap the first screen.
       const combined = extra ? [...group.items, ...extra.items] : group.items;
@@ -189,11 +225,11 @@ const ArchivedSettings: React.FC = () => {
         if (row) rows.push(row);
       }
       if (rows.length === 0) continue;
-      const scope = group.scope;
-      if (scope.type === 'project' || scope.type === 'dir') {
-        const key = scope.type === 'project' ? scope.project_id : scope.key;
-        const projectId = scope.type === 'project' ? scope.project_id : undefined;
-        archivedBlocks.push({ key, name: scope.name, rows, projectId, scopeToken: token, hasMore, cursor });
+      const groupScope = group.scope;
+      if (groupScope.type === 'project' || groupScope.type === 'dir') {
+        const key = groupScope.type === 'project' ? groupScope.project_id : groupScope.key;
+        const projectId = groupScope.type === 'project' ? groupScope.project_id : undefined;
+        archivedBlocks.push({ key, name: groupScope.name, rows, projectId, scopeToken: token, hasMore, cursor });
       } else {
         // Ordinary archived chats are still grouped as a project-like block, named "No project".
         noProjectRows.push(...rows);
@@ -211,7 +247,7 @@ const ArchivedSettings: React.FC = () => {
       });
     }
     return { archivedBlocks, total: seen.size };
-  }, [data, deletedKeys, extraPages, logos, t]);
+  }, [archiveStates, data, deletedKeys, extraPages, extraPagesScope, logos, scope, t]);
 
   const allRows = React.useMemo(() => archivedBlocks.flatMap((block) => block.rows), [archivedBlocks]);
 
@@ -281,23 +317,51 @@ const ArchivedSettings: React.FC = () => {
 
   const handleRestore = React.useCallback(
     async (row: ArchivedRow) => {
+      if (!isConversationListScopeCurrent(scope)) return;
       try {
         await ipcBridge.sidebar.unarchive.invoke({ item_type: row.item_type, item_id: row.item_id });
-        restoredRef.current = true;
-        await refresh();
+        if (!isConversationListScopeCurrent(scope)) return;
+        reconcileSidebarArchive({
+          scope,
+          item_type: row.item_type,
+          item_id: row.item_id,
+          archived: false,
+          conversation: row.conversation,
+          memberConversationIds: row.memberConversationIds,
+        });
+        // Use this page's SWR provider so pending reads cannot restore its row.
+        void mutate(
+          (previous) =>
+            previous && {
+              ...previous,
+              groups: previous.groups.map((group) => ({
+                ...group,
+                items: group.items.filter((item) =>
+                  item.type === 'conversation'
+                    ? !(row.item_type === 'conversation' && item.conversation.id === row.item_id)
+                    : !(row.item_type === 'team' && item.team_id === row.item_id)
+                ),
+              })),
+            },
+          { revalidate: false }
+        );
+        emitter.emit('chat.history.refresh');
         Message.success(t('settings.archived.restoreSuccess'));
+        void refresh().catch((error) => console.error('Failed to refresh archived items:', error));
       } catch (error) {
+        if (!isConversationListScopeCurrent(scope)) return;
         console.error('Failed to restore archived item:', error);
         Message.error(t('settings.archived.restoreFailed'));
       }
     },
-    [refresh, t]
+    [mutate, refresh, scope, t]
   );
 
   const handleLoadMore = React.useCallback(
     async (block: ProjectBlock) => {
       if (!block.hasMore || !block.cursor) return;
       const token = block.scopeToken;
+      const generation = pagingGeneration.current;
       setLoadingTokens((prev) => new Set(prev).add(token));
       try {
         const page = await ipcBridge.sidebar.items.invoke({
@@ -306,6 +370,8 @@ const ArchivedSettings: React.FC = () => {
           limit: LOAD_MORE_LIMIT,
           archived: true,
         });
+        if (!mounted.current || !isConversationListScopeCurrent(scope) || generation !== pagingGeneration.current)
+          return;
         setExtraPages((prev) => {
           const existing = prev[token]?.items ?? [];
           return {
@@ -314,26 +380,34 @@ const ArchivedSettings: React.FC = () => {
           };
         });
       } catch (error) {
+        if (!mounted.current || !isConversationListScopeCurrent(scope) || generation !== pagingGeneration.current)
+          return;
         console.error('Failed to load more archived items:', error);
         Message.error(t('settings.archived.loadMoreFailed'));
       } finally {
-        setLoadingTokens((prev) => {
-          const next = new Set(prev);
-          next.delete(token);
-          return next;
-        });
+        if (mounted.current && isConversationListScopeCurrent(scope) && generation === pagingGeneration.current) {
+          setLoadingTokens((prev) => {
+            const next = new Set(prev);
+            next.delete(token);
+            return next;
+          });
+        }
       }
     },
-    [t]
+    [scope, t]
   );
 
-  const reconcileDeletedRow = React.useCallback((row: ArchivedRow) => {
-    setDeletedKeys((previous) => new Set(previous).add(row.key));
-    if (row.item_type === 'conversation') {
-      removeDeletedConversation(row.item_id);
-      emitter.emit('conversation.deleted', row.item_id);
-    }
-  }, []);
+  const reconcileDeletedRow = React.useCallback(
+    (row: ArchivedRow) => {
+      if (!isConversationListScopeCurrent(scope)) return;
+      setDeletedKeys((previous) => new Set(previous).add(row.key));
+      if (row.item_type === 'conversation') {
+        removeDeletedConversation(row.item_id);
+        emitter.emit('conversation.deleted', row.item_id);
+      }
+    },
+    [scope]
+  );
 
   const handleDelete = React.useCallback(
     (row: ArchivedRow) => {
@@ -344,12 +418,16 @@ const ArchivedSettings: React.FC = () => {
         cancelText: t('common.cancel'),
         okButtonProps: { status: 'danger' },
         onOk: async () => {
+          if (!isConversationListScopeCurrent(scope)) return;
           try {
             await ipcBridge.sidebar.deleteArchivedItem.invoke({ item_type: row.item_type, item_id: row.item_id });
+            if (!isConversationListScopeCurrent(scope)) return;
             reconcileDeletedRow(row);
             await refresh();
+            if (!isConversationListScopeCurrent(scope)) return;
             Message.success(t('settings.archived.deleteSuccess'));
           } catch (error) {
+            if (!isConversationListScopeCurrent(scope)) return;
             console.error('Failed to delete archived item:', error);
             Message.error(t('settings.archived.deleteFailed'));
           }
@@ -359,7 +437,7 @@ const ArchivedSettings: React.FC = () => {
         getPopupContainer: () => document.body,
       });
     },
-    [reconcileDeletedRow, refresh, t]
+    [reconcileDeletedRow, refresh, scope, t]
   );
 
   const handleDeleteSelected = React.useCallback(() => {
@@ -372,6 +450,7 @@ const ArchivedSettings: React.FC = () => {
       cancelText: t('common.cancel'),
       okButtonProps: { status: 'danger' },
       onOk: async () => {
+        if (!isConversationListScopeCurrent(scope)) return;
         try {
           const selectedProjectBlocks = archivedBlocks.filter(
             (block) => block.projectId && block.rows.length > 0 && block.rows.every((row) => selectedKeys.has(row.key))
@@ -392,11 +471,14 @@ const ArchivedSettings: React.FC = () => {
             }),
           ]);
 
+          if (!isConversationListScopeCurrent(scope)) return;
           setSelectedKeys(new Set<string>());
           setSelectionMode(false);
           await refresh();
+          if (!isConversationListScopeCurrent(scope)) return;
           Message.success(t('settings.archived.deleteSelectedSuccess'));
         } catch (error) {
+          if (!isConversationListScopeCurrent(scope)) return;
           console.error('Failed to delete selected archived items:', error);
           Message.error(t('settings.archived.deleteFailed'));
         }
@@ -405,7 +487,7 @@ const ArchivedSettings: React.FC = () => {
       alignCenter: true,
       getPopupContainer: () => document.body,
     });
-  }, [reconcileDeletedRow, refresh, archivedBlocks, selectedKeys, selectedRows, t]);
+  }, [reconcileDeletedRow, refresh, archivedBlocks, scope, selectedKeys, selectedRows, t]);
 
   const formatArchivedTime = React.useCallback(
     (timestamp?: number) => {

@@ -14,6 +14,9 @@ const { navigateMock, requestPrefillMock, routeState } = vi.hoisted(() => ({
   routeState: { id: 'current-conversation' as string | undefined },
 }));
 
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'user-a' }, status: 'authenticated' }),
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => (key === 'cron.status.defaultPrompt' ? 'Create with /cron in AionUi' : key),

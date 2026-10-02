@@ -6,6 +6,8 @@
 
 import { ipcBridge } from '@/common';
 import type { TChatConversation } from '@/common/config/storage';
+import type { OrderItemType } from '@/common/types/sidebar';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { addEventListener, emitter } from '@/renderer/utils/emitter';
 import { mutate } from 'swr';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
@@ -220,6 +222,7 @@ type ConversationListSyncSnapshot = {
   waitingConfirmationConversationIds: Set<string>;
   completionUnreadConversationIds: Set<string>;
   manualUnreadConversationIds: Set<string>;
+  sidebarArchiveStates: ReadonlyMap<string, boolean>;
 };
 
 /**
@@ -233,7 +236,8 @@ const MANUAL_UNREAD_STORAGE_KEY = 'conversation-manual-unread-ids';
 
 const readStoredManualUnread = (): Set<string> => {
   try {
-    const raw = localStorage.getItem(MANUAL_UNREAD_STORAGE_KEY);
+    if (!currentConversationScope.ownerId) return new Set();
+    const raw = localStorage.getItem(`${MANUAL_UNREAD_STORAGE_KEY}:${currentConversationScope.ownerId}`);
     if (!raw) return new Set();
     const arr = JSON.parse(raw) as unknown;
     return new Set(Array.isArray(arr) ? arr.filter((id): id is string => typeof id === 'string') : []);
@@ -244,7 +248,11 @@ const readStoredManualUnread = (): Set<string> => {
 
 const persistManualUnread = () => {
   try {
-    localStorage.setItem(MANUAL_UNREAD_STORAGE_KEY, JSON.stringify([...manualUnreadConversationIdsState]));
+    if (!currentConversationScope.ownerId) return;
+    localStorage.setItem(
+      `${MANUAL_UNREAD_STORAGE_KEY}:${currentConversationScope.ownerId}`,
+      JSON.stringify([...manualUnreadConversationIdsState])
+    );
   } catch {
     // ignore
   }
@@ -262,11 +270,18 @@ let generatingConversationIdsState = new Set<string>();
 let waitingConfirmationIdsByConversationState = new Map<string, Set<string>>();
 let waitingConfirmationConversationIdsState = new Set<string>();
 let completionUnreadConversationIdsState = new Set<string>();
-let manualUnreadConversationIdsState = readStoredManualUnread();
+let manualUnreadConversationIdsState = new Set<string>();
 let completedConversationIdsState = new Set<string>();
 let conversation_idsState = new Set<string>();
 // Tombstones prevent a request started before DELETE from restoring stale rows.
 const deletedConversationIds = new Set<string>();
+// Archives can be reversed; never put them in the permanent deleted-id set.
+let sidebarArchiveStates = new Map<string, boolean>();
+export type ConversationListScope = { readonly ownerId: string | null; readonly epoch: number };
+let currentConversationScope: ConversationListScope = { ownerId: null, epoch: 0 };
+let conversationRequestGeneration = 0;
+let sidebarMutationVersion = 0;
+let refreshedOwnerEpoch = -1;
 // Full id → owning project_id map over ALL loaded conversations (incl. the team
 // member rows filtered out of `conversationsState`). Every row from
 // GET /api/conversations carries project_id, so this lets the route publish the
@@ -282,17 +297,19 @@ let snapshotState: ConversationListSyncSnapshot = {
   waitingConfirmationConversationIds: waitingConfirmationConversationIdsState,
   completionUnreadConversationIds: completionUnreadConversationIdsState,
   manualUnreadConversationIds: manualUnreadConversationIdsState,
+  sidebarArchiveStates,
 };
 
-const emitStoreChange = () => {
+const emitStoreChange = (notify = true) => {
   snapshotState = {
     conversations: conversationsState,
     generatingConversationIds: generatingConversationIdsState,
     waitingConfirmationConversationIds: waitingConfirmationConversationIdsState,
     completionUnreadConversationIds: completionUnreadConversationIdsState,
     manualUnreadConversationIds: manualUnreadConversationIdsState,
+    sidebarArchiveStates,
   };
-  listeners.forEach((listener) => listener());
+  if (notify) listeners.forEach((listener) => listener());
 };
 
 const subscribeConversationListSync = (listener: () => void) => {
@@ -335,49 +352,151 @@ export const getSnapshotConversationName = (conversation_id: string): string | u
   return name ? name : undefined;
 };
 
+/** Capture this identity before asynchronous reads or mutations. */
+export const getConversationListScope = (): ConversationListScope => currentConversationScope;
+export const isConversationListScopeCurrent = (scope: ConversationListScope): boolean =>
+  scope === currentConversationScope;
+export const getSidebarArchiveReadVersion = (): number => sidebarMutationVersion;
+
+/** Accept reversible visibility from a read initiated after the last mutation. */
+export const acknowledgeSidebarArchiveRead = (
+  scope: ConversationListScope,
+  version: number,
+  itemType?: OrderItemType
+): void => {
+  if (!isConversationListScopeCurrent(scope) || version !== sidebarMutationVersion) return;
+  const next = new Map([...sidebarArchiveStates].filter(([key]) => itemType && !key.startsWith(`${itemType}:`)));
+  if (next.size === sidebarArchiveStates.size) return;
+  sidebarArchiveStates = next;
+  emitStoreChange();
+};
+
+const bindConversationListOwner = (ownerId: string | null): void => {
+  if (currentConversationScope.ownerId === ownerId) return;
+  currentConversationScope = { ownerId, epoch: currentConversationScope.epoch + 1 };
+  ++conversationRequestGeneration;
+  ++sidebarMutationVersion;
+  conversationsState = [];
+  generatingConversationIdsState = new Set();
+  waitingConfirmationIdsByConversationState = new Map();
+  waitingConfirmationConversationIdsState = new Set();
+  completionUnreadConversationIdsState = new Set();
+  manualUnreadConversationIdsState = readStoredManualUnread();
+  completedConversationIdsState = new Set();
+  completedTurnIdByConversation.clear();
+  conversation_idsState = new Set();
+  projectIdByIdState = new Map();
+  activeConversationIdState = null;
+  deletedConversationIds.clear();
+  sidebarArchiveStates = new Map();
+  // Every auth subscriber reads the empty snapshot during this same render.
+  // Notify other subscribers after commit to avoid a cross-component render update.
+  emitStoreChange(false);
+};
+
+/** Bind the singleton snapshot to the current authenticated account. */
+export const useConversationListScope = (): ConversationListScope => {
+  const { user, status } = useAuth();
+  const ownerId = status === 'authenticated' ? (user?.id ?? (window.electronAPI ? 'system_default_user' : null)) : null;
+  bindConversationListOwner(ownerId);
+  const scope = currentConversationScope;
+  useEffect(() => {
+    emitStoreChange();
+    if (isStoreInitialized && refreshedOwnerEpoch !== scope.epoch) refreshConversations();
+  }, [scope]);
+  return scope;
+};
+
 const refreshConversations = () => {
+  const scope = currentConversationScope;
+  refreshedOwnerEpoch = scope.epoch;
+  if (!scope.ownerId) return;
+  const generation = ++conversationRequestGeneration;
+  const version = sidebarMutationVersion;
   void ipcBridge.database.getUserConversations
     .invoke({ limit: 10000 })
     .then((result) => {
+      if (!isConversationListScopeCurrent(scope) || generation !== conversationRequestGeneration) return;
       const items = result?.items;
-      if (items && Array.isArray(items)) {
-        const visibleItems = items.filter((conv) => !deletedConversationIds.has(conv.id));
-        const filteredData = visibleItems.filter((conv) => {
-          // Legacy rows from the pre-provider-probe health check flow are hidden
-          // from normal history. New health checks must not create conversations.
-          const extra = conv.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
-          return extra?.is_health_check !== true && !extra?.team_id && !extra?.teamId;
-        });
-        conversationsState = filteredData;
-        // Use ALL conversation IDs (including team/legacy health-check rows) so the
-        // responseStream listener recognises them as known and doesn't
-        // trigger an infinite refreshConversations loop.
-        conversation_idsState = new Set(visibleItems.map((conversation) => conversation.id));
-        // Map ALL rows (unfiltered) so a team member conversation's project_id is
-        // resolvable too — the team route looks up its leader conversation here.
-        projectIdByIdState = new Map(
-          visibleItems.map((conversation) => [conversation.id, conversation.project_id ?? null])
-        );
-        emitStoreChange();
-        return;
-      }
-
-      conversationsState = [];
-      conversation_idsState = new Set();
-      projectIdByIdState = new Map();
+      if (!items || !Array.isArray(items)) return;
+      const visibleItems = items.filter((conv) => !deletedConversationIds.has(conv.id));
+      conversationsState = visibleItems.filter((conv) => {
+        const extra = conv.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
+        return extra?.is_health_check !== true && !extra?.team_id && !extra?.teamId;
+      });
+      conversation_idsState = new Set(visibleItems.map((conversation) => conversation.id));
+      projectIdByIdState = new Map(
+        visibleItems.map((conversation) => [conversation.id, conversation.project_id ?? null])
+      );
+      acknowledgeSidebarArchiveRead(scope, version, 'conversation');
       emitStoreChange();
     })
     .catch((error) => {
+      if (!isConversationListScopeCurrent(scope) || generation !== conversationRequestGeneration) return;
       console.error('[WorkspaceGroupedHistory] Failed to load conversations:', error);
-      conversationsState = [];
-      conversation_idsState = new Set();
-      projectIdByIdState = new Map();
-      emitStoreChange();
     });
 };
 
+/** Subscribe to confirmed archive/restore state without starting another list fetch. */
+export const useSidebarArchiveState = (): ReadonlyMap<string, boolean> => {
+  useConversationListScope();
+  return useSyncExternalStore(
+    subscribeConversationListSync,
+    getConversationListSyncSnapshot,
+    getConversationListSyncSnapshot
+  ).sidebarArchiveStates;
+};
+
+/** Apply a successful archive/restore before background revalidation. */
+export const reconcileSidebarArchive = ({
+  scope,
+  item_type,
+  item_id,
+  archived,
+  conversation,
+  memberConversationIds = [],
+}: {
+  scope: ConversationListScope;
+  item_type: OrderItemType;
+  item_id: string;
+  archived: boolean;
+  conversation?: TChatConversation;
+  memberConversationIds?: string[];
+}): void => {
+  if (!isConversationListScopeCurrent(scope) || (item_type === 'conversation' && deletedConversationIds.has(item_id)))
+    return;
+  ++conversationRequestGeneration;
+  ++sidebarMutationVersion;
+  sidebarArchiveStates = new Map(sidebarArchiveStates).set(`${item_type}:${item_id}`, archived);
+  const ids = item_type === 'conversation' ? [item_id] : memberConversationIds;
+  for (const id of ids) {
+    if (deletedConversationIds.has(id)) continue;
+    sidebarArchiveStates.set(`conversation:${id}`, archived);
+    if (archived) {
+      conversationsState = conversationsState.filter((row) => row.id !== id);
+      clearGenerating(id, 'archived');
+      clearAllWaitingConfirmation(id);
+    } else if (conversation?.id === id) {
+      const restored = {
+        ...conversation,
+        extra: { ...conversation.extra, pinned: false, pinned_at: undefined },
+      } as TChatConversation;
+      const extra = restored.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
+      if (!extra?.is_health_check && !extra?.team_id && !extra?.teamId) {
+        conversationsState = [...conversationsState.filter((item) => item.id !== id), restored];
+      }
+      conversation_idsState = new Set(conversation_idsState).add(id);
+      projectIdByIdState = new Map(projectIdByIdState).set(id, restored.project_id ?? null);
+    }
+  }
+  emitStoreChange();
+  // Account-keyed caches are revalidated; their owner never changes mid-read.
+  void mutate(['sidebar-archived', scope.ownerId]).catch(() => {});
+  if (item_type === 'team') void mutate(`teams/${scope.ownerId}`).catch(() => {});
+};
+
 /** Source of a generating-state transition, logged for field diagnosis. */
-type GeneratingTransitionSource = 'stream' | 'reconcile' | 'terminal' | 'turnCompleted' | 'deleted';
+type GeneratingTransitionSource = 'stream' | 'reconcile' | 'terminal' | 'turnCompleted' | 'deleted' | 'archived';
 
 const logGeneratingTransition = (conversation_id: string, next: boolean, source: GeneratingTransitionSource) => {
   void ipcBridge.application.writeRendererLog
@@ -394,7 +513,11 @@ const logGeneratingTransition = (conversation_id: string, next: boolean, source:
 };
 
 const markGenerating = (conversation_id: string, source: GeneratingTransitionSource = 'stream') => {
-  if (deletedConversationIds.has(conversation_id)) return;
+  if (
+    deletedConversationIds.has(conversation_id) ||
+    sidebarArchiveStates.get(`conversation:${conversation_id}`) === true
+  )
+    return;
   if (generatingConversationIdsState.has(conversation_id)) {
     return;
   }
@@ -476,7 +599,11 @@ const applyWaitingConfirmation = (conversation_id: string, transition: WaitingCo
 };
 
 const markWaitingConfirmation = (conversation_id: string, confirmationId: string) => {
-  if (deletedConversationIds.has(conversation_id)) return;
+  if (
+    deletedConversationIds.has(conversation_id) ||
+    sidebarArchiveStates.get(`conversation:${conversation_id}`) === true
+  )
+    return;
   applyWaitingConfirmation(conversation_id, { kind: 'mark', confirmationId });
 };
 
@@ -632,7 +759,11 @@ const initializeConversationListSyncStore = () => {
   });
   ipcBridge.conversation.responseStream.on((message) => {
     const conversation_id = message.conversation_id;
-    if (!conversation_id || deletedConversationIds.has(conversation_id)) {
+    if (
+      !conversation_id ||
+      deletedConversationIds.has(conversation_id) ||
+      sidebarArchiveStates.get(`conversation:${conversation_id}`) === true
+    ) {
       return;
     }
 
@@ -679,7 +810,11 @@ const initializeConversationListSyncStore = () => {
     }
   });
   ipcBridge.conversation.turnCompleted.on((event) => {
-    if (deletedConversationIds.has(event.session_id)) return;
+    if (
+      deletedConversationIds.has(event.session_id) ||
+      sidebarArchiveStates.get(`conversation:${event.session_id}`) === true
+    )
+      return;
     if (isTerminalTurnState(event.state) && activeConversationIdState !== event.session_id) {
       markCompletionUnread(event.session_id);
     }
@@ -690,6 +825,7 @@ const initializeConversationListSyncStore = () => {
 };
 
 export const useConversationListSync = () => {
+  useConversationListScope();
   useEffect(() => {
     initializeConversationListSyncStore();
   }, []);

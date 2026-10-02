@@ -7,6 +7,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'user-a' }, status: 'authenticated' }),
+}));
 vi.mock('@/renderer/utils/emitter', () => ({
   addEventListener: vi.fn(),
 }));
@@ -30,7 +33,7 @@ vi.mock('@/common', () => ({
 
 import { useConversationListSync } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 
-const STORAGE_KEY = 'conversation-manual-unread-ids';
+const STORAGE_KEY = 'conversation-manual-unread-ids:user-a';
 
 describe('useConversationListSync manual unread persistence', () => {
   beforeEach(() => {

@@ -10,10 +10,13 @@ import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { getMock, itemsMock, deleteMock } = vi.hoisted(() => ({
+const { getMock, itemsMock, deleteMock, restoreMock, emitMock, account } = vi.hoisted(() => ({
   getMock: vi.fn(),
   itemsMock: vi.fn(),
   deleteMock: vi.fn(),
+  restoreMock: vi.fn(),
+  emitMock: vi.fn(),
+  account: { id: 'user-a' as string | null },
 }));
 
 // The component reads `ipcBridge` from `@/common`. Only the sidebar surface is
@@ -23,7 +26,7 @@ vi.mock('@/common', () => ({
     sidebar: {
       get: { invoke: getMock },
       items: { invoke: itemsMock },
-      unarchive: { invoke: vi.fn(() => Promise.resolve()) },
+      unarchive: { invoke: restoreMock },
       deleteArchivedItem: { invoke: deleteMock },
       deleteArchivedProject: { invoke: vi.fn(() => Promise.resolve()) },
     },
@@ -42,7 +45,13 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/renderer/utils/model/agentLogo', () => ({ useAgentLogos: () => ({}) }));
 
-vi.mock('@/renderer/utils/emitter', () => ({ emitter: { emit: vi.fn() } }));
+vi.mock('@/renderer/utils/emitter', () => ({ emitter: { emit: emitMock } }));
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({
+    user: account.id ? { id: account.id } : null,
+    status: account.id ? 'authenticated' : 'unauthenticated',
+  }),
+}));
 
 vi.mock('@/renderer/pages/conversation/utils/conversationAssistantIdentity', () => ({
   resolveConversationLeadingMark: () => ({ kind: 'assistant_fallback' as const }),
@@ -95,6 +104,9 @@ describe('ArchivedSettings paging', () => {
   beforeEach(() => {
     vi.spyOn(Message, 'success').mockImplementation(vi.fn());
     vi.spyOn(Message, 'error').mockImplementation(vi.fn());
+    account.id = 'user-a';
+    emitMock.mockClear();
+    restoreMock.mockReset().mockResolvedValue(undefined);
     getMock.mockReset();
     itemsMock.mockReset();
     deleteMock.mockReset();
@@ -221,5 +233,188 @@ describe('ArchivedSettings paging', () => {
     });
     expect(screen.getByText('Still present')).toBeTruthy();
     expect(getMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('ignores a pending old-account delete after login changes (batch: %s)', async (batch) => {
+    getMock.mockResolvedValueOnce({
+      groups: [
+        projectGroup(
+          'owner-project',
+          'Owner project',
+          [conv('old-owner-delete', 'Old owner title'), conv('kept', 'Keep')],
+          false
+        ),
+      ],
+    });
+    let finish!: () => void;
+    deleteMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      })
+    );
+    const modal = vi.spyOn(Modal, 'confirm').mockReturnValue({ close: vi.fn(), update: vi.fn() });
+    const view = renderPage();
+    await screen.findByText('Old owner title');
+    if (batch) {
+      fireEvent.click(screen.getByRole('button', { name: 'settings.archived.multiSelect' }));
+      fireEvent.click(screen.getByText('Old owner title'));
+      fireEvent.click(screen.getByRole('button', { name: 'settings.archived.deleteSelected' }));
+    } else {
+      fireEvent.click(screen.getAllByRole('button', { name: 'settings.archived.delete' })[0]);
+    }
+    let pending!: Promise<void>;
+    act(() => {
+      pending = modal.mock.calls[0][0].onOk!() as Promise<void>;
+    });
+    getMock.mockResolvedValueOnce({ groups: [] });
+    account.id = 'user-b';
+    view.rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <ArchivedSettings />
+      </SWRConfig>
+    );
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      finish();
+      await pending;
+    });
+    expect(screen.queryByText('Old owner title')).toBeNull();
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(Message.success).not.toHaveBeenCalled();
+    expect(Message.error).not.toHaveBeenCalled();
+    expect(getMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('ArchivedSettings immediate restore', () => {
+  beforeEach(() => {
+    account.id = 'user-a';
+    getMock.mockReset();
+    itemsMock.mockReset();
+    restoreMock.mockReset().mockResolvedValue(undefined);
+    emitMock.mockClear();
+    vi.spyOn(Message, 'success').mockImplementation(vi.fn());
+    vi.spyOn(Message, 'error').mockImplementation(vi.fn());
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('hides the restored row and refreshes active history before archived revalidation finishes', async () => {
+    const stale = {
+      groups: [
+        projectGroup(
+          'P-restore',
+          'Restore',
+          [conv('restore-now', 'Restore now'), conv('restore-kept', 'Keep archived')],
+          false
+        ),
+      ],
+      has_more_groups: false,
+    };
+    getMock.mockResolvedValueOnce(stale);
+    renderPage();
+    await screen.findByText('Restore now');
+    let finish!: (value: unknown) => void;
+    getMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'settings.archived.restore' })[0]);
+    await waitFor(() => expect(screen.queryByText('Restore now')).toBeNull());
+    expect(screen.getByText('Keep archived')).toBeTruthy();
+    expect(emitMock).toHaveBeenCalledWith('chat.history.refresh');
+    await act(async () =>
+      finish({
+        groups: [projectGroup('P-restore', 'Restore', [conv('restore-kept', 'Keep archived')], false)],
+        has_more_groups: false,
+      })
+    );
+    expect(screen.queryByText('Restore now')).toBeNull();
+  });
+
+  it('keeps the row and reports failure when the restore mutation is rejected', async () => {
+    getMock.mockResolvedValue({
+      groups: [projectGroup('P-failed', 'Failed', [conv('restore-failed', 'Failed restore')], false)],
+    });
+    restoreMock.mockRejectedValue(new Error('mutation failed'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.archived.restore' }));
+    await waitFor(() => expect(Message.error).toHaveBeenCalledWith('settings.archived.restoreFailed'));
+    expect(screen.getByText('Failed restore')).toBeTruthy();
+    expect(emitMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a confirmed restore when background revalidation fails', async () => {
+    getMock.mockResolvedValueOnce({
+      groups: [projectGroup('P-outage', 'Outage', [conv('restore-outage', 'Restore during outage')], false)],
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderPage();
+    await screen.findByText('Restore during outage');
+    getMock.mockRejectedValueOnce(new Error('refresh failed'));
+    fireEvent.click(screen.getByRole('button', { name: 'settings.archived.restore' }));
+    await waitFor(() => expect(screen.queryByText('Restore during outage')).toBeNull());
+    expect(Message.success).toHaveBeenCalledWith('settings.archived.restoreSuccess');
+    expect(Message.error).not.toHaveBeenCalled();
+  });
+
+  it('discards an older load-more window after a restore invalidates its cursor', async () => {
+    const initial = {
+      groups: [
+        projectGroup(
+          'P-late',
+          'Late',
+          [conv('restore-late', 'Restore first'), conv('restore-remains', 'Remains archived')],
+          true,
+          'old-cursor'
+        ),
+      ],
+    };
+    getMock.mockResolvedValue(initial);
+    let finishPage!: (value: unknown) => void;
+    itemsMock.mockReturnValue(
+      new Promise((resolve) => {
+        finishPage = resolve;
+      })
+    );
+    renderPage();
+    fireEvent.click(await screen.findByText('settings.archived.loadMore'));
+    getMock.mockResolvedValue({
+      groups: [projectGroup('P-late', 'Late', [conv('restore-remains', 'Remains archived')], false)],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'settings.archived.restore' })[0]);
+    await waitFor(() => expect(screen.queryByText('Restore first')).toBeNull());
+    await act(async () => finishPage({ items: [conv('old-page', 'Stale paged title')], has_more: false }));
+    expect(screen.queryByText('Stale paged title')).toBeNull();
+    expect(screen.getByText('Remains archived')).toBeTruthy();
+  });
+
+  it('does not show the previous account cached page or apply its pending restore after account change', async () => {
+    getMock.mockResolvedValueOnce({
+      groups: [projectGroup('P-private', 'Private', [conv('private-account-a', 'Private account A title')], false)],
+    });
+    let finishRestore!: () => void;
+    restoreMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishRestore = resolve;
+      })
+    );
+    const view = renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.archived.restore' }));
+    getMock.mockReturnValueOnce(new Promise(() => {}));
+    account.id = 'user-b';
+    view.rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <ArchivedSettings />
+      </SWRConfig>
+    );
+    expect(screen.queryByText('Private account A title')).toBeNull();
+    await act(async () => finishRestore());
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(Message.success).not.toHaveBeenCalled();
   });
 });
