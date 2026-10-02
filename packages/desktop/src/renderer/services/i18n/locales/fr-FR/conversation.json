@@ -833,5 +833,17 @@
   "entryRuntime": {
     "preparing": "Préparation de la conversation…",
     "failed": "Impossible de se connecter à la conversation. Votre brouillon est conservé. Réessayez."
+  },
+  "secureSecrets": {
+    "title": "Secure credentials",
+    "description": "Enter your credential here. It is encrypted on the server and never sent to the AI or saved in chat. General secrets are stored as opaque references; only the GitHub adapter can currently use a token. After saving, continue the conversation.",
+    "name": "Credential name",
+    "value": "Secret value",
+    "saved": "Credential saved securely. You can continue the conversation.",
+    "error": "The credential could not be saved. Check your session and try again.",
+    "revoke": "Revoke",
+    "service": "Secret use",
+    "generic": "Encrypted storage",
+    "github": "GitHub account verification"
   }
 }

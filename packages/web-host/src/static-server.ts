@@ -20,6 +20,7 @@ export type StaticServerOptions = {
   backendPort: number;
   port?: number;
   allowRemote?: boolean;
+  platformApiPort?: number;
 };
 
 export type StaticServerHandle = {
@@ -162,6 +163,12 @@ function peekWsRoute(buf: Buffer): boolean | null {
 export async function startStaticServer(opts: StaticServerOptions): Promise<StaticServerHandle> {
   const port = opts.port ?? DEFAULT_PORT;
   const allowRemote = opts.allowRemote === true;
+  if (
+    opts.platformApiPort !== undefined &&
+    (!Number.isInteger(opts.platformApiPort) || opts.platformApiPort < 1 || opts.platformApiPort > 65535 || allowRemote)
+  ) {
+    throw new Error('Platform API proxy requires a valid loopback port and local-only host');
+  }
   const host = allowRemote ? '0.0.0.0' : '127.0.0.1';
 
   // The HTTP server listens only on loopback — user traffic hits the outer
@@ -180,6 +187,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
 
+      // A trusted local platform sidecar owns credential values; Core sees metadata only.
+      if (opts.platformApiPort && req.url.startsWith('/api/platform/secrets/')) {
+        forwardToBackend(req, res, opts.platformApiPort);
+        return;
+      }
       // /api/* — reverse proxy to backend (includes /api/auth/*).
       // /login and /logout are aionui-auth's top-level auth endpoints: proxy them too
       // so WebUI browser clients reach the backend without a path-rewrite.

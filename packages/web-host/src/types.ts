@@ -35,6 +35,7 @@ export type WebHostOptions = {
   staticDir: string;
   port?: number;
   allowRemote?: boolean;
+  platformApiPort?: number;
   dataDir?: string;
   logDir?: string;
   dirs?: BackendSystemDirs;

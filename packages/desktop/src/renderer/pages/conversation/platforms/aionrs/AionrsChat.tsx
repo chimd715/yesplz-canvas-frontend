@@ -25,6 +25,7 @@ import HOC from '@renderer/utils/ui/HOC';
 import React, { useMemo } from 'react';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 import AionrsSendBox from './AionrsSendBox';
+import SecureSecrets from './SecureSecrets';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 
 const AionrsChat: React.FC<{
@@ -92,6 +93,7 @@ const AionrsChat: React.FC<{
             <MessageList className='flex-1' emptySlot={emptySlot} />
           </FlexFullContainer>
           <ConversationPlanBar conversation_id={conversation_id} />
+          <SecureSecrets key={conversation_id} conversationId={conversation_id} />
           <AionrsSendBox
             conversation_id={conversation_id}
             modelSelection={modelSelection}

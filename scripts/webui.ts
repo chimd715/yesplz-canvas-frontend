@@ -224,6 +224,7 @@ async function main(): Promise<void> {
   console.log(`[webui] launching  : port=${port} allowRemote=${allowRemote}`);
 
   const handle = await startWebHost({
+    platformApiPort: process.env.AIONUI_PLATFORM_API_PORT ? Number(process.env.AIONUI_PLATFORM_API_PORT) : undefined,
     app: {
       version: '0.0.0',
       isPackaged: false,
