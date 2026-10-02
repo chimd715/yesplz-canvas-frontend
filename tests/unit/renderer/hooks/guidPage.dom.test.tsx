@@ -124,6 +124,7 @@ const {
   },
   navigateMock: vi.fn(),
 }));
+const platform = vi.hoisted(() => ({ desktop: false }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -230,6 +231,7 @@ vi.mock('@/renderer/hooks/system/useSpeechInput', () => ({
 }));
 
 vi.mock('@/renderer/utils/platform', () => ({
+  isElectronDesktop: () => platform.desktop,
   openExternalUrl: vi.fn(),
   resolveExtensionAssetUrl: vi.fn(),
   resolveBackendAssetUrl: vi.fn((path: string) => path),
@@ -316,6 +318,7 @@ describe('GuidPage', () => {
   });
 
   beforeEach(() => {
+    platform.desktop = false;
     locationMock.state = null;
     locationMock.key = 'guid-location';
     navigateMock.mockReset();
@@ -447,14 +450,11 @@ describe('GuidPage', () => {
     expect(screen.queryByLabelText('common.back')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Assistant Details')).not.toBeInTheDocument();
     expect(screen.getByText('conversation.welcome.title')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-selection-area')).toBeInTheDocument();
-    const latestAssistantSelectionAreaProps = capturedAssistantSelectionAreaProps.at(-1);
+    expect(screen.queryByTestId('assistant-selection-area')).not.toBeInTheDocument();
     const latestGuidActionRowProps = capturedGuidActionRowProps.at(-1);
     const latestGuidInputCardProps = capturedGuidInputCardProps.at(-1);
 
-    expect(capturedAssistantSelectionAreaProps.length).toBeGreaterThan(0);
-    expect(latestAssistantSelectionAreaProps).not.toHaveProperty('is_presetAgent');
-    expect(latestAssistantSelectionAreaProps).not.toHaveProperty('selectedAgentInfo');
+    expect(capturedAssistantSelectionAreaProps).toHaveLength(0);
     expect(capturedGuidActionRowProps.length).toBeGreaterThan(0);
     expect(latestGuidActionRowProps).not.toHaveProperty('hidePresetTag');
     expect(latestGuidActionRowProps).not.toHaveProperty('is_presetAgent');
@@ -465,6 +465,38 @@ describe('GuidPage', () => {
     expect(latestGuidInputCardProps).not.toHaveProperty('mentionOpen');
     expect(latestGuidInputCardProps).not.toHaveProperty('mentionSelectorBadge');
     expect(latestGuidInputCardProps).not.toHaveProperty('mentionDropdown');
+  });
+
+  it('uses the customer selection policy and keeps managed model/send controls without developer tabs', () => {
+    render(<GuidPage />);
+    expect(useGuidAssistantSelectionMock).toHaveBeenCalledWith(expect.objectContaining({ customerHome: true }));
+    expect(screen.queryByTestId('assistant-selection-area')).not.toBeInTheDocument();
+    expect(capturedGuidActionRowProps.at(-1)?.modeBackend).toBe('aionrs');
+    expect(capturedGuidSendDeps.at(-1)).toMatchObject({
+      selectedAssistantId: 'bare-aionrs',
+      selectedAssistantBackend: 'aionrs',
+    });
+  });
+
+  it('omits the complete assistant/More selector even when customer templates exist', () => {
+    const native = agentSelectionMock.assistants[0];
+    const template = { ...native, id: 'customer-template', source: 'builtin', name: 'Report builder' };
+    agentSelectionMock.assistants = [
+      native,
+      ...Array.from({ length: 6 }, (_, index) => ({ ...template, id: `customer-template-${index}` })),
+      { ...template, id: 'disabled-template', enabled: false },
+    ];
+    render(<GuidPage />);
+    expect(screen.queryByTestId('assistant-selection-area')).not.toBeInTheDocument();
+    expect(capturedAssistantSelectionAreaProps).toHaveLength(0);
+  });
+
+  it('preserves desktop runtime tabs and desktop assistant selection behavior', () => {
+    platform.desktop = true;
+    render(<GuidPage />);
+    expect(useGuidAssistantSelectionMock).toHaveBeenCalledWith(expect.objectContaining({ customerHome: false }));
+    expect(screen.getByTestId('assistant-selection-area')).toBeInTheDocument();
+    expect(capturedAssistantSelectionAreaProps.at(-1)?.assistants).toEqual(agentSelectionMock.assistants);
   });
 
   it('ignores legacy selectedAgentKey navigation state when preselecting an assistant', () => {

@@ -159,6 +159,63 @@ describe('useGuidAssistantSelection', () => {
     expect(configSetMock).toHaveBeenCalledWith('guid.lastAssistantId', 'assistant-claude');
   });
 
+  it.each([false, true])('ignores a persisted CLI on browser home, including reset=%s', async (resetAssistant) => {
+    mockAssistants = [
+      assistantFixture({ id: 'bare-claude', runtimeKey: 'claude', source: 'generated', sortOrder: 1 }),
+      assistantFixture({ id: 'bare-aionrs', runtimeKey: 'aionrs', source: 'generated', sortOrder: 2 }),
+    ];
+    configGetMock.mockReturnValue('bare-claude');
+    const { result } = renderHook(() => useGuidAssistantSelection({ resetAssistant, customerHome: true }));
+    await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare-aionrs'));
+    expect(result.current.selectedAssistantBackend).toBe('aionrs');
+    expect(result.current.assistants.map((assistant) => assistant.id)).toEqual(['bare-aionrs']);
+  });
+
+  it('rejects generated CLI navigation and manual selections on browser home', async () => {
+    mockAssistants = [
+      assistantFixture({ id: 'bare-codex', runtimeKey: 'codex', source: 'generated', sortOrder: 1 }),
+      assistantFixture({ id: 'bare-aionrs', runtimeKey: 'aionrs', source: 'generated', sortOrder: 2 }),
+    ];
+    const { result } = renderHook(() =>
+      useGuidAssistantSelection({ customerHome: true, preselectAssistantId: 'bare-codex' })
+    );
+    await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare-aionrs'));
+    act(() => result.current.setSelectedAssistantId('bare-codex'));
+    expect(result.current.selectedAssistantBackend).toBe('aionrs');
+    expect(configSetMock).not.toHaveBeenCalledWith('guid.lastAssistantId', 'bare-codex');
+  });
+
+  it('does not silently create a CLI fallback when the native managed assistant is unavailable', async () => {
+    mockAssistants = [
+      assistantFixture({ id: 'bare-claude', runtimeKey: 'claude', source: 'generated', sortOrder: 1 }),
+      {
+        ...assistantFixture({ id: 'bare-aionrs', runtimeKey: 'aionrs', source: 'generated', sortOrder: 2 }),
+        enabled: false,
+      },
+    ];
+    configGetMock.mockReturnValue('bare-claude');
+    const { result } = renderHook(() => useGuidAssistantSelection({ customerHome: true }));
+    expect(result.current.selectedAssistantId).toBeNull();
+    expect(result.current.selectedAssistantBackend).toBe('');
+    expect(result.current.defaultAssistantId).toBeNull();
+  });
+
+  it('keeps explicit routed native customer templates while ignoring old CLI preferences', async () => {
+    mockAssistants = [
+      assistantFixture({ id: 'bare-aionrs', runtimeKey: 'aionrs', source: 'generated', sortOrder: 1 }),
+      assistantFixture({ id: 'report-template', runtimeKey: 'aionrs', source: 'builtin', sortOrder: 2 }),
+      assistantFixture({ id: 'claude-template', runtimeKey: 'claude', source: 'builtin', sortOrder: 3 }),
+    ];
+    configGetMock.mockReturnValue('claude-template');
+    const { result } = renderHook(() =>
+      useGuidAssistantSelection({ customerHome: true, preselectAssistantId: 'report-template' })
+    );
+    await waitFor(() => expect(result.current.selectedAssistantId).toBe('report-template'));
+    expect(result.current.selectedAssistantId).toBe('report-template');
+    expect(result.current.selectedAssistantBackend).toBe('aionrs');
+    expect(result.current.assistants.map((assistant) => assistant.id)).toEqual(['bare-aionrs', 'report-template']);
+  });
+
   it('falls back to the default assistant when the persisted guid assistant no longer exists', async () => {
     mockAssistants = [
       assistantFixture({ id: 'bare-aionrs', runtimeKey: 'aionrs', source: 'generated', sortOrder: 1 }),

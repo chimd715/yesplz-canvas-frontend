@@ -14,7 +14,7 @@ import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
 import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { getFuzzyMatchIndices, useSlashCommandController } from '@/renderer/hooks/chat/useSlashCommandController';
-import { openExternalUrl } from '@/renderer/utils/platform';
+import { isElectronDesktop, openExternalUrl } from '@/renderer/utils/platform';
 import SlashCommandMenu, { type SlashCommandMenuItem } from '@/renderer/components/chat/SlashCommandMenu';
 import AssistantSelectionArea from './components/AssistantSelectionArea';
 import GuidActionRow from './components/GuidActionRow';
@@ -57,6 +57,7 @@ const GuidPage: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const customerHome = !isElectronDesktop();
   const guidContainerRef = useRef<HTMLDivElement>(null);
   const { activeBorderColor, inactiveBorderColor, activeShadow } = useInputFocusRing();
 
@@ -142,6 +143,7 @@ const GuidPage: React.FC = () => {
     resetAssistant: resetAssistantRequested,
     preselectAssistantId,
     locationKey: location.key,
+    customerHome,
   });
 
   const guidInput = useGuidInput({
@@ -690,12 +692,14 @@ const GuidPage: React.FC = () => {
             <p className='text-2xl font-semibold mb-0 text-t-primary text-center'>{t('conversation.welcome.title')}</p>
           </div>
 
-          <AssistantSelectionArea
-            selectedAssistantId={agentSelection.selectedAssistantId}
-            assistants={agentSelection.assistants}
-            localeKey={localeKey}
-            onSelectAssistant={handleSelectAssistant}
-          />
+          {!customerHome && (
+            <AssistantSelectionArea
+              selectedAssistantId={agentSelection.selectedAssistantId}
+              assistants={agentSelection.assistants}
+              localeKey={localeKey}
+              onSelectAssistant={handleSelectAssistant}
+            />
+          )}
 
           <GuidInputCard
             focusRequestKey={navState?.focusPrefill && navState.prefillPrompt ? location.key : undefined}

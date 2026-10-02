@@ -114,18 +114,33 @@ type UseGuidAssistantSelectionOptions = {
   resetAssistant?: boolean;
   preselectAssistantId?: string;
   locationKey?: string;
+  customerHome?: boolean;
 };
 
 export const useGuidAssistantSelection = ({
   resetAssistant,
   preselectAssistantId,
   locationKey,
+  customerHome = false,
 }: UseGuidAssistantSelectionOptions): GuidAssistantSelectionResult => {
   const [selectedAssistantIdState, _setSelectedAssistantId] = useState<string | null>(null);
   const [selectedMode, _setSelectedMode] = useState<string>('default');
   const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
   const [selectedThoughtLevelValue, _setSelectedThoughtLevelValue] = useState<string>('');
-  const { assistants } = useCustomAgentsLoader();
+  const { assistants: catalogAssistants } = useCustomAgentsLoader();
+  const assistants = useMemo(
+    () =>
+      customerHome
+        ? catalogAssistants.filter((assistant) => assistant.enabled !== false && isAionrsAssistant(assistant))
+        : catalogAssistants,
+    [catalogAssistants, customerHome]
+  );
+  const defaultAssistantId = useMemo(() => pickDefaultAssistantSelectionKey(assistants), [assistants]);
+  // Only customer-eligible catalog rows can restore a persisted browser selection.
+  const initialAssistantId = useCallback(
+    () => readPersistedGuidAssistantSelectionKey(assistants) ?? defaultAssistantId,
+    [assistants, defaultAssistantId]
+  );
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
 
   const setSelectedMode = useCallback(
@@ -161,10 +176,12 @@ export const useGuidAssistantSelection = ({
   const setSelectedAssistantId = useCallback(
     (assistantId: string) => {
       const normalizedId = resolveAssistantSelectionKey(assistantId, assistants) ?? assistantId;
+      if (customerHome && !assistants.some((assistant) => assistant.id === normalizedId && assistant.enabled !== false))
+        return;
       _setSelectedAssistantId(normalizedId);
       persistGuidAssistantSelectionKey(normalizedId);
     },
-    [assistants]
+    [assistants, customerHome]
   );
 
   const resetHandledRef = useRef(false);
@@ -189,22 +206,18 @@ export const useGuidAssistantSelection = ({
 
     if (resetAssistant) {
       resetHandledRef.current = true;
-      const fallbackId =
-        readPersistedGuidAssistantSelectionKey(assistants) ?? pickDefaultAssistantSelectionKey(assistants);
-      _setSelectedAssistantId(fallbackId);
+      _setSelectedAssistantId(initialAssistantId());
     }
-  }, [assistants, preselectAssistantId, resetAssistant]);
+  }, [assistants, preselectAssistantId, resetAssistant, initialAssistantId]);
 
   useEffect(() => {
     if (assistants.length === 0) return;
     if (resetAssistant) return;
     if (preselectAssistantId && resolveAssistantSelectionKey(preselectAssistantId, assistants)) return;
     if (!selectedAssistantIdState || !assistants.some((assistant) => assistant.id === selectedAssistantIdState)) {
-      _setSelectedAssistantId(
-        readPersistedGuidAssistantSelectionKey(assistants) ?? pickDefaultAssistantSelectionKey(assistants)
-      );
+      _setSelectedAssistantId(initialAssistantId());
     }
-  }, [assistants, preselectAssistantId, resetAssistant, selectedAssistantIdState]);
+  }, [assistants, preselectAssistantId, resetAssistant, selectedAssistantIdState, initialAssistantId]);
 
   const selectedAssistant = useMemo(
     () =>
@@ -330,8 +343,6 @@ export const useGuidAssistantSelection = ({
 
     return buildAssistantModelInfo(selectedAssistantModels);
   }, [selectedAssistantModels, selectedAgentRuntimeModelInfo]);
-
-  const defaultAssistantId = useMemo(() => pickDefaultAssistantSelectionKey(assistants), [assistants]);
 
   return {
     selectedAssistantId,
