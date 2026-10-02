@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "ファイルを追加",
   "fileAttach.myDevice": "マイデバイス",
   "fileAttach.failed": "アップロードに失敗しました",
+  "fileAttach.tooLarge": "添付ファイルはそれぞれ 25 MB 以下にしてください。",
   "fileAttach.uploading": "アップロード中...",
   "fileAttach.uploadSuccess": "アップロード成功",
   "fileAttach.cancelUpload": "アップロードをキャンセル",

@@ -184,6 +184,7 @@
   "fileAttach.addFiles": "Добавить файлы",
   "fileAttach.myDevice": "Моё устройство",
   "fileAttach.failed": "Ошибка загрузки",
+  "fileAttach.tooLarge": "Размер каждого вложения не должен превышать 25 МБ.",
   "fileAttach.uploading": "Загрузка...",
   "fileAttach.uploadSuccess": "Загружено успешно",
   "fileAttach.cancelUpload": "Отменить загрузку",

@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "파일 추가",
   "fileAttach.myDevice": "내 기기",
   "fileAttach.failed": "업로드 실패",
+  "fileAttach.tooLarge": "첨부 파일은 각각 25 MB 이하여야 합니다.",
   "fileAttach.uploading": "업로드 중...",
   "fileAttach.uploadSuccess": "업로드 성공",
   "fileAttach.cancelUpload": "업로드 취소",

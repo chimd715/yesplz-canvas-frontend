@@ -182,6 +182,7 @@
   "fileAttach.addFiles": "Dateien hinzufügen",
   "fileAttach.myDevice": "Mein Gerät",
   "fileAttach.failed": "Hochladen fehlgeschlagen",
+  "fileAttach.tooLarge": "Jeder Anhang darf höchstens 25 MB groß sein.",
   "fileAttach.uploading": "Wird hochgeladen...",
   "fileAttach.uploadSuccess": "Erfolgreich hochgeladen",
   "fileAttach.cancelUpload": "Upload abbrechen",

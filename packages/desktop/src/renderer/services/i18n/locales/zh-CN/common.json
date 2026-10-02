@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "添加文件",
   "fileAttach.myDevice": "从设备上传",
   "fileAttach.failed": "上传失败",
+  "fileAttach.tooLarge": "每个附件不能超过 25 MB。",
   "fileAttach.uploading": "上传中...",
   "fileAttach.uploadSuccess": "上传成功",
   "fileAttach.cancelUpload": "取消上传",

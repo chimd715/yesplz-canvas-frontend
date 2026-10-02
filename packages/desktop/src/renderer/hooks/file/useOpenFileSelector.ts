@@ -1,53 +1,86 @@
+import { useAttachmentUploadScope } from './useAttachmentUploadScope';
 import { ipcBridge } from '@/common';
-import { useCallback } from 'react';
+import { FileService, uploadErrorKey, type FileMetadata } from '@/renderer/services/FileService';
+import { isElectronDesktop } from '@/renderer/utils/platform';
+import { Message } from '@arco-design/web-react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
-interface UseOpenFileSelectorOptions {
+type UseOpenFileSelectorOptions = {
   onFilesSelected: (files: string[]) => void;
-}
+  onFilesUploaded?: (files: FileMetadata[]) => void;
+  conversation_id?: string;
+};
 
-interface UseOpenFileSelectorResult {
+type UseOpenFileSelectorResult = {
   openFileSelector: () => void;
   onSlashBuiltinCommand: (name: string) => void;
-}
+};
 
-/**
- * Shared open-file selector behavior for send boxes.
- * Unifies '+' button and '/open' builtin command handling.
- *
- * In Electron: opens native file dialog.
- * In WebUI: routes through the registered web file picker (webFsPicker),
- * which browses the server filesystem via `/api/fs/dir`.
- */
+/** Shared '+' and '/open' behavior: device files in WebUI, native paths in Electron. */
 export function useOpenFileSelector(options: UseOpenFileSelectorOptions): UseOpenFileSelectorResult {
-  const { onFilesSelected } = options;
+  const { onFilesSelected, onFilesUploaded, conversation_id } = options;
+  const { t } = useTranslation();
+  const pendingInputs = useRef(new Set<HTMLInputElement>());
+  const getUploadSignal = useAttachmentUploadScope(conversation_id);
+  useLayoutEffect(() => {
+    return () => {
+      for (const input of pendingInputs.current) {
+        input.onchange = null;
+        input.remove();
+      }
+      pendingInputs.current.clear();
+    };
+  }, [conversation_id]);
 
   const openFileSelector = useCallback(() => {
+    const signal = getUploadSignal();
+    if (!isElectronDesktop()) {
+      // This transient native file-control is never a server filesystem browser.
+      // Keep it attached for browser compatibility, then release it on selection,
+      // cancellation or unmount. Uploads return managed paths, never device paths.
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.hidden = true;
+      document.body.appendChild(input);
+      pendingInputs.current.add(input);
+      const release = () => {
+        pendingInputs.current.delete(input);
+        input.remove();
+      };
+      input.addEventListener('cancel', release, { once: true });
+      input.onchange = () => {
+        const files = input.files;
+        release();
+        if (signal.aborted || !files?.length || !onFilesUploaded) return;
+        void FileService.processDroppedFiles(files, conversation_id, 'sendbox', { signal })
+          .then((uploaded) => {
+            if (!signal.aborted && uploaded.length > 0) onFilesUploaded(uploaded);
+          })
+          .catch((error) => {
+            if (!signal.aborted) Message.error(t(uploadErrorKey(error)));
+          });
+      };
+      input.click();
+      return;
+    }
     void ipcBridge.dialog.showOpen
       .invoke({ properties: ['openFile', 'multiSelections'] })
       .then((files) => {
-        if (!files || files.length === 0) {
-          return;
-        }
-        onFilesSelected(files);
+        if (!signal.aborted && files?.length) onFilesSelected(files);
       })
-      .catch((error) => {
-        // In WebUI, dialog may fail if the web file picker (webFsPicker) is not
-        // registered or the bridge is not properly connected. Log for debugging.
-        console.warn('[useOpenFileSelector] Failed to open file selector:', error);
+      .catch(() => {
+        if (!signal.aborted) Message.error(t('common.fileAttach.failed'));
       });
-  }, [onFilesSelected]);
+  }, [conversation_id, getUploadSignal, onFilesSelected, onFilesUploaded, t]);
 
   const onSlashBuiltinCommand = useCallback(
     (name: string) => {
-      if (name === 'open') {
-        openFileSelector();
-      }
+      if (name === 'open') openFileSelector();
     },
     [openFileSelector]
   );
 
-  return {
-    openFileSelector,
-    onSlashBuiltinCommand,
-  };
+  return { openFileSelector, onSlashBuiltinCommand };
 }

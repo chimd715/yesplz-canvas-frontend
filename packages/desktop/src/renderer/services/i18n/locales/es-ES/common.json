@@ -182,6 +182,7 @@
   "fileAttach.addFiles": "Agregar archivos",
   "fileAttach.myDevice": "Subir desde el dispositivo",
   "fileAttach.failed": "Error al subir",
+  "fileAttach.tooLarge": "Cada archivo adjunto debe tener un tamaño máximo de 25 MB.",
   "fileAttach.uploading": "Subiendo...",
   "fileAttach.uploadSuccess": "Subida exitosa",
   "fileAttach.cancelUpload": "Cancelar subida",

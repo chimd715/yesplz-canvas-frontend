@@ -147,10 +147,10 @@ const GuidPage: React.FC = () => {
   const guidInput = useGuidInput({
     locationState: location.state as { workspace?: string } | null,
   });
-  // The `/open` builtin + attach picker browse the backend machine's filesystem
-  // (native dialog / server-fs) → `local` refs, not uploads.
+  // Browser /open uploads device bytes; Electron keeps native host paths.
   const { onSlashBuiltinCommand } = useOpenFileSelector({
     onFilesSelected: guidInput.handleFilesPicked,
+    onFilesUploaded: guidInput.handleFilesPasted,
   });
   // Display/remove lanes stay path-based; the ref kind is carried only by the
   // send path (useGuidSend).

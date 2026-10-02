@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "افزودن فایل‌ها",
   "fileAttach.myDevice": "آپلود از دستگاه",
   "fileAttach.failed": "آپلود ناموفق بود",
+  "fileAttach.tooLarge": "اندازه هر پیوست باید ۲۵ مگابایت یا کمتر باشد.",
   "fileAttach.uploading": "در حال آپلود...",
   "fileAttach.uploadSuccess": "آپلود موفقیت‌آمیز بود",
   "fileAttach.cancelUpload": "لغو آپلود",

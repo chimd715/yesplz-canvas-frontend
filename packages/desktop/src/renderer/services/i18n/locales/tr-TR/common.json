@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "Dosya ekle",
   "fileAttach.myDevice": "Cihazım",
   "fileAttach.failed": "Yükleme başarısız",
+  "fileAttach.tooLarge": "Her ek 25 MB veya daha küçük olmalıdır.",
   "fileAttach.uploading": "Yükleniyor...",
   "fileAttach.uploadSuccess": "Yükleme başarılı",
   "fileAttach.cancelUpload": "Yüklemeyi iptal et",

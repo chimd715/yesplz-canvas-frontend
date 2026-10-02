@@ -186,6 +186,7 @@
   "fileAttach.myDevice": "Мій пристрій",
   "fileAttach.tooLarge": "Файл перевищує ліміт {{max}} МБ",
   "fileAttach.failed": "Помилка завантаження",
+  "fileAttach.tooLarge": "Розмір кожного вкладення не має перевищувати 25 МБ.",
   "fileAttach.uploading": "Завантаження...",
   "fileAttach.uploadSuccess": "Завантажено успішно",
   "fileAttach.cancelUpload": "Скасувати завантаження",

@@ -183,6 +183,7 @@
   "fileAttach.addFiles": "Ajouter des fichiers",
   "fileAttach.myDevice": "Mon appareil",
   "fileAttach.failed": "Échec du téléversement",
+  "fileAttach.tooLarge": "Chaque pièce jointe doit faire au maximum 25 Mo.",
   "fileAttach.uploading": "Téléversement...",
   "fileAttach.uploadSuccess": "Téléversement réussi",
   "fileAttach.cancelUpload": "Annuler le téléchargement",

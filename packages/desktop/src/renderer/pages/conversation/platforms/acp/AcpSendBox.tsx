@@ -528,6 +528,8 @@ Please check your local CLI tool authentication status`,
   );
   const { openFileSelector, onSlashBuiltinCommand } = useOpenFileSelector({
     onFilesSelected: appendSelectedFiles,
+    onFilesUploaded: handleFilesAdded,
+    conversation_id,
   });
 
   const { entries: attachEntries, hiddenFileInput: attachHiddenInput } = useAttachEntry({

@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useAttachmentUploadScope } from './useAttachmentUploadScope';
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Message } from '@arco-design/web-react';
 import type { FileMetadata } from '@renderer/services/FileService';
-import { isSupportedFile, FileService } from '@renderer/services/FileService';
+import { isSupportedFile, FileService, uploadErrorKey } from '@renderer/services/FileService';
 
 export interface UseDragUploadOptions {
   supportedExts?: string[];
@@ -19,25 +20,26 @@ export interface UseDragUploadOptions {
 
 export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_id }: UseDragUploadOptions) => {
   const { t } = useTranslation();
+  const getUploadSignal = useAttachmentUploadScope(conversation_id);
   const [isFileDragging, setIsFileDragging] = useState(false);
 
-  // 拖拽计数器，防止状态闪烁
+  // Ignore text/URL drags so moving prompt text retains native browser behavior.
+  const hasFiles = (event: React.DragEvent): boolean =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files') || (event.dataTransfer?.files.length ?? 0) > 0;
+
+  // Nested drag events must not flicker the highlight.
   const dragCounter = useRef(0);
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (!isFileDragging) {
-        setIsFileDragging(true);
-        dragCounter.current += 1;
-      }
-    },
-    [isFileDragging]
-  );
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsFileDragging(true);
+  }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -46,6 +48,7 @@ export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_i
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -59,6 +62,7 @@ export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_i
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
+      if (!hasFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -67,9 +71,14 @@ export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_i
       setIsFileDragging(false);
 
       if (!onFilesAdded) return;
+      const signal = getUploadSignal();
 
       try {
-        const droppedFiles = e.nativeEvent.dataTransfer!.files;
+        if (Array.from(e.dataTransfer.items ?? []).some((item) => item.webkitGetAsEntry?.()?.isDirectory)) {
+          Message.error(t('common.fileAttach.failed'));
+          return;
+        }
+        const droppedFiles = e.dataTransfer.files;
 
         // 第一步：先校验文件类型，筛选出支持的文件
         const validFiles: File[] = [];
@@ -89,18 +98,19 @@ export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_i
             length: validFiles.length,
             item: (index: number) => validFiles[index] || null,
           }) as unknown as FileList;
-          const processedFiles = await FileService.processDroppedFiles(validFileList, conversation_id);
+          const processedFiles = await FileService.processDroppedFiles(validFileList, conversation_id, 'sendbox', {
+            signal,
+          });
 
-          if (processedFiles.length > 0) {
+          if (!signal.aborted && processedFiles.length > 0) {
             onFilesAdded(processedFiles);
           }
         }
       } catch (err) {
-        console.error('Failed to process dropped files:', err);
-        Message.error(t('conversation.workspace.dragFailed', 'Failed to process dropped files'));
+        if (!signal.aborted) Message.error(t(uploadErrorKey(err)));
       }
     },
-    [conversation_id, onFilesAdded, supportedExts, t]
+    [conversation_id, getUploadSignal, onFilesAdded, supportedExts, t]
   );
 
   const dragHandlers = {

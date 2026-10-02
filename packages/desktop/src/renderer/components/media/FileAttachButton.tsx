@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useAttachmentUploadScope } from '@/renderer/hooks/file/useAttachmentUploadScope';
 import type { IConversationMcpStatus, IConversationMcpStatusKind } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
 import { Button, Message, Trigger } from '@arco-design/web-react';
-import { FolderOpen, Lightning, Paperclip, Plus, Right, Shield } from '@icon-park/react';
+import { Lightning, Paperclip, Plus, Right, Shield } from '@icon-park/react';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { iconColors } from '@/renderer/styles/colors';
 import { isElectronDesktop } from '@/renderer/utils/platform';
-import { FileService } from '@/renderer/services/FileService';
+import { FileService, uploadErrorKey } from '@/renderer/services/FileService';
 import type { FileMetadata } from '@/renderer/services/FileService';
 import { emitter } from '@/renderer/utils/emitter';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
@@ -82,7 +83,14 @@ const FileAttachButton: React.FC<FileAttachButtonProps> = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickerSignal = useRef<AbortSignal | null>(null);
+  const getUploadSignal = useAttachmentUploadScope(conversationContext?.conversation_id);
+  const openDevicePicker = useCallback(() => {
+    pickerSignal.current = getUploadSignal();
+    fileInputRef.current?.click();
+  }, [getUploadSignal]);
   const [uploading, setUploading] = useState(false);
+  useEffect(() => setUploading(false), [conversationContext?.conversation_id]);
   const [open, setOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -111,20 +119,30 @@ const FileAttachButton: React.FC<FileAttachButtonProps> = ({
 
   const handleLocalFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const signal = pickerSignal.current ?? getUploadSignal();
       const fileList = e.target.files;
+      if (signal.aborted) {
+        e.target.value = '';
+        return;
+      }
       if (!fileList || fileList.length === 0 || !onLocalFilesAdded) return;
       setUploading(true);
       try {
-        const processed = await FileService.processDroppedFiles(fileList, conversationContext?.conversation_id);
-        if (processed.length > 0) onLocalFilesAdded(processed);
-      } catch {
-        Message.error(t('common.fileAttach.failed'));
+        const processed = await FileService.processDroppedFiles(
+          fileList,
+          conversationContext?.conversation_id,
+          'sendbox',
+          { signal }
+        );
+        if (!signal.aborted && processed.length > 0) onLocalFilesAdded(processed);
+      } catch (error) {
+        if (!signal.aborted) Message.error(t(uploadErrorKey(error)));
       } finally {
-        setUploading(false);
+        if (!signal.aborted) setUploading(false);
       }
       e.target.value = '';
     },
-    [conversationContext?.conversation_id, onLocalFilesAdded, t]
+    [conversationContext?.conversation_id, getUploadSignal, onLocalFilesAdded, t]
   );
 
   const isDesktop = isElectronDesktop();
@@ -278,21 +296,12 @@ const FileAttachButton: React.FC<FileAttachButtonProps> = ({
 
       {/* 文件操作最常用，在最下（离 + 最近） */}
       <div className='px-6px'>
-        {!isDesktop && (
-          <MenuItem
-            icon={<FolderOpen theme='outline' size={15} strokeWidth={2.5} />}
-            label={t('common.fileAttach.myDevice', { defaultValue: 'Upload from device' })}
-            onClick={() => {
-              fileInputRef.current?.click();
-              setOpen(false);
-            }}
-          />
-        )}
         <MenuItem
           icon={<Paperclip theme='outline' size={15} strokeWidth={2.5} />}
           label={t('common.fileAttach.addFiles', { defaultValue: 'Add files' })}
           onClick={() => {
-            openFileSelector();
+            if (isDesktop) openFileSelector();
+            else openDevicePicker();
             setOpen(false);
           }}
         />
@@ -322,6 +331,7 @@ const FileAttachButton: React.FC<FileAttachButtonProps> = ({
       </Trigger>
       <input
         ref={fileInputRef}
+        key={conversationContext?.conversation_id ?? 'home'}
         type='file'
         multiple
         style={{ display: 'none' }}

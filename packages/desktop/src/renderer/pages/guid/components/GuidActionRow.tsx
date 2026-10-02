@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useAttachmentUploadScope } from '@/renderer/hooks/file/useAttachmentUploadScope';
 import { ipcBridge } from '@/common';
 import type { IMcpServer, IProvider, TProviderWithModel } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
@@ -17,23 +18,13 @@ import type {
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import type { AgentRuntimeDerivedOption } from '@/renderer/utils/model/agentRuntimeCatalog';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
-import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
+import { getCleanFileNames, FileService, uploadErrorKey } from '@/renderer/services/FileService';
 import { iconColors } from '@/renderer/styles/colors';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import type { AcpModelInfo } from '../types';
 import { getAvailableModels } from '../utils/modelUtils';
 import { Button, Checkbox, Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
-import {
-  ArrowUp,
-  Brain,
-  FolderOpen,
-  FolderUpload,
-  Lightning,
-  Paperclip,
-  Plus,
-  Shield,
-  UploadOne,
-} from '@icon-park/react';
+import { ArrowUp, Brain, FolderUpload, Lightning, Plus, Shield, UploadOne } from '@icon-park/react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css';
@@ -170,27 +161,38 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
 
   // Browser file picker ref (WebUI only)
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickerSignal = useRef<AbortSignal | null>(null);
+  const getUploadSignal = useAttachmentUploadScope(undefined);
+  const openDevicePicker = useCallback(() => {
+    pickerSignal.current = getUploadSignal();
+    fileInputRef.current?.click();
+  }, [getUploadSignal]);
   const [uploading, setUploading] = useState(false);
 
   const handleLocalFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const signal = pickerSignal.current ?? getUploadSignal();
       const fileList = e.target.files;
+      if (signal.aborted) {
+        e.target.value = '';
+        return;
+      }
       if (!fileList || fileList.length === 0) return;
       setUploading(true);
       try {
-        const processed = await FileService.processDroppedFiles(fileList);
-        if (processed.length > 0) {
+        const processed = await FileService.processDroppedFiles(fileList, undefined, 'sendbox', { signal });
+        if (!signal.aborted && processed.length > 0) {
           onFilesUploaded(processed.map((f) => f.path));
         }
-      } catch {
-        Message.error(t('common.fileAttach.failed'));
+      } catch (error) {
+        if (!signal.aborted) Message.error(t(uploadErrorKey(error)));
       } finally {
-        setUploading(false);
+        if (!signal.aborted) setUploading(false);
       }
       // Reset so the same file can be re-selected
       e.target.value = '';
     },
-    [onFilesUploaded, t]
+    [getUploadSignal, onFilesUploaded, t]
   );
 
   const getModeDisplayLabel = (mode: AgentModeOption): string =>
@@ -318,36 +320,15 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       });
     }
 
-    // Match the conversation send box: WebUI offers both the backend-machine
-    // picker and an upload from the phone/current browser device.
-    if (isWebUI) {
-      entries.push(
-        {
-          key: 'attach-host-files',
-          icon: <Paperclip theme='outline' size='16' />,
-          label: t('common.fileAttach.addFiles', { defaultValue: 'Add files' }),
-          variant: 'muted',
-          dividerBefore: true,
-          onClick: openHostFilePicker,
-        },
-        {
-          key: 'attach-my-device',
-          icon: <FolderOpen theme='outline' size='16' />,
-          label: t('common.fileAttach.myDevice', { defaultValue: 'Upload from device' }),
-          variant: 'muted',
-          onClick: () => fileInputRef.current?.click(),
-        }
-      );
-    } else {
-      entries.push({
-        key: 'attach',
-        icon: <FolderUpload theme='outline' size='16' />,
-        label: t('common.fileAttach.addFiles', { defaultValue: 'Add files' }),
-        variant: 'muted',
-        dividerBefore: true,
-        onClick: openHostFilePicker,
-      });
-    }
+    // Browser attachments always come from the customer's current device.
+    entries.push({
+      key: 'attach',
+      icon: <FolderUpload theme='outline' size='16' />,
+      label: t('common.fileAttach.addFiles', { defaultValue: 'Add files' }),
+      variant: 'muted',
+      dividerBefore: true,
+      onClick: isWebUI ? openDevicePicker : openHostFilePicker,
+    });
 
     // Skills (multi-select).
     if (allSkills.length > 0) {
@@ -428,6 +409,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     activeMcpCount,
     isWebUI,
     openHostFilePicker,
+    openDevicePicker,
     t,
   ]);
 
@@ -436,44 +418,17 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       className='min-w-200px'
       onClickMenuItem={(key) => {
         if (key === 'file') {
-          ipcBridge.dialog.showOpen
-            .invoke({ properties: ['openFile', 'multiSelections'] })
-            .then((pickedFiles) => {
-              if (pickedFiles && pickedFiles.length > 0) {
-                onFilesPicked(pickedFiles);
-              }
-            })
-            .catch((error) => {
-              console.error('Failed to open file dialog:', error);
-            });
-        } else if (key === 'device') {
-          fileInputRef.current?.click();
+          if (isWebUI) openDevicePicker();
+          else openHostFilePicker();
         }
       }}
     >
-      {isWebUI ? (
-        <>
-          <Menu.Item key='file'>
-            <div className='flex items-center gap-8px'>
-              <UploadOne theme='outline' size='16' fill={iconColors.secondary} style={{ lineHeight: 0 }} />
-              <span>{t('common.fileAttach.addFiles')}</span>
-            </div>
-          </Menu.Item>
-          <Menu.Item key='device'>
-            <div className='flex items-center gap-8px'>
-              <UploadOne theme='outline' size='16' fill={iconColors.secondary} style={{ lineHeight: 0 }} />
-              <span>{t('common.fileAttach.myDevice')}</span>
-            </div>
-          </Menu.Item>
-        </>
-      ) : (
-        <Menu.Item key='file'>
-          <div className='flex items-center gap-8px'>
-            <UploadOne theme='outline' size='16' fill={iconColors.secondary} style={{ lineHeight: 0 }} />
-            <span>{t('common.fileAttach.addFiles')}</span>
-          </div>
-        </Menu.Item>
-      )}
+      <Menu.Item key='file'>
+        <div className='flex items-center gap-8px'>
+          <UploadOne theme='outline' size='16' fill={iconColors.secondary} style={{ lineHeight: 0 }} />
+          <span>{t('common.fileAttach.addFiles')}</span>
+        </div>
+      </Menu.Item>
       {allSkills.length > 0 && (
         <Menu.SubMenu
           key='skills'

@@ -10,6 +10,7 @@ import React from 'react';
 import GuidActionRow from '@/renderer/pages/guid/components/GuidActionRow';
 import type { IMcpServer } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
+import { FileService } from '@/renderer/services/FileService';
 
 const environment = vi.hoisted(() => ({ isMobile: false, isDesktop: true }));
 
@@ -50,6 +51,7 @@ vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
 vi.mock('@/renderer/services/FileService', () => ({
   getCleanFileNames: (files: string[]) => files,
   FileService: { processDroppedFiles: vi.fn().mockResolvedValue([]) },
+  uploadErrorKey: () => 'common.fileAttach.failed',
 }));
 
 vi.mock('@/renderer/utils/platform', () => ({
@@ -155,6 +157,7 @@ const renderActionRow = (overrides: Partial<React.ComponentProps<typeof GuidActi
     <GuidActionRow
       files={[]}
       onFilesUploaded={vi.fn()}
+      onFilesPicked={vi.fn()}
       modelSelectorNode={null}
       isGeminiMode={false}
       modelList={[]}
@@ -186,24 +189,59 @@ describe('GuidActionRow skill/MCP submenu search', () => {
     environment.isDesktop = true;
   });
 
-  it('offers both host files and device upload in the mobile WebUI action sheet', () => {
+  it('offers only customer-device attachment in mobile WebUI', () => {
     environment.isMobile = true;
     environment.isDesktop = false;
     renderActionRow({ allSkills: [], mcpServers: [] });
 
-    expect(screen.getByTestId('attach-host-files')).toHaveTextContent('Add files');
-    expect(screen.getByTestId('attach-my-device')).toHaveTextContent('Upload from device');
+    expect(screen.getByTestId('attach')).toHaveTextContent('Add files');
+    expect(screen.queryByTestId('attach-host-files')).not.toBeInTheDocument();
   });
 
-  it('adds files selected from the host picker in mobile WebUI', async () => {
+  it('opens the browser picker without requesting server filesystem paths', () => {
     environment.isMobile = true;
     environment.isDesktop = false;
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    renderActionRow({ allSkills: [], mcpServers: [] });
+
+    fireEvent.click(screen.getByTestId('attach'));
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(ipcBridge.dialog.showOpen.invoke).not.toHaveBeenCalled();
+    click.mockRestore();
+  });
+
+  it('adds browser-selected bytes through the managed upload lane', async () => {
+    environment.isMobile = true;
+    environment.isDesktop = false;
+    const onFilesUploaded = vi.fn();
+    const file = new File(['customer bytes'], 'customer.txt', { type: 'text/plain' });
+    vi.mocked(FileService.processDroppedFiles).mockResolvedValue([
+      {
+        name: file.name,
+        path: '/managed/customer.txt',
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      },
+    ]);
+    const { container } = renderActionRow({ allSkills: [], mcpServers: [], onFilesUploaded });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+
+    await waitFor(() => expect(onFilesUploaded).toHaveBeenCalledWith(['/managed/customer.txt']));
+    expect(FileService.processDroppedFiles).toHaveBeenCalledWith([file], undefined, 'sendbox', {
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('preserves the native picker for Electron', async () => {
+    environment.isMobile = true;
+    environment.isDesktop = true;
     const onFilesPicked = vi.fn();
     vi.mocked(ipcBridge.dialog.showOpen.invoke).mockResolvedValue(['/host/project/a.txt']);
     renderActionRow({ allSkills: [], mcpServers: [], onFilesPicked });
 
-    fireEvent.click(screen.getByTestId('attach-host-files'));
-
+    fireEvent.click(screen.getByTestId('attach'));
     await waitFor(() => expect(onFilesPicked).toHaveBeenCalledWith(['/host/project/a.txt']));
   });
 

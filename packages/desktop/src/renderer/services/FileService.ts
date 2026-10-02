@@ -4,11 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getBaseUrl } from '@/common/adapter/httpBridge';
+import { getBaseUrl, resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
+import { refreshSession } from '@/common/adapter/sessionRefresh';
 import { trackUpload, type UploadSource } from '@/renderer/hooks/file/useUploadState';
 
 /** Sentinel error message used when an upload is cancelled by the caller. */
 export const UPLOAD_ABORTED_ERROR = 'Upload aborted';
+
+/** Reserve multipart overhead below Core's 30 MiB request cap. */
+export const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+
+/** Map transport failures to safe, localized messages without exposing server details. */
+export function uploadErrorKey(error: unknown): 'common.fileAttach.tooLarge' | 'common.fileAttach.failed' {
+  return error instanceof Error && error.message === 'FILE_TOO_LARGE'
+    ? 'common.fileAttach.tooLarge'
+    : 'common.fileAttach.failed';
+}
 
 export interface UploadFileOptions {
   /** Cancel the upload from the outside. Closing the XHR also frees the backend connection. */
@@ -19,8 +30,8 @@ export interface UploadFileOptions {
  * Upload a file to the backend via HTTP multipart.
  *
  * Works in both Electron (via `http://127.0.0.1:<backendPort>`) and WebUI
- * (same-origin reverse-proxied). Conversation-bound uploads go to the
- * workspace uploads directory; pre-conversation uploads go to temp storage.
+ * (same-origin reverse-proxied). Core stores attachments in the authenticated
+ * user's managed temporary namespace and checks conversation ownership.
  *
  * Field names match the backend contract exactly (snake_case): `file`,
  * `file_name` (optional), `conversation_id` (optional). The response is
@@ -36,6 +47,9 @@ export async function uploadFileViaHttp(
   file_name?: string,
   options?: UploadFileOptions
 ): Promise<string> {
+  if (file.size > MAX_ATTACHMENT_SIZE) throw new Error('FILE_TOO_LARGE');
+  if (options?.signal?.aborted) throw new Error(UPLOAD_ABORTED_ERROR);
+
   const formData = new FormData();
   formData.append('file', file);
   if (file_name) {
@@ -45,80 +59,111 @@ export async function uploadFileViaHttp(
     formData.append('conversation_id', conversation_id);
   }
 
-  return new Promise<string>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${getBaseUrl()}/api/fs/upload`);
+  const send = (allowRefresh: boolean): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${getBaseUrl()}/api/fs/upload`);
+      // Same-origin cookies authenticate WebUI requests. Do not enable cross-origin
+      // credentials: Electron's local Core permits wildcard CORS.
+      const csrfToken = resolveCoreCsrfToken();
+      if (csrfToken) xhr.setRequestHeader('x-csrf-token', csrfToken);
+      xhr.timeout = 120_000;
 
-    // Wire AbortSignal → xhr.abort. Closing the XHR tears down the underlying
-    // socket; the backend (axum/multer) treats the truncated multipart body as
-    // a client disconnect and stops reading. No explicit cancel IPC needed.
-    const signal = options?.signal;
-    let onSignalAbort: (() => void) | null = null;
-    if (signal) {
-      if (signal.aborted) {
-        // Caller asked to abort before send — bail out without opening a socket.
-        reject(new Error(UPLOAD_ABORTED_ERROR));
-        return;
+      // Wire AbortSignal → xhr.abort. Closing the XHR tears down the underlying
+      // socket; the backend (axum/multer) treats the truncated multipart body as
+      // a client disconnect and stops reading. No explicit cancel IPC needed.
+      const signal = options?.signal;
+      let onSignalAbort: (() => void) | null = null;
+      if (signal) {
+        if (signal.aborted) {
+          // Caller asked to abort before send — bail out without opening a socket.
+          reject(new Error(UPLOAD_ABORTED_ERROR));
+          return;
+        }
+        onSignalAbort = () => {
+          try {
+            xhr.abort();
+          } catch {
+            /* ignore */
+          }
+          detachSignal();
+          reject(new Error(UPLOAD_ABORTED_ERROR));
+        };
+        signal.addEventListener('abort', onSignalAbort);
       }
-      onSignalAbort = () => {
-        try {
-          xhr.abort();
-        } catch {
-          /* ignore */
+
+      const detachSignal = (): void => {
+        if (signal && onSignalAbort) {
+          signal.removeEventListener('abort', onSignalAbort);
+          onSignalAbort = null;
         }
       };
-      signal.addEventListener('abort', onSignalAbort);
-    }
 
-    const detachSignal = (): void => {
-      if (signal && onSignalAbort) {
-        signal.removeEventListener('abort', onSignalAbort);
-        onSignalAbort = null;
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        });
       }
-    };
 
-    if (onProgress) {
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
+      xhr.addEventListener('load', () => {
+        if (xhr.status === 401 && allowRefresh) {
+          // Authentication rejects the request before any file is written, so one
+          // replay after the shared session refresh cannot duplicate an upload.
+          void refreshSession().then(
+            (refreshed) => {
+              detachSignal();
+              if (signal?.aborted) reject(new Error(UPLOAD_ABORTED_ERROR));
+              else if (refreshed) send(false).then(resolve, reject);
+              else reject(new Error('UPLOAD_UNAUTHORIZED'));
+            },
+            () => {
+              detachSignal();
+              reject(new Error('UPLOAD_UNAUTHORIZED'));
+            }
+          );
+          return;
+        }
+        detachSignal();
+        if (xhr.status === 413) {
+          reject(new Error('FILE_TOO_LARGE'));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+          return;
+        }
+        try {
+          const result = JSON.parse(xhr.responseText) as { success: boolean; data?: string };
+          if (!result.success || typeof result.data !== 'string' || !result.data) {
+            reject(new Error('Upload failed: server returned unsuccessful response'));
+          } else {
+            resolve(result.data);
+          }
+        } catch {
+          reject(new Error('Upload failed: invalid server response'));
         }
       });
-    }
 
-    xhr.addEventListener('load', () => {
-      detachSignal();
-      if (xhr.status === 413) {
-        reject(new Error('FILE_TOO_LARGE'));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
-        return;
-      }
-      try {
-        const result = JSON.parse(xhr.responseText) as { success: boolean; data?: string };
-        if (!result.success || typeof result.data !== 'string' || !result.data) {
-          reject(new Error('Upload failed: server returned unsuccessful response'));
-        } else {
-          resolve(result.data);
-        }
-      } catch {
-        reject(new Error('Upload failed: invalid server response'));
-      }
+      xhr.addEventListener('error', () => {
+        detachSignal();
+        reject(new Error('Upload failed: network error'));
+      });
+
+      xhr.addEventListener('timeout', () => {
+        detachSignal();
+        reject(new Error('Upload failed: timeout'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        detachSignal();
+        reject(new Error(UPLOAD_ABORTED_ERROR));
+      });
+
+      xhr.send(formData);
     });
-
-    xhr.addEventListener('error', () => {
-      detachSignal();
-      reject(new Error('Upload failed: network error'));
-    });
-
-    xhr.addEventListener('abort', () => {
-      detachSignal();
-      reject(new Error(UPLOAD_ABORTED_ERROR));
-    });
-
-    xhr.send(formData);
-  });
+  return send(true);
 }
 
 // ===== 文件类型支持配置 =====
@@ -314,17 +359,26 @@ class FileServiceClass {
   async processDroppedFiles(
     files: FileList,
     conversation_id?: string,
-    source: UploadSource = 'sendbox'
+    source: UploadSource = 'sendbox',
+    options?: UploadFileOptions
   ): Promise<FileMetadata[]> {
     const processedFiles: FileMetadata[] = [];
+    // Validate the batch before uploading any bytes. A size error must not leave
+    // the user with an apparently successful but incomplete attachment list.
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACHMENT_SIZE) throw new Error('FILE_TOO_LARGE');
+    }
 
     for (let i = 0; i < files.length; i++) {
+      if (options?.signal?.aborted) return [];
       const file = files[i];
 
       // Each upload owns its own AbortController; the tracker exposes an `abort()`
       // that triggers the signal so user-driven cancel and conversation-switch
       // bulk-abort go through the same path.
       const controller = new AbortController();
+      const abortForScope = () => controller.abort();
+      options?.signal?.addEventListener('abort', abortForScope, { once: true });
       const tracker = trackUpload(file.size, {
         source,
         name: file.name,
@@ -337,20 +391,21 @@ class FileServiceClass {
           signal: controller.signal,
         });
       } catch (error) {
-        // Re-throw size errors so caller can show user-facing toast
-        if (error instanceof Error && error.message === 'FILE_TOO_LARGE') {
-          throw error;
-        }
         if (error instanceof Error && error.message === UPLOAD_ABORTED_ERROR) {
-          // User-initiated abort: drop this file silently (the UI already reflects it).
+          // Leaving a composer cancels the entire selection, including queued
+          // files. A single-file cancel may keep the rest of the selection.
+          if (options?.signal?.aborted) return [];
           continue;
         }
-        console.error('Failed to upload file:', error);
-        continue;
+        // Surface failures to the caller's localized toast rather than silently
+        // sending a prompt without the files the customer selected.
+        throw error;
       } finally {
+        options?.signal?.removeEventListener('abort', abortForScope);
         tracker.finish();
       }
 
+      if (options?.signal?.aborted) return [];
       processedFiles.push({
         name: file.name,
         path: file_path,

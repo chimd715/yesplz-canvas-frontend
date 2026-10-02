@@ -1,3 +1,5 @@
+import { useAttachmentUploadScope } from './useAttachmentUploadScope';
+import { uploadErrorKey } from '@/renderer/services/FileService';
 import type { FileMetadata } from '@/renderer/services/FileService';
 import type { UploadSource } from '@/renderer/hooks/file/useUploadState';
 import type { ImageCounter } from '@/renderer/services/PasteService';
@@ -28,6 +30,7 @@ export const usePasteService = ({
   source = 'sendbox',
 }: UsePasteServiceProps) => {
   const { t } = useTranslation();
+  const getUploadSignal = useAttachmentUploadScope(conversation_id);
   const componentId = useRef('paste-service-' + uuid(4)).current;
 
   // 跨 handlePaste 调用保持的粘贴图片序号。生命周期 = hook 实例 = SendBox mount，
@@ -50,15 +53,19 @@ export const usePasteService = ({
         event.stopPropagation();
       }
 
+      const signal = getUploadSignal();
       try {
         const handled = await PasteService.handlePaste(
           event,
           supportedExts,
-          onFilesAdded || (() => {}),
+          (added) => {
+            if (!signal.aborted) onFilesAdded?.(added);
+          },
           onTextPaste,
           conversation_id,
           source,
-          imageCounter
+          imageCounter,
+          { signal }
         );
         if (handled && (!files || files.length === 0)) {
           // 如果不是文件粘贴但被处理了（比如纯文本粘贴），也阻止默认行为
@@ -67,11 +74,11 @@ export const usePasteService = ({
         }
         return handled;
       } catch (err) {
-        Message.error(t('common.fileAttach.failed'));
+        if (!signal.aborted) Message.error(t(uploadErrorKey(err)));
         return false;
       }
     },
-    [conversation_id, source, supportedExts, onFilesAdded, onTextPaste, imageCounter, t]
+    [conversation_id, getUploadSignal, source, supportedExts, onFilesAdded, onTextPaste, imageCounter, t]
   );
 
   // 焦点处理
