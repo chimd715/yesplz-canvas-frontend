@@ -88,6 +88,12 @@
     "errorUnsupported": "Bu ajan çatallamayı desteklemiyor",
     "errorGeneric": "Çatallama başarısız: {{message}}"
   },
+  "askProgress": "Soru {{current}} / {{total}}",
+  "askBack": "Geri",
+  "askNext": "İleri",
+  "askSubmitError": "Yanıtlarınız gönderilemedi. Seçimleriniz korundu; tekrar deneyin.",
+  "askRecoveryError": "Bekleyen sorular yüklenemedi. Tekrar deneyin.",
+  "askRetry": "Tekrar dene",
   "askSubmit": "Gönder",
   "askDecline": "Yanıtlama",
   "askAnswered": "Yanıtlandı",

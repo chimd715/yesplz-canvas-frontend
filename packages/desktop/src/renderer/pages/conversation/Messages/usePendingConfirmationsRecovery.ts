@@ -87,6 +87,8 @@ export function usePendingConfirmationsRecovery(conversation_id: string) {
         updateMessageList((list) => {
           let next = list;
           for (const confirmation of confirmations ?? []) {
+            // Formal questions recover in the dock, outside paginated history.
+            if (Array.isArray(confirmation.questions) && confirmation.questions.length > 0) continue;
             if (hasPermissionMessageForCallId(next, confirmation.call_id)) continue;
             next = next.concat(buildPendingConfirmationMessage(conversation_id, confirmation));
           }

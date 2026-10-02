@@ -373,6 +373,20 @@ describe('normalizeTextMessageContent', () => {
 });
 
 describe('transformMessage', () => {
+  it('keeps formal questions out of paginated message history', () => {
+    expect(
+      transformMessage({
+        type: 'ask',
+        conversation_id: CONVERSATION_ID,
+        msg_id: 'question-turn',
+        data: {
+          session_id: CONVERSATION_ID,
+          request_id: 'question-request',
+          questions: [{ question: 'Which style?', options: [{ label: 'Simple' }] }],
+        },
+      })
+    ).toBeUndefined();
+  });
   it('returns undefined for hidden system stream messages', () => {
     const message: IResponseMessage = {
       type: 'system',

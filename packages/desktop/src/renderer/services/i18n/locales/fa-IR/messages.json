@@ -88,6 +88,12 @@
     "errorUnsupported": "این عامل از انشعاب پشتیبانی نمی‌کند",
     "errorGeneric": "انشعاب ناموفق بود: {{message}}"
   },
+  "askProgress": "پرسش {{current}} از {{total}}",
+  "askBack": "قبلی",
+  "askNext": "بعدی",
+  "askSubmitError": "ارسال پاسخ‌ها ممکن نشد. انتخاب‌های شما حفظ شده‌اند؛ دوباره تلاش کنید.",
+  "askRecoveryError": "بازیابی پرسش‌های در انتظار ممکن نشد. دوباره تلاش کنید.",
+  "askRetry": "تلاش دوباره",
   "askSubmit": "ارسال",
   "askDecline": "پاسخ ندادن",
   "askAnswered": "پاسخ داده شد",

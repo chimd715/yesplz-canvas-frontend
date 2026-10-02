@@ -88,6 +88,12 @@
     "errorUnsupported": "このエージェントは分岐をサポートしていません",
     "errorGeneric": "分岐に失敗しました：{{message}}"
   },
+  "askProgress": "質問 {{current}} / {{total}}",
+  "askBack": "戻る",
+  "askNext": "次へ",
+  "askSubmitError": "回答を送信できませんでした。選択は保存されています。再試行してください。",
+  "askRecoveryError": "未回答の質問を読み込めませんでした。再試行してください。",
+  "askRetry": "再試行",
   "askSubmit": "送信",
   "askDecline": "回答しない",
   "askAnswered": "回答済み",

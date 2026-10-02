@@ -88,6 +88,12 @@
     "errorUnsupported": "该智能体不支持会话分叉",
     "errorGeneric": "分叉失败：{{message}}"
   },
+  "askProgress": "问题 {{current}} / {{total}}",
+  "askBack": "上一步",
+  "askNext": "下一步",
+  "askSubmitError": "无法提交答案。已保留您的选择，请重试。",
+  "askRecoveryError": "无法恢复待回答的问题，请重试。",
+  "askRetry": "重试",
   "askSubmit": "提交",
   "askDecline": "不回答",
   "askAnswered": "已回答",

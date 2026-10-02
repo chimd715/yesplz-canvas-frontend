@@ -88,6 +88,12 @@
     "errorUnsupported": "This agent does not support forking",
     "errorGeneric": "Fork failed: {{message}}"
   },
+  "askProgress": "Question {{current}} of {{total}}",
+  "askBack": "Back",
+  "askNext": "Next",
+  "askSubmitError": "Unable to submit your answers. Your selections are saved; try again.",
+  "askRecoveryError": "Unable to recover pending questions. Please retry.",
+  "askRetry": "Retry",
   "askSubmit": "Submit",
   "askDecline": "Dismiss",
   "askAnswered": "Answered",

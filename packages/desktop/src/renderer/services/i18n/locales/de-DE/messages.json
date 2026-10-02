@@ -88,6 +88,12 @@
     "errorUnsupported": "Dieser Agent unterstützt kein Verzweigen",
     "errorGeneric": "Verzweigen fehlgeschlagen: {{message}}"
   },
+  "askProgress": "Frage {{current}} von {{total}}",
+  "askBack": "Zurück",
+  "askNext": "Weiter",
+  "askSubmitError": "Ihre Antworten konnten nicht gesendet werden. Ihre Auswahl bleibt erhalten. Versuchen Sie es erneut.",
+  "askRecoveryError": "Offene Fragen konnten nicht geladen werden. Versuchen Sie es erneut.",
+  "askRetry": "Erneut versuchen",
   "askSubmit": "Absenden",
   "askDecline": "Nicht beantworten",
   "askAnswered": "Beantwortet",

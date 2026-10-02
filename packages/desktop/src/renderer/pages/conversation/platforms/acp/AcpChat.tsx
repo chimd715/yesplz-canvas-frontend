@@ -14,6 +14,7 @@ import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionCon
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 import FlexFullContainer from '@renderer/components/layout/FlexFullContainer';
 import MessageList from '@renderer/pages/conversation/Messages/MessageList';
+import QuestionDock from '@renderer/pages/conversation/Messages/UserQuestions/QuestionDock';
 import { ConversationArtifactProvider } from '@renderer/pages/conversation/Messages/artifacts';
 import {
   MessageListLoadingProvider,
@@ -95,6 +96,7 @@ const AcpChat: React.FC<{
           </FlexFullContainer>
           <AcpE2EStreamInjector conversationId={conversation_id} />
           <ConversationPlanBar conversation_id={conversation_id} />
+          <QuestionDock conversationId={conversation_id} />
           {!hideSendBox && (
             <AcpSendBox
               conversation_id={conversation_id}

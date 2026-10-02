@@ -88,6 +88,12 @@
     "errorUnsupported": "Cet agent ne prend pas en charge la bifurcation",
     "errorGeneric": "Échec de la bifurcation : {{message}}"
   },
+  "askProgress": "Question {{current}} sur {{total}}",
+  "askBack": "Retour",
+  "askNext": "Suivant",
+  "askSubmitError": "Impossible d’envoyer vos réponses. Vos choix sont conservés ; réessayez.",
+  "askRecoveryError": "Impossible de récupérer les questions en attente. Réessayez.",
+  "askRetry": "Réessayer",
   "askSubmit": "Envoyer",
   "askDecline": "Ne pas répondre",
   "askAnswered": "Répondu",

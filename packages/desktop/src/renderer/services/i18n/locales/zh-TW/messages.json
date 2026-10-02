@@ -88,6 +88,12 @@
     "errorUnsupported": "此智慧代理不支援對話分叉",
     "errorGeneric": "分叉失敗：{{message}}"
   },
+  "askProgress": "問題 {{current}} / {{total}}",
+  "askBack": "上一步",
+  "askNext": "下一步",
+  "askSubmitError": "無法提交答案。已保留您的選擇，請重試。",
+  "askRecoveryError": "無法恢復待回答的問題，請重試。",
+  "askRetry": "重試",
   "askSubmit": "提交",
   "askDecline": "不回答",
   "askAnswered": "已回答",

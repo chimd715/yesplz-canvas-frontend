@@ -313,7 +313,7 @@ export interface IAskQuestion {
 }
 
 /** Structured question card (AgentStreamEvent::Ask, wire tag `ask`). Answered via
- *  confirmMessage with `{answers:[{question, labels[]}]}` or `{ask_decline:true}`;
+ *  answerAsk with `{answers:[{question, labels[]}]}` or `{decline:true}`;
  *  call_id = request_id (the claude control correlation key). */
 export type IMessageAsk = IMessage<
   'ask',
@@ -818,17 +818,9 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
         content: message.data as any,
       };
     }
-    case 'ask': {
-      return {
-        id: uuid(),
-        type: 'ask',
-        msg_id: message.msg_id,
-        position: 'left',
-        conversation_id: message.conversation_id,
-        created_at,
-        content: message.data as any,
-      };
-    }
+    case 'ask':
+      // Pending questions render in the composer dock, outside paginated history.
+      return undefined;
     case 'acp_permission': {
       return {
         id: uuid(),

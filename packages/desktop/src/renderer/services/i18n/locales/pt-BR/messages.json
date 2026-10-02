@@ -88,6 +88,12 @@
     "errorUnsupported": "Este agente não oferece suporte a bifurcação",
     "errorGeneric": "Falha ao bifurcar: {{message}}"
   },
+  "askProgress": "Pergunta {{current}} de {{total}}",
+  "askBack": "Voltar",
+  "askNext": "Próxima",
+  "askSubmitError": "Não foi possível enviar suas respostas. Suas escolhas foram mantidas; tente novamente.",
+  "askRecoveryError": "Não foi possível recuperar as perguntas pendentes. Tente novamente.",
+  "askRetry": "Tentar novamente",
   "askSubmit": "Enviar",
   "askDecline": "Não responder",
   "askAnswered": "Respondido",

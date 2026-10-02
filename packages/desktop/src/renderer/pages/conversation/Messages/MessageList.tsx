@@ -15,7 +15,6 @@ import { collectAiCopyRows, type TurnCopyItem } from '@/renderer/utils/chat/turn
 import { Image } from '@arco-design/web-react';
 import { Down } from '@icon-park/react';
 import MessageAcpPermission from '@renderer/pages/conversation/Messages/acp/MessageAcpPermission';
-import MessageQuestion from './MessageQuestion';
 import MessagePermission from './components/MessagePermission';
 import MessageAcpTerminalOutput from '@renderer/pages/conversation/Messages/acp/MessageAcpTerminalOutput';
 import MessageAcpToolCall from '@renderer/pages/conversation/Messages/acp/MessageAcpToolCall';
@@ -295,7 +294,7 @@ const MessageItem: React.FC<{
         case 'acp_permission':
           return <MessageAcpPermission message={message}></MessageAcpPermission>;
         case 'ask':
-          return <MessageQuestion message={message}></MessageQuestion>;
+          return null;
         case 'acp_tool_call':
           return <MessageAcpToolCall message={message}></MessageAcpToolCall>;
         case 'acp_terminal_output':
@@ -406,7 +405,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       const message = list[i];
       // Skip hidden and available_commands messages
       if (message.hidden) continue;
-      if (message.type === 'available_commands') continue;
+      if (message.type === 'available_commands' || message.type === 'ask') continue;
       // A plan renders in ConversationPlanBar, never in the stream. Filtered
       // here rather than rendered as null: a null row still occupies a slot.
       if (message.type === 'plan') continue;
