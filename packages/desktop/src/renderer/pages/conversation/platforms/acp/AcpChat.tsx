@@ -14,7 +14,7 @@ import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionCon
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 import FlexFullContainer from '@renderer/components/layout/FlexFullContainer';
 import MessageList from '@renderer/pages/conversation/Messages/MessageList';
-import QuestionDock from '@renderer/pages/conversation/Messages/UserQuestions/QuestionDock';
+import QuestionDock from '@renderer/pages/conversation/Messages/UserQuestions';
 import { ConversationArtifactProvider } from '@renderer/pages/conversation/Messages/artifacts';
 import {
   MessageListLoadingProvider,

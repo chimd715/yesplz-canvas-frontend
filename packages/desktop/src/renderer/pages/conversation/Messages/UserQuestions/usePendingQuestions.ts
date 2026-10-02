@@ -12,14 +12,15 @@ export function usePendingQuestions(conversationId: string) {
   const [error, setError] = useState(false);
   const mounted = useRef(false);
   const epoch = useRef(0);
-  const querying = useRef(false);
+  const querying = useRef<symbol | null>(null);
   const refresh = useCallback(async (): Promise<void> => {
     if (querying.current || !mounted.current) return;
-    querying.current = true;
+    const query = Symbol();
+    querying.current = query;
     const started = epoch.current;
     try {
       const confirmations = await ipcBridge.conversation.confirmation.list.invoke({ conversation_id: conversationId });
-      if (!mounted.current || epoch.current !== started) return;
+      if (!mounted.current || epoch.current !== started || querying.current !== query) return;
       setPending((previous) =>
         (confirmations ?? []).flatMap((confirmation: IConfirmation<unknown>) => {
           if (!Array.isArray(confirmation.questions) || confirmation.questions.length === 0) return [];
@@ -31,9 +32,9 @@ export function usePendingQuestions(conversationId: string) {
       );
       setError(false);
     } catch {
-      if (mounted.current) setError(true);
+      if (mounted.current && epoch.current === started && querying.current === query) setError(true);
     } finally {
-      querying.current = false;
+      if (querying.current === query) querying.current = null;
     }
   }, [conversationId]);
 
@@ -50,6 +51,7 @@ export function usePendingQuestions(conversationId: string) {
         const data = event.data as IMessageAsk['content'];
         if (!data?.request_id || !Array.isArray(data.questions) || !data.questions.length) return;
         epoch.current += 1;
+        setError(false);
         setPending((previous) =>
           previous.some((row) => row.message.content.request_id === data.request_id)
             ? previous
@@ -91,6 +93,8 @@ export function usePendingQuestions(conversationId: string) {
     return () => {
       mounted.current = false;
       epoch.current += 1;
+      // A StrictMode effect restart must start recovery even if the old request is still in flight.
+      querying.current = null;
       offStream();
       offRemove();
       offReconnect();

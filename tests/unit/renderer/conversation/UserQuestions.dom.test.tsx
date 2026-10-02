@@ -3,7 +3,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAsk } from '@/common/chat/chatLib';
-import MessageQuestion from '@/renderer/pages/conversation/Messages/UserQuestions/MessageQuestion';
+import { MessageQuestion } from '@/renderer/pages/conversation/Messages/UserQuestions';
 
 const { answerAsk } = vi.hoisted(() => ({ answerAsk: vi.fn() }));
 vi.mock('@/common/adapter/ipcBridge', () => ({ conversation: { answerAsk: { invoke: answerAsk } } }));

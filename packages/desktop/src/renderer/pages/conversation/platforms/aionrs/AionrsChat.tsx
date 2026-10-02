@@ -13,7 +13,7 @@ import { usePlanRecovery } from '@renderer/pages/conversation/PlanBar/usePlanRec
 import { CHAT_SURFACE_CONTAINER_CLASS } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import FlexFullContainer from '@renderer/components/layout/FlexFullContainer';
 import MessageList from '@renderer/pages/conversation/Messages/MessageList';
-import QuestionDock from '@renderer/pages/conversation/Messages/UserQuestions/QuestionDock';
+import QuestionDock from '@renderer/pages/conversation/Messages/UserQuestions';
 import { ConversationArtifactProvider } from '@renderer/pages/conversation/Messages/artifacts';
 import {
   MessageListLoadingProvider,

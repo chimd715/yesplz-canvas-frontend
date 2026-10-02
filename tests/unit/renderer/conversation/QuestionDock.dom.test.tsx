@@ -3,7 +3,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IConfirmation } from '@/common/chat/chatLib';
-import QuestionDock from '@/renderer/pages/conversation/Messages/UserQuestions/QuestionDock';
+import QuestionDock from '@/renderer/pages/conversation/Messages/UserQuestions';
 
 type StreamFrame = { conversation_id: string; type: string; data?: unknown };
 type RemovalFrame = { conversation_id: string; id: string };
@@ -109,6 +109,73 @@ describe('question dock recovery and scope', () => {
     act(() => emitAsk());
     await act(async () => finish([]));
     expect(screen.getByText('Question ask-live?')).toBeInTheDocument();
+  });
+
+  it('ignores an older failed recovery after a newer live question arrives', async () => {
+    let reject!: (reason: Error) => void;
+    mocks.list.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        })
+    );
+    render(<QuestionDock conversationId='conversation-a' />);
+    act(() => emitAsk('current'));
+    await act(async () => reject(new Error('outdated recovery failed')));
+    expect(screen.getByText('Question current?')).toBeInTheDocument();
+    expect(screen.queryByText('messages.askRecoveryError')).not.toBeInTheDocument();
+  });
+  it('recovers immediately on a StrictMode restart while the old query is pending', async () => {
+    let finishOld!: (value: IConfirmation<unknown>[]) => void;
+    mocks.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        })
+    );
+    mocks.list.mockResolvedValueOnce([confirmation('current')]);
+    render(
+      <React.StrictMode>
+        <QuestionDock conversationId='conversation-a' />
+      </React.StrictMode>
+    );
+    expect(await screen.findByText('Question current?')).toBeInTheDocument();
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    await act(async () => finishOld([confirmation('stale')]));
+    expect(screen.getByText('Question current?')).toBeInTheDocument();
+    expect(screen.queryByText('Question stale?')).not.toBeInTheDocument();
+  });
+  it('does not release a newer query lock when an obsolete StrictMode query fails', async () => {
+    let rejectOld!: (reason: Error) => void;
+    let finishCurrent!: (value: IConfirmation<unknown>[]) => void;
+    mocks.list.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectOld = reject;
+        })
+    );
+    mocks.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCurrent = resolve;
+        })
+    );
+    render(
+      <React.StrictMode>
+        <QuestionDock conversationId='conversation-a' />
+      </React.StrictMode>
+    );
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    await act(async () => rejectOld(new Error('old query failure')));
+    act(() => mocks.reconnect.forEach((listener) => listener()));
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('messages.askRecoveryError')).not.toBeInTheDocument();
+    await act(async () => finishCurrent([confirmation('current')]));
+    expect(screen.getByText('Question current?')).toBeInTheDocument();
+    mocks.list.mockResolvedValue([confirmation('reconnected')]);
+    await act(async () => mocks.reconnect.forEach((listener) => listener()));
+    expect(mocks.list).toHaveBeenCalledTimes(3);
+    expect(screen.getByText('Question reconnected?')).toBeInTheDocument();
   });
   it('retries failed recovery and refreshes on WebSocket reconnect', async () => {
     mocks.list.mockRejectedValueOnce(new Error('private server response'));
