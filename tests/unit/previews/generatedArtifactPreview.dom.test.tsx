@@ -169,6 +169,27 @@ describe('generated document preview', () => {
     expect(h.read).not.toHaveBeenCalled();
     expect(h.open).not.toHaveBeenCalled();
   });
+  it('rejects malformed recovery and live artifacts without throwing or reading any files', async () => {
+    const malformed = [
+      undefined,
+      null,
+      false,
+      [],
+      {},
+      ...[undefined, null, false, 42, 'invalid', [], {}].map((value) => Object.assign(artifact(), { payload: value })),
+    ] as unknown as IConversationArtifact[];
+    h.list.mockResolvedValue(malformed);
+    render(<GeneratedArtifactPreview conversationId='chat-a' projectId='project-a' />);
+    for (const value of malformed) {
+      expect(() => isGeneratedArtifact(value, 'chat-a', 'project-a')).not.toThrow();
+      expect(isGeneratedArtifact(value, 'chat-a', 'project-a')).toBe(false);
+      expect(() => emit(value)).not.toThrow();
+    }
+    await act(async () => {});
+    expect(h.read).not.toHaveBeenCalled();
+    expect(h.open).not.toHaveBeenCalled();
+    expect(h.error).not.toHaveBeenCalled();
+  });
   it('rejects cross-scope, absolute, traversal, local, missing and unsupported references', () => {
     const values = [
       artifact('foreign', 'file.md', 'foreign'),

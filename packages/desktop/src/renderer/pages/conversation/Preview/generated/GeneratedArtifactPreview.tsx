@@ -30,10 +30,11 @@ export function isGeneratedArtifact(
   conversationId: string,
   projectId: string
 ): artifact is IGeneratedFileArtifact {
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
+  if (!artifact.payload || typeof artifact.payload !== 'object' || Array.isArray(artifact.payload)) return false;
   if (artifact.kind !== 'generated_file' || artifact.status !== 'active' || artifact.conversation_id !== conversationId)
     return false;
   const { file, project_id, file_name } = artifact.payload;
-  if (!artifact?.payload || typeof artifact.payload !== 'object') return false;
   if (
     project_id !== projectId ||
     file?.kind !== 'project' ||
