@@ -14,14 +14,14 @@
  */
 
 import React from 'react';
-import { render, waitFor, cleanup, screen } from '@testing-library/react';
+import { render, waitFor, cleanup, screen, fireEvent } from '@testing-library/react';
 import { act } from 'react';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IConversationListChangedEvent } from '@/common/adapter/ipcBridge';
 import type { TChatConversation } from '@/common/config/storage';
-import type { NativeRuntimeContext } from '@/common/adapter/httpBridge';
+import { BackendHttpError, type NativeRuntimeContext } from '@/common/adapter/httpBridge';
 
 const nativeActivation = vi.hoisted(() => ({
   context: null as NativeRuntimeContext | null,
@@ -124,6 +124,61 @@ describe('conversation project_id backfill — responsive refetch on listChanged
 
     // Refetch fires → backfilled project_id flows to the store → host would render.
     await waitFor(() => expect(getCurrentProject()).toBe('p1'));
+  });
+
+  it('keeps an already loaded conversation visible when a background detail refresh returns 503', async () => {
+    getConversationOrNull.mockResolvedValueOnce(conv('p1')).mockRejectedValue(
+      new BackendHttpError({
+        method: 'GET',
+        path: '/api/conversations/c1',
+        status: 503,
+        body: { error: 'Temporarily unavailable' },
+      })
+    );
+    renderIndex();
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
+    await act(async () => {
+      listChangedCb?.({ conversation_id: 'c1', action: 'updated' } as IConversationListChangedEvent);
+    });
+    await waitFor(() => expect(getConversationOrNull).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('chat')).toHaveTextContent('c1');
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.versions.unavailable');
+    getConversationOrNull.mockResolvedValue(conv('p1'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByTestId('chat')).toHaveTextContent('c1');
+  });
+
+  it.each([401, 403])('does not retain an interactive cached conversation after a %s denial', async (status) => {
+    getConversationOrNull.mockResolvedValueOnce(conv('p1')).mockRejectedValue(
+      new BackendHttpError({
+        method: 'GET',
+        path: '/api/conversations/c1',
+        status,
+        body: { error: 'Denied' },
+      })
+    );
+    renderIndex();
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
+    await act(async () => {
+      listChangedCb?.({ conversation_id: 'c1', action: 'updated' } as IConversationListChangedEvent);
+    });
+    await waitFor(() => expect(screen.queryByTestId('chat')).not.toBeInTheDocument());
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.versions.unavailable');
+  });
+
+  it('still blocks a first conversation load when no cached detail is available', async () => {
+    getConversationOrNull.mockRejectedValue(
+      new BackendHttpError({
+        method: 'GET',
+        path: '/api/conversations/c1',
+        status: 503,
+        body: { error: 'Unavailable' },
+      })
+    );
+    renderIndex();
+    await screen.findByRole('alert');
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
   });
 
   it('ignores a listChanged event for a different conversation (no refetch)', async () => {

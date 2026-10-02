@@ -3,6 +3,7 @@ import {
   getActiveNativeRuntimeContext,
   getBuilderWorkspace,
   isNativeRuntimeActive,
+  isBackendHttpError,
   nativeRuntimeActivationEpoch,
   subscribeNativeRuntimeActivation,
   suspendNativeRuntime,
@@ -155,8 +156,11 @@ const ChatConversationIndex: React.FC = () => {
     navigate('/', { replace: true });
   }, [activeId, isLoading, error, data, navigate, t]);
 
+  // A transient refresh failure must not unmount an already loaded conversation.
+  // Auth/ownership failures and unresolved continuations still block the route.
+  const detailRefreshFailed = !!data && isBackendHttpError(error) && error.status >= 500 && error.status < 600;
   if (versions.isLoading || isLoading) return <AppLoader />;
-  if ((!versions.data && versions.error) || error)
+  if ((!versions.data && versions.error) || (error && !detailRefreshFailed))
     return (
       <div role='alert' className='flex items-center gap-12px p-20px text-t-secondary'>
         <span>{t('conversation.versions.unavailable')}</span>
@@ -174,7 +178,7 @@ const ChatConversationIndex: React.FC = () => {
   return (
     <VersionHistoryProvider value={versions}>
       <div className='flex flex-col h-full min-h-0'>
-        {(versions.restoreError || versions.error) && (
+        {(versions.restoreError || versions.error || detailRefreshFailed) && (
           <div role='alert' className='flex items-center gap-12px px-20px py-8px text-13px text-danger'>
             <span>
               {t(
@@ -182,10 +186,19 @@ const ChatConversationIndex: React.FC = () => {
                   ? 'conversation.versions.restoreConflict'
                   : versions.restoreError
                     ? 'conversation.versions.restoreUnavailable'
-                    : 'conversation.versions.restoreHistoryUnavailable'
+                    : detailRefreshFailed
+                      ? 'conversation.versions.unavailable'
+                      : 'conversation.versions.restoreHistoryUnavailable'
               )}
             </span>
-            <Button size='mini' loading={versions.isValidating} onClick={() => void versions.refresh()}>
+            <Button
+              size='mini'
+              loading={versions.isValidating}
+              onClick={() => {
+                if (detailRefreshFailed) void mutate();
+                else void versions.refresh();
+              }}
+            >
               {t('common.retry')}
             </Button>
           </div>
