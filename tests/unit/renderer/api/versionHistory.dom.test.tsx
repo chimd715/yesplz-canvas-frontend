@@ -35,6 +35,7 @@ const nativeActive = vi.hoisted(() => ({ current: true, epoch: 0 }));
 const activationListeners = vi.hoisted(() => new Set<() => void>());
 vi.mock('@/common/adapter/httpBridge', () => ({
   getBaseUrl: () => '',
+  resolveCoreCsrfToken: () => '',
   getBuilderWorkspace: () => null,
   getActiveNativeRuntimeContext: () => null,
   isNativeRuntimeActive: () => nativeActive.current,
@@ -61,6 +62,9 @@ import {
 } from '@/renderer/pages/conversation/components/ChatLayout/VersionHistory';
 import { VersionTimelineItems } from '@/renderer/pages/conversation/components/ChatLayout/VersionHistory/VersionCard';
 import {
+  fetchVersions,
+  fetchSourceVersions,
+  fetchRevertedMessages,
   restoreVersion,
   versionPreviewUrl,
   type VersionHistory,
@@ -140,6 +144,60 @@ afterEach(() => {
 });
 
 describe('saved conversation versions', () => {
+  it('recovers a version read after session refresh and preserves an expected legacy 404', async () => {
+    const path = '/api/platform/conversations/logical/versions';
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: 'Unauthorized' }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ success: true }))
+      .mockResolvedValueOnce(Response.json({ error: 'No version history yet' }, { status: 404 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(fetchVersions(path)).resolves.toBeNull();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([path, '/api/auth/refresh', path]);
+    expect(fetcher.mock.calls[1][1]).toMatchObject({ method: 'POST', credentials: 'include' });
+  });
+
+  it.each([401, 403])('preserves a real %s denial after at most one refresh', async (status) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: 'Denied' }, { status }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(fetchVersions('/api/platform/conversations/logical/versions')).rejects.toMatchObject({ status });
+    expect(fetcher).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
+  });
+
+  it('does not refresh again if the replay is still unauthorized', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: 'Unauthorized' }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ success: true }))
+      .mockResolvedValueOnce(Response.json({ error: 'Unauthorized' }, { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(fetchVersions('/api/platform/conversations/logical/versions')).rejects.toMatchObject({ status: 401 });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('shares the same refresh for source and reverted history reads', async () => {
+    let refreshed = false;
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      if (String(url) === '/api/auth/refresh') {
+        await Promise.resolve();
+        refreshed = true;
+        return Response.json({ success: true });
+      }
+      if (!refreshed) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      return String(url).includes('source-versions')
+        ? Response.json({ configured: true, versions: [], cards: [] })
+        : Response.json({ items: [] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      Promise.all([
+        fetchSourceVersions('/api/platform/source-versions?conversationId=logical'),
+        fetchRevertedMessages('/api/platform/conversations/logical/reverted/group/messages'),
+      ])
+    ).resolves.toEqual([{ configured: true, versions: [], cards: [] }, { items: [] }]);
+    expect(fetcher.mock.calls.filter(([url]) => url === '/api/auth/refresh')).toHaveLength(1);
+  });
+
   it('keeps the active context until restore commits and retains a future for preview and another restore', async () => {
     let current = initial();
     let finish!: (response: Response) => void;

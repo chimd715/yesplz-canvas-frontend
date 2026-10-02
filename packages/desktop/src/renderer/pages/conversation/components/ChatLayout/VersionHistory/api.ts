@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { refreshSession } from '@/common/adapter/sessionRefresh';
 import { isHistoricalPreviewUrl } from '@/renderer/utils/platform';
 
 const id = z.string().min(1).max(200);
@@ -62,13 +63,22 @@ export type VersionSelection =
 export const sourceVersionsPath = (conversationId: string): string =>
   `/api/platform/source-versions?conversationId=${encodeURIComponent(conversationId)}`;
 
-export async function fetchSourceVersions(path: string): Promise<SourceHistory | null> {
-  const response = await fetch(path, {
+/** Replay safe reads once after the same coalesced session refresh used by the Core bridge. */
+async function fetchHistoryRead(path: string): Promise<Response> {
+  const options: RequestInit = {
     credentials: 'same-origin',
     cache: 'no-store',
     redirect: 'error',
     signal: AbortSignal.timeout(15000),
-  });
+  };
+  const response = await fetch(path, options);
+  if (response.status !== 401 || !(await refreshSession())) return response;
+  options.signal!.throwIfAborted();
+  return fetch(path, options);
+}
+
+export async function fetchSourceVersions(path: string): Promise<SourceHistory | null> {
+  const response = await fetchHistoryRead(path);
   if (response.status === 404) return null;
   if (!response.ok) throw new VersionRequestError(response.status);
   return sourceHistorySchema.parse(await response.json());
@@ -137,12 +147,7 @@ export class VersionRequestError extends Error {
 }
 
 export async function fetchVersions(path: string): Promise<VersionHistory | null> {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    redirect: 'error',
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await fetchHistoryRead(path);
   if (response.status === 404) return null;
   if (!response.ok) throw new VersionRequestError(response.status);
   return versionHistorySchema.parse(await response.json());
@@ -170,12 +175,7 @@ export async function restoreVersion(
 }
 
 export async function fetchRevertedMessages(path: string): Promise<HistoryPage> {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    redirect: 'error',
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await fetchHistoryRead(path);
   if (!response.ok) throw new VersionRequestError(response.status);
   return historyPageSchema.parse(await response.json());
 }
