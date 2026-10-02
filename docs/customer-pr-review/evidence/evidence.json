@@ -1,0 +1,137 @@
+{
+  "before_frontend": "384312e243695a6e9c6da14f289799c3058e6d81",
+  "before_compatibility_core": "093ff64a5450bf5011867bb4829119334f4dbacb",
+  "original_core_baseline_executed": false,
+  "after_frontend_production": "474140364339d917edb1f1770d8105b5ad85af52",
+  "after_core": "093ff64a5450bf5011867bb4829119334f4dbacb",
+  "after_root_runtime": "d728bb7ee221fb85f23145d09ed59466f1a50062",
+  "model": "deterministic local mock",
+  "items": [
+    {
+      "item": 1,
+      "before": ["before/chat/server-file-picker.png", "before/chat/attachment-menu.png"],
+      "after": ["after/chat/browser-attachments.png"],
+      "before_observation": "Add files opened Select a file on the server. The alternative Upload from device already existed.",
+      "before_limits": "This proves the inconsistent customer entry point; do not claim every baseline attachment entry used the server picker. Browser drag/drop was not exercised on the baseline."
+    },
+    {
+      "item": 2,
+      "before": ["before/chat/long-prompt-before-guard.png"],
+      "after": ["after/chat/prompt-limit.png"],
+      "before_observation": "A harmless 273012-character unsent input kept Send enabled.",
+      "before_limits": "The input was never sent. This is frontend guard evidence; original Core335 provider limits were not executed."
+    },
+    {
+      "item": 3,
+      "before": ["before/chat/conversation-controls.png"],
+      "after": ["after/tools/secret-masked-dialog.png"],
+      "before_observation": "The baseline composer showed attachment/draft/permission controls and no dedicated secure-secret modal entry.",
+      "before_limits": "Generic before context only. No secret was entered. Encryption and no-LLM handling cannot be demonstrated by this still image."
+    },
+    {
+      "item": 4,
+      "before": ["before/chat/inline-questions.png"],
+      "after": ["after/tools/question-first-step.png"],
+      "before_observation": "The mock model invoked two questions, shown together inside the message history.",
+      "before_limits": "Actual baseline UI with current local mock/Core compatibility, not a cloud-model request."
+    },
+    {
+      "item": 5,
+      "before": ["before/history/sidebar-archive-only.png"],
+      "after": ["after/chat/delete-dialog.png"],
+      "before_observation": "The real conversation menu exposed Archive and no Delete.",
+      "before_limits": "Database retention semantics are not visible in the screenshot."
+    },
+    {
+      "item": 6,
+      "before": ["before/history/sidebar-archive-only.png"],
+      "after": ["after/chat/archive-applied.png"],
+      "before_observation": "The baseline Archive action is visible in the real conversation menu.",
+      "before_limits": "Context only. A delayed archive-list response bug was not reproduced; no fabricated stale row is shown."
+    },
+    {
+      "item": 7,
+      "before": ["before/chat/generated-file-no-auto-preview.png"],
+      "after": ["after/tools/document-preview.png"],
+      "before_observation": "Actual local Write produced mock-preview.html; its file-tree entry was visible while the right side stayed in Files rather than opening the preview.",
+      "before_limits": "Current Core093 handled Write/publication. This demonstrates baseline FE384 display behavior, not original Core335 artifact behavior."
+    },
+    {
+      "item": 8,
+      "before": ["before/chat/manual-draft-box.png"],
+      "after": ["after/chat/prompt-queue.png"],
+      "before_observation": "Using Save to Draft box displayed one harmless draft and Manual send.",
+      "before_limits": "This depicts the original manual draft workflow; maximum queue capacity and active-turn automatic submission were not measured in the baseline."
+    },
+    {
+      "item": 9,
+      "before": ["before/home/login-context.png"],
+      "after": ["after/chat/auth-renewed.png"],
+      "before_observation": "A fresh unauthenticated browser context displayed the actual baseline login screen.",
+      "before_limits": "Context only, not proof of premature logout. Authentication server is current Core093, so original expiry behavior was not executed."
+    },
+    {
+      "item": 10,
+      "before": ["before/chat/conversation-controls.png"],
+      "after": ["after/chat/direct-conversation.png"],
+      "before_observation": "The original native conversation entry displayed the actual empty chat/composer.",
+      "before_limits": "No Resume summary page was observed for this native fixture. No ACP CLI/runtime or fabricated summary page was used."
+    },
+    {
+      "item": 11,
+      "before": ["before/chat/permission-picker.png", "before/home/developer-home.png"],
+      "after": ["after/chat/model-menu.png"],
+      "before_observation": "The composer exposed Default, Auto Edit, and YOLO permission choices. The home screen also exposed a permission control.",
+      "before_limits": "The fixture was initialized in YOLO for safe deterministic tool execution; customer-visible selectable modes are genuine original FE UI."
+    },
+    {
+      "item": 12,
+      "before": ["before/chat/separate-thinking-activity.png"],
+      "after": ["after/tools/expanded-activity.png"],
+      "before_observation": "Actual mock reasoning appeared in a separate expandable Thought complete row; tool Write appeared in a separate View Steps group.",
+      "before_limits": "The baseline already grouped tool steps and retained this completed reasoning. Do not claim this still image proves disappearing activity or that all baseline activity was ungrouped."
+    },
+    {
+      "item": 13,
+      "before": ["before/history/brand-click-remains-conversation.png"],
+      "after": ["after/home/direct-chat.png"],
+      "before_observation": "Clicking the visible Build Your Own brand left the hash route at /conversation/8651cb5d.",
+      "before_limits": "The action/unchanged route is recorded in ignored capture notes; a still image alone does not show navigation timing."
+    },
+    {
+      "item": 14,
+      "before": ["before/home/developer-home.png"],
+      "after": ["after/home/direct-chat.png"],
+      "before_observation": "The actual native home showed a separate home composer, project chooser, developer agent choices, and suggestions.",
+      "before_limits": "Context only. No literal Start workspace button was observed on this native route; do not invent that before state."
+    },
+    {
+      "item": 15,
+      "before": ["before/home/developer-home.png"],
+      "after": ["after/home/direct-chat.png"],
+      "before_observation": "The actual home displayed Build Your Own, Claude Code, Codex CLI, Hermes, and More pills.",
+      "before_limits": "The visible fourth pill was Hermes on this recorded SHA. Do not label it Gemini in the screenshot caption."
+    },
+    {
+      "item": 16,
+      "before": ["before/history/back-reopen-context.png"],
+      "after": ["after/chat/restored-session.png"],
+      "before_observation": "After native history was loaded, Back to /guid and sidebar reopen displayed all 13 persisted rows.",
+      "before_limits": "Context only: the durable blank-history bug was not reproduced. A transient zero row count before async history loading was corrected and is not claimed as bug proof."
+    },
+    {
+      "item": 17,
+      "before": ["before/chat/dollar-skills-no-popup.png"],
+      "after": ["after/chat/skill-menu.png"],
+      "before_observation": "Typing $ in the actual composer showed no skills popup.",
+      "before_limits": "The baseline attachment menu already had Selected skills; this evidence specifically concerns dollar-triggered selection."
+    },
+    {
+      "item": 18,
+      "before": ["before/history/scroll-before-top-jump.png"],
+      "after": ["after/history/10-history-up-arrow.png"],
+      "before_observation": "A real wheel scroll reached top352 of height2289 (viewport937); the original downward scroll-to-bottom control is visible, with no new upward endpoint control.",
+      "before_limits": "Do not claim the original UI lacked all arrows. This screenshot depicts the new top-jump gap; original database pagination costs were not measured."
+    }
+  ]
+}
