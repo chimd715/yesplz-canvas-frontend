@@ -7,18 +7,19 @@
 import type { TMessage } from '@/common/chat/chatLib';
 import { loadAllConversationMessagesPaged } from '@/renderer/utils/chat/messagePagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useHistoryRequestScope } from '../historyScope/useHistoryRequestScope';
 import { buildMessageAnchors, type MessageAnchorItem } from './anchors';
 
 /**
- * Anchors for a conversation's *whole* history, not just the pages currently held
- * in memory.
+ * Customer chat anchors follow the current bounded history window without
+ * background reads. Other surfaces retain their whole-history rail.
  *
  * The chat area loads messages lazily, so reopening an old conversation starts
  * with only the newest page. Deriving ticks from that alone made the rail claim a
  * long conversation was short: earlier turns simply had no anchor until the user
  * scrolled up far enough to page them in — which defeats the point of a jump
- * target. So the rail reads the full turn list once, the same way the search
- * panel and conversation export do.
+ * target. The desktop/legacy rail therefore reads the full turn list once,
+ * the same way the search panel and conversation export do.
  *
  * The fetched list seeds the rail; the in-memory list then takes over whenever it
  * covers more turns, which is what keeps new messages appearing live without
@@ -26,15 +27,17 @@ import { buildMessageAnchors, type MessageAnchorItem } from './anchors';
  */
 export const useConversationAnchors = (
   conversationId: string | undefined,
-  liveMessages: TMessage[]
+  liveMessages: TMessage[],
+  bounded = false
 ): MessageAnchorItem[] => {
+  const historyScope = useHistoryRequestScope(conversationId);
   const [historyAnchors, setHistoryAnchors] = useState<MessageAnchorItem[]>([]);
   // Guards against a stale conversation's response landing after a switch.
   const requestedIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     requestedIdRef.current = conversationId;
-    if (!conversationId) {
+    if (!conversationId || bounded) {
       setHistoryAnchors([]);
       return;
     }
@@ -61,12 +64,22 @@ export const useConversationAnchors = (
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, bounded]);
 
-  const liveAnchors = useMemo(() => buildMessageAnchors(liveMessages), [liveMessages]);
+  const liveAnchors = useMemo(
+    () =>
+      buildMessageAnchors(
+        bounded ? liveMessages.filter((message) => message.conversation_id === conversationId) : liveMessages
+      ),
+    [liveMessages, conversationId, bounded]
+  );
 
-  return useMemo(
+  const wholeHistoryAnchors = useMemo(
     () => (liveAnchors.length >= historyAnchors.length ? liveAnchors : historyAnchors),
     [liveAnchors, historyAnchors]
   );
+  if (!bounded) return wholeHistoryAnchors;
+  // The cache owns this scope. A previous route's cached rows must not become
+  // clickable while the new conversation is hydrating or has been unmounted.
+  return historyScope.current.active && historyScope.current.conversationId === conversationId ? liveAnchors : [];
 };

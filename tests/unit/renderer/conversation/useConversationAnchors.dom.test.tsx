@@ -5,10 +5,29 @@
  */
 
 import type { TMessage } from '@/common/chat/chatLib';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import React from 'react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadAllConversationMessagesPaged = vi.fn();
+const fixture = vi.hoisted(() => ({
+  messages: [] as TMessage[],
+  conversation: { conversation_id: 'c1', type: 'aionrs' },
+  team: null as { isTeamMode: true } | null,
+  scope: { current: { conversationId: 'c1', active: true, epoch: 0, window: 'latest' } },
+}));
+
+vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
+  useConversationContextSafe: () => fixture.conversation,
+}));
+vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', () => ({
+  useTeamPermission: () => fixture.team,
+}));
+vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({ useMessageList: () => fixture.messages }));
+vi.mock('@/renderer/pages/conversation/Messages/historyScope/useHistoryRequestScope', () => ({
+  useHistoryRequestScope: () => fixture.scope,
+}));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 vi.mock('@/renderer/utils/chat/messagePagination', () => ({
   loadAllConversationMessagesPaged: (...args: unknown[]) => loadAllConversationMessagesPaged(...args),
@@ -16,6 +35,8 @@ vi.mock('@/renderer/utils/chat/messagePagination', () => ({
 
 const { useConversationAnchors } =
   await import('@/renderer/pages/conversation/Messages/anchorRail/useConversationAnchors');
+const { MessageAnchorRail } = await import('@/renderer/pages/conversation/Messages/anchorRail');
+const { CHAT_MESSAGE_JUMP_EVENT } = await import('@/renderer/utils/chat/chatMinimapEvents');
 
 /** Builds one user/assistant turn pair. */
 const turn = (n: number): TMessage[] =>
@@ -44,7 +65,92 @@ const history = (count: number) => Array.from({ length: count }, (_, i) => turn(
 
 describe('useConversationAnchors', () => {
   beforeEach(() => {
+    cleanup();
     loadAllConversationMessagesPaged.mockReset();
+    fixture.messages = [];
+    fixture.conversation = { conversation_id: 'c1', type: 'aionrs' };
+    fixture.team = null;
+    fixture.scope.current = { conversationId: 'c1', active: true, epoch: 0, window: 'latest' };
+    delete window.electronAPI;
+  });
+
+  it('uses only the currently loaded customer window and replaces anchors on endpoint navigation', () => {
+    const { result, rerender } = renderHook(({ live }) => useConversationAnchors('c1', live, true), {
+      initialProps: { live: history(40).slice(-4) },
+    });
+    expect(result.current.map((anchor) => anchor.question)).toEqual(['question 39', 'question 40']);
+    fixture.scope.current.window = 'first';
+    rerender({ live: history(2) });
+    expect(result.current.map((anchor) => anchor.question)).toEqual(['question 1', 'question 2']);
+    rerender({ live: history(3) });
+    expect(result.current).toHaveLength(3);
+    fixture.scope.current.window = 'latest';
+    rerender({ live: history(40).slice(-4) });
+    expect(result.current.map((anchor) => anchor.question)).toEqual(['question 39', 'question 40']);
+    expect(loadAllConversationMessagesPaged).not.toHaveBeenCalled();
+  });
+
+  it('rejects foreign cached rows and inactive or mismatched customer history scopes', () => {
+    const { result, rerender } = renderHook(({ id }) => useConversationAnchors(id, history(2), true), {
+      initialProps: { id: 'c1' },
+    });
+    expect(result.current).toHaveLength(2);
+    rerender({ id: 'c2' });
+    expect(result.current).toEqual([]);
+    fixture.scope.current.conversationId = 'c2';
+    rerender({ id: 'c2' });
+    expect(result.current).toEqual([]);
+    fixture.scope.current.conversationId = 'c1';
+    fixture.scope.current.active = false;
+    rerender({ id: 'c1' });
+    expect(result.current).toEqual([]);
+    expect(loadAllConversationMessagesPaged).not.toHaveBeenCalled();
+  });
+
+  it('cancels an older whole-history result when entering bounded customer mode', async () => {
+    let resolveHistory!: (rows: TMessage[]) => void;
+    loadAllConversationMessagesPaged.mockReturnValue(new Promise<TMessage[]>((resolve) => (resolveHistory = resolve)));
+    const { result, rerender } = renderHook(({ bounded }) => useConversationAnchors('c1', history(2), bounded), {
+      initialProps: { bounded: false },
+    });
+    expect(loadAllConversationMessagesPaged).toHaveBeenCalledOnce();
+    rerender({ bounded: true });
+    await act(async () => resolveHistory(history(40)));
+    expect(result.current).toHaveLength(2);
+    expect(loadAllConversationMessagesPaged).toHaveBeenCalledOnce();
+  });
+
+  it('renders bounded native browser ticks and dispatches a scoped keyboard jump without fetching history', () => {
+    fixture.messages = history(40).slice(-4);
+    const jump = vi.fn();
+    window.addEventListener(CHAT_MESSAGE_JUMP_EVENT, jump);
+    try {
+      render(<MessageAnchorRail />);
+      const ticks = screen.getAllByTestId('message-anchor-tick');
+      expect(ticks).toHaveLength(2);
+      fireEvent.keyDown(ticks[0], { key: 'Enter' });
+      expect(jump).toHaveBeenCalledOnce();
+      expect((jump.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+        conversation_id: 'c1',
+        messageId: 'u-39',
+        msgId: 'u-39',
+        align: 'start',
+      });
+      expect(loadAllConversationMessagesPaged).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(CHAT_MESSAGE_JUMP_EVENT, jump);
+    }
+  });
+
+  it.each(['desktop', 'team', 'legacy'])('preserves whole-history anchors for %s', async (surface) => {
+    fixture.messages = history(2);
+    if (surface === 'desktop') window.electronAPI = {} as NonNullable<typeof window.electronAPI>;
+    if (surface === 'team') fixture.team = { isTeamMode: true };
+    if (surface === 'legacy') fixture.conversation.type = 'acp';
+    loadAllConversationMessagesPaged.mockResolvedValue(history(40));
+    render(<MessageAnchorRail />);
+    await waitFor(() => expect(screen.getAllByTestId('message-anchor-tick')).toHaveLength(40));
+    expect(loadAllConversationMessagesPaged).toHaveBeenCalledWith('c1', { contentMode: 'compact' });
   });
 
   it('covers the whole history even when the chat area has only paged in the tail', async () => {

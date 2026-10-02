@@ -5,6 +5,7 @@
  */
 
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
+import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import { dispatchChatMessageJump, dispatchChatSearchPanelOpen } from '@/renderer/utils/chat/chatMinimapEvents';
 import { IconSearch } from '@arco-design/web-react/icon';
 import classNames from 'classnames';
@@ -63,10 +64,12 @@ const MessageAnchorRail: React.FC = () => {
   const messages = useMessageList();
   const conversationContext = useConversationContextSafe();
   const conversationId = conversationContext?.conversation_id;
+  const teamPermission = useTeamPermission();
+  const bounded = conversationContext?.type === 'aionrs' && !window.electronAPI && !teamPermission?.isTeamMode;
 
-  // Covers the whole conversation, not just the pages the chat area has loaded, so
-  // reopening an old conversation shows every turn without scrolling up first.
-  const anchors = useConversationAnchors(conversationId, messages);
+  // Customer anchors track loaded pages; first/latest navigation loads the
+  // requested window instead of fetching all history in the background.
+  const anchors = useConversationAnchors(conversationId, messages, bounded);
 
   // A callback ref, not a plain one: the rail is not rendered until a second
   // anchor arrives, so a mount-only effect would run while there is no element to
