@@ -60,4 +60,24 @@ describe('secure browser credential channel', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('private-token', { status: 500 })));
     await expect(uploadSecret('chat-a', row.id, 'private-token')).rejects.toThrow('secret_request_failed');
   });
+  it('does not replay an upload if its scope is aborted while session refresh is in flight', async () => {
+    let finishRefresh!: (result: boolean) => void;
+    vi.mocked(refreshSession).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        })
+    );
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    const controller = new AbortController();
+    const upload = uploadSecret('chat-a', row.id, 'private-token', controller.signal);
+    const rejected = expect(upload).rejects.toThrow();
+    await vi.waitFor(() => expect(refreshSession).toHaveBeenCalledOnce());
+    controller.abort();
+    finishRefresh(true);
+    await rejected;
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
+  });
 });

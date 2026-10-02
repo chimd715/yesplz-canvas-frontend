@@ -3,10 +3,11 @@ import { Alert, Button, Input, Message, Modal, Select, Typography } from '@arco-
 import { Lock } from '@icon-park/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { listSecrets, requestSecret, revokeSecret, uploadSecret, type SecretMetadata } from './client';
 
 /** Dedicated browser channel; credential values never enter chat drafts, IPC, or model question answers. */
-const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId }) => {
+const SecretDialog: React.FC<{ conversationId: string }> = ({ conversationId }) => {
   const { t } = useTranslation();
   const [rows, setRows] = useState<SecretMetadata[]>([]);
   const [visible, setVisible] = useState(false);
@@ -19,8 +20,11 @@ const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId })
   const dismissed = useRef(new Set<string>());
   const dialogOpen = useRef(false);
   const uploading = useRef(false);
+  const operation = useRef<AbortController | null>(null);
+  const mounted = useRef(false);
 
   useEffect(() => {
+    mounted.current = true;
     const controller = new AbortController();
     let polling = false;
     const refresh = async (): Promise<void> => {
@@ -50,12 +54,19 @@ const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId })
     void refresh();
     const timer = setInterval(() => void refresh(), 3000);
     return () => {
+      mounted.current = false;
       controller.abort();
+      operation.current?.abort();
+      operation.current = null;
       clearInterval(timer);
     };
   }, [conversationId]);
 
   const close = (): void => {
+    operation.current?.abort();
+    operation.current = null;
+    uploading.current = false;
+    setBusy(false);
     dialogOpen.current = false;
     setValue('');
     setError(false);
@@ -63,26 +74,55 @@ const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId })
     setSelected(undefined);
   };
   const save = async (): Promise<void> => {
-    if (busy || !value || value.length > 8192 || !/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) return;
+    if (uploading.current || !value || value.length > 8192 || !/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    const active = (): boolean => mounted.current && !controller.signal.aborted && operation.current === controller;
     uploading.current = true;
     setBusy(true);
     setError(false);
     try {
-      const target = selected ?? (await requestSecret(conversationId, name, service));
+      const target = selected ?? (await requestSecret(conversationId, name, service, controller.signal));
+      if (!active()) return;
       if (target.state === 'stored') {
         setValue('');
         setError(true);
         return;
       }
-      await uploadSecret(conversationId, target.id, value);
+      const stored = await uploadSecret(conversationId, target.id, value, controller.signal);
+      if (!active()) return;
+      setRows((previous) => [...previous.filter((row) => row.id !== stored.id), stored]);
       close();
-      setRows(await listSecrets(conversationId));
       Message.success(t('conversation.secureSecrets.saved'));
     } catch {
-      setError(true);
+      if (active()) setError(true);
     } finally {
-      uploading.current = false;
-      setBusy(false);
+      if (active()) {
+        operation.current = null;
+        uploading.current = false;
+        setBusy(false);
+      }
+    }
+  };
+  const revoke = async (id: string): Promise<void> => {
+    if (uploading.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    const active = (): boolean => mounted.current && !controller.signal.aborted && operation.current === controller;
+    uploading.current = true;
+    setBusy(true);
+    setError(false);
+    try {
+      await revokeSecret(conversationId, id, controller.signal);
+      if (active()) setRows((previous) => previous.filter((row) => row.id !== id));
+    } catch {
+      if (active()) setError(true);
+    } finally {
+      if (active()) {
+        operation.current = null;
+        uploading.current = false;
+        setBusy(false);
+      }
     }
   };
 
@@ -159,20 +199,7 @@ const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId })
           .map((row) => (
             <div key={row.id} className='flex items-center justify-between mt-12px'>
               <Typography.Text>{row.name}</Typography.Text>
-              <Button
-                size='small'
-                status='danger'
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  void revokeSecret(conversationId, row.id)
-                    .then(async () => {
-                      setRows(await listSecrets(conversationId));
-                    })
-                    .catch(() => setError(true))
-                    .finally(() => setBusy(false));
-                }}
-              >
+              <Button size='small' status='danger' disabled={busy} onClick={() => void revoke(row.id)}>
                 {t('conversation.secureSecrets.revoke')}
               </Button>
             </div>
@@ -180,5 +207,11 @@ const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId })
       </Modal>
     </>
   );
+};
+const SecureSecrets: React.FC<{ conversationId: string }> = ({ conversationId }) => {
+  const { status, user } = useAuth();
+  if (status !== 'authenticated') return null;
+  // The dialog and all in-flight operations belong to exactly one account/conversation.
+  return <SecretDialog key={`${user?.id ?? 'local'}:${conversationId}`} conversationId={conversationId} />;
 };
 export default SecureSecrets;
