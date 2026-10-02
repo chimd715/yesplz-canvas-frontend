@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import { conversation } from '@/common/adapter/ipcBridge';
-import { isShopifyConnectorOption } from '../Messages/MessageQuestion';
+import { allowLegacyConnectorQuestions, isShopifyConnectorOption } from '../Messages/MessageQuestion';
 
 export const shopifyPendingKey = (conversationId: string) => `shopify_pending_${conversationId}`;
 
@@ -60,8 +60,7 @@ async function answerShopifyQuestion(conversationId: string, shop: string, signa
   if (!question && pending.some((item) => hasConnector(item, true))) {
     const current = await conversation.get.invoke({ id: conversationId });
     if (signal?.aborted) throw new Error('Connection cancelled');
-    allowLegacy =
-      current?.id === conversationId && current.extra?.creationMode?.interactionContract !== 'explicit-actions-v1';
+    allowLegacy = current?.id === conversationId && allowLegacyConnectorQuestions(current.extra?.creationMode);
     if (allowLegacy) question = pending.find((item) => hasConnector(item, true));
   }
   if (!question) return pending.some((item) => item.questions?.length);

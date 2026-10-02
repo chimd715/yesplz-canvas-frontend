@@ -16,6 +16,7 @@ declare global {
   interface Window {
     __backendPort?: number;
     __BUILDER_WORKSPACE__?: unknown;
+    __BUILDER_RUNTIME_CAPABILITIES__?: unknown;
   }
 }
 
@@ -32,6 +33,12 @@ export type NativeRuntimeContext = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const workspaceBoot = typeof window === 'undefined' ? undefined : window.__BUILDER_WORKSPACE__;
+const capabilitiesBoot = typeof window === 'undefined' ? undefined : window.__BUILDER_RUNTIME_CAPABILITIES__;
+const legacyNativeQuestions =
+  !!capabilitiesBoot &&
+  typeof capabilitiesBoot === 'object' &&
+  !Array.isArray(capabilitiesBoot) &&
+  (capabilitiesBoot as Record<string, unknown>).legacyNativeQuestions === true;
 const workspace = (() => {
   if (!workspaceBoot || typeof workspaceBoot !== 'object') return null;
   const value = workspaceBoot as Record<string, unknown>;
@@ -47,6 +54,9 @@ let activeRuntimeContext: Readonly<NativeRuntimeContext> | null = null;
 let activeWorkspaceContext: Readonly<NativeWorkspaceContext> | null = null;
 let activationEpoch = 0;
 const activationListeners = new Set<() => void>();
+
+/** Authenticated shell capability for older Core question payloads; does not grant native access. */
+export const usesLegacyNativeQuestions = (): boolean => legacyNativeQuestions;
 
 /** Only authenticated shell metadata opts a hosted workspace into deferred native access. */
 export const getBuilderWorkspace = (): Readonly<BuilderWorkspace> | null => workspace;

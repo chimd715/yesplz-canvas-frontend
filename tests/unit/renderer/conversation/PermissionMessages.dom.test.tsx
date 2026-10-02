@@ -15,10 +15,16 @@ import { ConversationProvider } from '@/renderer/hooks/context/ConversationConte
 import { emitter } from '@/renderer/utils/emitter';
 import { widgetModeFixture } from '../../../fixtures/creationMode';
 
-const { genericInvoke, acpInvoke, answerAskInvoke } = vi.hoisted(() => ({
+const { genericInvoke, acpInvoke, answerAskInvoke, legacyNativeQuestions } = vi.hoisted(() => ({
+  legacyNativeQuestions: vi.fn(() => false),
   genericInvoke: vi.fn(),
   acpInvoke: vi.fn(),
   answerAskInvoke: vi.fn(),
+}));
+
+vi.mock('@/common/adapter/httpBridge', async () => ({
+  ...(await vi.importActual<typeof import('@/common/adapter/httpBridge')>('@/common/adapter/httpBridge')),
+  usesLegacyNativeQuestions: legacyNativeQuestions,
 }));
 
 vi.mock('@/common', () => ({
@@ -97,12 +103,17 @@ describe('permission message adapters', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    legacyNativeQuestions.mockReturnValue(false);
     genericInvoke.mockResolvedValue(undefined);
     acpInvoke.mockResolvedValue(undefined);
     answerAskInvoke.mockResolvedValue(undefined);
   });
 
-  const renderCatalogQuestion = (options: IAskQuestion['options'], legacy = false) =>
+  const renderCatalogQuestion = (
+    options: IAskQuestion['options'],
+    legacy = false,
+    question = legacy ? 'Which platform is your store on?' : 'Pick a source for this feature'
+  ) =>
     render(
       <ConversationProvider
         value={{
@@ -126,9 +137,7 @@ describe('permission message adapters', () => {
             content: {
               session_id: 'conversation-1',
               request_id: 'connector-question',
-              questions: [
-                { question: legacy ? 'Which platform is your store on?' : 'Pick a source for this feature', options },
-              ],
+              questions: [{ question, options }],
             },
           }}
         />
@@ -173,6 +182,47 @@ describe('permission message adapters', () => {
         { question: 'Which platform is your store on?', labels: ['Shopify (selected store: verified.myshopify.com)'] },
       ],
     });
+  });
+
+  it('connects a new catalog snapshot on a verified legacy native runtime', async () => {
+    legacyNativeQuestions.mockReturnValue(true);
+    const emit = vi.spyOn(emitter, 'emit');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ connected: true, shop: 'verified.myshopify.com' }) })
+    );
+    renderCatalogQuestion([{ label: 'Shopify' }, { label: 'Other' }], false, 'Which platform is your store on?');
+    fireEvent.click(screen.getByTestId('message-question-option-0-Shopify'));
+    expect(emit).toHaveBeenCalledWith('connectors.shopify.open', true, 'conversation-1');
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(answerAskInvoke).toHaveBeenCalledWith({
+      conversation_id: 'conversation-1',
+      request_id: 'connector-question',
+      answers: [
+        { question: 'Which platform is your store on?', labels: ['Shopify (selected store: verified.myshopify.com)'] },
+      ],
+    });
+  });
+
+  it('does not replace unsupported explicit actions on a legacy native runtime', async () => {
+    legacyNativeQuestions.mockReturnValue(true);
+    const emit = vi.spyOn(emitter, 'emit');
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    renderCatalogQuestion(
+      [
+        { label: 'Shopify', action: { type: 'connect', connector: 'unknown' } } as IAskQuestion['options'][number],
+        { label: 'Other' },
+      ],
+      false,
+      'Which platform is your store on?'
+    );
+    fireEvent.click(screen.getByTestId('message-question-option-0-Shopify'));
+    fireEvent.click(screen.getByTestId('message-question-submit'));
+    expect(await screen.findByTestId('message-question-status')).toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalledWith('connectors.shopify.open', true, 'conversation-1');
   });
 
   it.each([undefined, { type: 'connect', connector: 'unknown' }, { type: 'open', url: 'https://untrusted.example' }])(

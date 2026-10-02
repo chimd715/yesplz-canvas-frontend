@@ -12,6 +12,12 @@ import {
   useConnectorReturnError,
 } from '@/renderer/pages/conversation/platforms/useConnectorContinuation';
 
+const legacyNativeQuestions = vi.hoisted(() => vi.fn(() => false));
+vi.mock('@/common/adapter/httpBridge', async () => ({
+  ...(await vi.importActual<typeof import('@/common/adapter/httpBridge')>('@/common/adapter/httpBridge')),
+  usesLegacyNativeQuestions: legacyNativeQuestions,
+}));
+
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }));
 vi.mock('@arco-design/web-react', () => ({ Message: { error: vi.fn() } }));
 vi.mock('@/common/adapter/ipcBridge', () => ({
@@ -25,6 +31,7 @@ const translate = (key: string, values?: { shop?: string }) => (values?.shop ? `
 const entry = 'n'.repeat(43);
 beforeEach(() => {
   vi.clearAllMocks();
+  legacyNativeQuestions.mockReturnValue(false);
   vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([]);
   vi.mocked(conversation.answerAsk.invoke).mockResolvedValue(undefined);
   vi.mocked(conversation.get.invoke).mockResolvedValue({ id: 'current', extra: {} } as TChatConversation);
@@ -171,6 +178,40 @@ it.each([undefined, { ...widgetModeFixture, revision: 3 }])(
     expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
   }
 );
+
+it('answers an old native question for a new catalog snapshot after verified OAuth return', async () => {
+  legacyNativeQuestions.mockReturnValue(true);
+  vi.mocked(conversation.get.invoke).mockResolvedValue({
+    id: 'current',
+    extra: { creationMode: { ...widgetModeFixture, interactionContract: 'explicit-actions-v1', revision: 4 } },
+  } as TChatConversation);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => ({ connected: true, shop: 'selected.myshopify.com' }) }))
+  );
+  vi.mocked(conversation.confirmation.list.invoke).mockResolvedValue([
+    {
+      id: 'pending',
+      call_id: 'widget-data',
+      questions: [
+        { question: 'Which platform is your store on?', options: [{ label: 'Shopify' }, { label: 'Other' }] },
+      ],
+    },
+  ] as Awaited<ReturnType<typeof conversation.confirmation.list.invoke>>);
+  const accept = vi.fn(() => true);
+  renderHook(() => useConnectorContinuation('current', true, accept));
+  await waitFor(() =>
+    expect(conversation.answerAsk.invoke).toHaveBeenCalledExactlyOnceWith({
+      conversation_id: 'current',
+      request_id: 'widget-data',
+      answers: [
+        { question: 'Which platform is your store on?', labels: ['Shopify (selected store: selected.myshopify.com)'] },
+      ],
+    })
+  );
+  expect(accept).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(shopifyPendingKey('current'))).toBeNull();
+});
 
 it('keeps a failed question answer available for retry and never sends a second task', async () => {
   vi.stubGlobal(

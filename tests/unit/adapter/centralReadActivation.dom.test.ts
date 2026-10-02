@@ -55,12 +55,32 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete window.__BUILDER_WORKSPACE__;
+  delete window.__BUILDER_RUNTIME_CAPABILITIES__;
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe('central read native activation', () => {
+  it.each([undefined, null, {}, true, 'true', [], { legacyNativeQuestions: 'true' }, { legacyNativeQuestions: false }])(
+    'does not infer legacy question support from malformed or absent capabilities (%j)',
+    async (capabilities) => {
+      window.__BUILDER_RUNTIME_CAPABILITIES__ = capabilities;
+      const gate = await loadGate();
+      expect(gate.usesLegacyNativeQuestions()).toBe(false);
+    }
+  );
+
+  it('accepts a trusted legacy question capability without activating central-read native access', async () => {
+    window.__BUILDER_RUNTIME_CAPABILITIES__ = { legacyNativeQuestions: true };
+    const gate = await loadGate();
+    expect(gate.usesLegacyNativeQuestions()).toBe(true);
+    expect(gate.isNativeRuntimeActive()).toBe(false);
+    await expect(gate.httpRequest('POST', '/api/conversations/old/asks/pending/answer', {})).rejects.toMatchObject({
+      code: 'NATIVE_RUNTIME_INACTIVE',
+    });
+  });
+
   it('starts workspace metadata and creation without granting an existing conversation runtime', async () => {
     const gate = await loadGate();
     const { prepareNativeWorkspace } = await import('@/renderer/pages/conversation/platforms/aionrs/durableAdmission');
@@ -315,6 +335,7 @@ describe('central read native activation', () => {
 
   it('preserves legacy connection and native settings behavior when boot metadata is absent', async () => {
     delete window.__BUILDER_WORKSPACE__;
+    delete window.__BUILDER_RUNTIME_CAPABILITIES__;
     const gate = await import('@/common/adapter/httpBridge');
     const fetchMock = vi.fn(async () => Response.json({ data: [] }));
     vi.stubGlobal('fetch', fetchMock);

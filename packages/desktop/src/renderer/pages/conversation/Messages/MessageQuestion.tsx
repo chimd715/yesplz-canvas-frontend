@@ -12,7 +12,8 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { emitter } from '@/renderer/utils/emitter';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
-import { isNativeRuntimeActive } from '@/common/adapter/httpBridge';
+import { isNativeRuntimeActive, usesLegacyNativeQuestions } from '@/common/adapter/httpBridge';
+import type { TCreationModeSnapshot } from '@/common/config/storage';
 // The permission panel's stylesheet supplies the shared card chrome; own.* adds
 // the question-specific pieces (option rows with secondary description lines),
 // built on the same tokens so the two cards read as siblings (user feedback,
@@ -61,6 +62,10 @@ export const isStorePlatformQuestion = (q: IAskQuestion) =>
   !q.multiSelect &&
   !q.multi_select;
 
+/** Runtime capability takes precedence when a newer mode snapshot runs on an older Core. */
+export const allowLegacyConnectorQuestions = (mode?: Pick<TCreationModeSnapshot, 'interactionContract'>): boolean =>
+  usesLegacyNativeQuestions() || mode?.interactionContract !== 'explicit-actions-v1';
+
 /** Only registered connector actions can open product-owned connection UI. */
 export const isShopifyConnectorOption = (q: IAskQuestion, label: string, allowLegacy = false): boolean => {
   const option = q.options.find((item) => item.label === label);
@@ -84,7 +89,7 @@ const MessageQuestion: React.FC<MessageQuestionProps> = React.memo(({ message, o
   const { t } = useTranslation();
   const context = useConversationContextSafe();
   const readOnly = !!context?.readOnly || !isNativeRuntimeActive();
-  const allowLegacy = context?.creationMode?.interactionContract !== 'explicit-actions-v1';
+  const allowLegacy = allowLegacyConnectorQuestions(context?.creationMode);
   const content = message.content || ({} as IMessageAsk['content']);
   const questions = useMemo<IAskQuestion[]>(
     () => (Array.isArray(content.questions) ? content.questions : []),

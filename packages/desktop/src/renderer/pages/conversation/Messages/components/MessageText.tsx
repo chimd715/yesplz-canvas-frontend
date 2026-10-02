@@ -386,7 +386,10 @@ const MessageText: React.FC<{
                   questions: [
                     {
                       question: t('settings.plugins.shopify.platformQuestion'),
-                      options: [{ label: 'Shopify' }, { label: 'Other' }],
+                      options: [
+                        { label: 'Shopify', action: { type: 'connect', connector: 'shopify' } },
+                        { label: 'Other' },
+                      ],
                     },
                   ],
                 },

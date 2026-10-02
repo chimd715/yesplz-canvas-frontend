@@ -14,6 +14,7 @@ import MessageText, {
   parseTeamContextResetNotice,
 } from '@/renderer/pages/conversation/Messages/components/MessageText';
 import { copyText } from '@/renderer/utils/ui/clipboard';
+import { emitter } from '@/renderer/utils/emitter';
 import { widgetModeFixture } from '../../fixtures/creationMode';
 
 const previewMocks = vi.hoisted(() => ({
@@ -140,7 +141,8 @@ vi.mock('@/renderer/utils/ui/clipboard', () => ({
   copyText: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@arco-design/web-react', () => ({
+vi.mock('@arco-design/web-react', async () => ({
+  ...(await vi.importActual<typeof import('@arco-design/web-react')>('@arco-design/web-react')),
   Alert: () => null,
   Message: {
     error: vi.fn(),
@@ -154,7 +156,10 @@ vi.mock('@icon-park/react', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+    t: (key: string, options?: { defaultValue?: string }) =>
+      key === 'settings.plugins.shopify.platformQuestion'
+        ? '어떤 쇼핑몰 플랫폼을 사용하시나요?'
+        : (options?.defaultValue ?? key),
   }),
 }));
 
@@ -853,6 +858,26 @@ describe('creation mode user request display', () => {
     );
     expect(screen.getByTestId('message-text-content').textContent).toBe(request);
     expect(message.content.content).toBe(content);
+  });
+
+  it('opens Shopify from the translated legacy platform choice', () => {
+    const emit = vi.spyOn(emitter, 'emit');
+    const message: IMessageText = {
+      id: 'legacy-platform',
+      conversation_id: 'legacy-chat',
+      type: 'text',
+      position: 'left',
+      content: { content: '어떤 쇼핑몰 플랫폼을 사용하시나요?\nShopify / Other\n[SHOP_WIDGET_PLATFORM]' },
+    };
+    render(
+      <ConversationProvider value={{ conversation_id: 'legacy-chat', type: 'aionrs', isWidget: true }}>
+        <MessageText message={message} />
+      </ConversationProvider>
+    );
+    expect(screen.getByText('어떤 쇼핑몰 플랫폼을 사용하시나요?')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('message-question-option-0-Shopify'));
+    expect(emit).toHaveBeenCalledWith('connectors.shopify.open', true, 'legacy-chat');
+    emit.mockRestore();
   });
 
   it('preserves mismatched instructions and does not infer a connector card from new-mode prose', () => {
