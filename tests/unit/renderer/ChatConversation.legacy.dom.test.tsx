@@ -109,6 +109,10 @@ vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({ openPreview: vi.fn() }),
 }));
 
+// This wrapper test isolates runtime/model controls. The authenticated artifact
+// subscription has separate live/recovery/scope tests in generatedArtifactPreview.
+vi.mock('@/renderer/pages/conversation/Preview/generated', () => ({ default: () => null }));
+
 function legacyConversation(type: 'gemini' | 'codex' | 'openclaw-gateway' | 'nanobot' | 'remote'): TChatConversation {
   return {
     id: `conv-${type}`,
