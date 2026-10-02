@@ -24,11 +24,11 @@ import {
   MessagePaginationProvider,
   useMessagePaginationState,
   useUpdateMessagePaginationState,
-  isHistoryRequestCurrent,
-  useHistoryRequestScope,
-} from './historyScope';
-import type { HistoryRequestScope } from './historyScope';
-export type { MessagePaginationState } from './historyScope';
+} from './historyScope/contexts';
+// Recovery consumes these hooks; importing its barrel here creates a runtime cycle.
+import { isHistoryRequestCurrent, useHistoryRequestScope } from './historyScope/useHistoryRequestScope';
+import type { HistoryRequestScope } from './historyScope/useHistoryRequestScope';
+export type { MessagePaginationState } from './historyScope/contexts';
 import {
   DEFAULT_MESSAGE_PAGE_LIMIT,
   loadConversationAnchorWindow,

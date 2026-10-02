@@ -23,8 +23,10 @@ const h = vi.hoisted(() => ({
 vi.mock('@/common', () => ({ ipcBridge: { database: { getConversationMessages: { invoke: h.fetch } } } }));
 vi.mock('@arco-design/web-react', () => ({ Message: { error: h.error } }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('@/renderer/pages/conversation/Messages/historyScope', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/renderer/pages/conversation/Messages/historyScope')>()),
+vi.mock('@/renderer/pages/conversation/Messages/historyScope/useHistoryRequestScope', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@/renderer/pages/conversation/Messages/historyScope/useHistoryRequestScope')
+  >()),
   useHistoryRequestScope: () => h.scope,
 }));
 import { useHistoryNavigation } from '@/renderer/pages/conversation/Messages/historyNavigation';
