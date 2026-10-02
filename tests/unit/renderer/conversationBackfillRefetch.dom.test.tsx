@@ -16,7 +16,7 @@
 import React from 'react';
 import { render, waitFor, cleanup, screen, fireEvent } from '@testing-library/react';
 import { act } from 'react';
-import { SWRConfig } from 'swr';
+import { SWRConfig, useSWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IConversationListChangedEvent } from '@/common/adapter/ipcBridge';
@@ -89,9 +89,16 @@ import {
 const conv = (project_id: string | null): TChatConversation =>
   ({ id: 'c1', name: 'x', type: 'acp', extra: { workspace: '/w' }, project_id }) as unknown as TChatConversation;
 
+let refreshCached: ReturnType<typeof useSWRConfig>['mutate'];
+const CacheAccess = () => {
+  refreshCached = useSWRConfig().mutate;
+  return null;
+};
+
 const renderIndex = () =>
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+      <CacheAccess />
       <ChatConversationIndex />
     </SWRConfig>
   );
@@ -280,6 +287,51 @@ describe('logical conversation routing', () => {
     await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
     expect(getConversationOrNull).toHaveBeenCalledWith('c1');
   });
+  it('retains a confirmed legacy route when a background versions read temporarily fails', async () => {
+    enableVersions();
+    let unavailable = false;
+    const fetcher = vi.fn(async (input) =>
+      String(input).includes('/source-versions?')
+        ? Response.json({ configured: false, versions: [], cards: [] })
+        : new Response(null, { status: unavailable ? 503 : 404 })
+    );
+    vi.stubGlobal('fetch', fetcher);
+    getConversationOrNull.mockResolvedValue(conv('p1'));
+    renderIndex();
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
+    unavailable = true;
+    await act(async () => {
+      await refreshCached('/api/platform/conversations/c1/versions');
+    });
+    await waitFor(() =>
+      expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/versions'))).toHaveLength(2)
+    );
+    expect(screen.getByTestId('chat')).toHaveTextContent('c1');
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.versions.restoreHistoryUnavailable');
+  });
+
+  it('still blocks a confirmed legacy route when versions subsequently deny access', async () => {
+    enableVersions();
+    let denied = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input) =>
+        String(input).includes('/source-versions?')
+          ? Response.json({ configured: false, versions: [], cards: [] })
+          : new Response(null, { status: denied ? 403 : 404 })
+      )
+    );
+    getConversationOrNull.mockResolvedValue(conv('p1'));
+    renderIndex();
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('c1'));
+    denied = true;
+    await act(async () => {
+      await refreshCached('/api/platform/conversations/c1/versions');
+    });
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.versions.unavailable');
+  });
+
   it('does not resume the original Core conversation when resolution fails', async () => {
     enableVersions();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));

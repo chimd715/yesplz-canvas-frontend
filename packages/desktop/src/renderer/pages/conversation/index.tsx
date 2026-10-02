@@ -39,9 +39,7 @@ const ChatConversationIndex: React.FC = () => {
   // Public links retain the logical id. Native chat, websocket and send-box code
   // receive the active continuation only after the platform resolves it.
   const activeId =
-    versions.isLoading || (!versions.data && versions.error)
-      ? undefined
-      : (versions.data?.activeCoreConversationId ?? id);
+    versions.isLoading || !versions.continuationResolved ? undefined : (versions.data?.activeCoreConversationId ?? id);
   const { data, error, isLoading, mutate } = useSWR(activeId ? `conversation/${activeId}` : null, () => {
     return getConversationOrNull(activeId!);
   });
@@ -160,7 +158,7 @@ const ChatConversationIndex: React.FC = () => {
   // Auth/ownership failures and unresolved continuations still block the route.
   const detailRefreshFailed = !!data && isBackendHttpError(error) && error.status >= 500 && error.status < 600;
   if (versions.isLoading || isLoading) return <AppLoader />;
-  if ((!versions.data && versions.error) || (error && !detailRefreshFailed))
+  if (!versions.continuationResolved || (error && !detailRefreshFailed))
     return (
       <div role='alert' className='flex items-center gap-12px p-20px text-t-secondary'>
         <span>{t('conversation.versions.unavailable')}</span>

@@ -50,7 +50,11 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
     }
   );
   const activeConversationId = data?.activeCoreConversationId ?? logicalConversationId;
-  const continuationResolved = !enabled || (!isLoading && !(!data && error));
+  // null is a successful legacy 404, distinct from an unresolved first request.
+  // Retain that same-key decision through a temporary server failure only.
+  const retainedLegacyResolution =
+    data === null && error instanceof VersionRequestError && error.status >= 500 && error.status < 600;
+  const continuationResolved = !enabled || (!isLoading && !(!data && error && !retainedLegacyResolution));
   const sources = useSWR(
     enabled && activeConversationId ? sourceVersionsPath(activeConversationId) : null,
     fetchSourceVersions,
