@@ -68,6 +68,7 @@ const makeProps = (overrides: Partial<ConversationRowProps> = {}): ConversationR
   onEditStart: vi.fn(),
   onCreateCronTask: vi.fn(),
   onArchive: vi.fn(),
+  onDelete: vi.fn(),
   onTogglePin: vi.fn(),
   getJobStatus: () => 'none',
   ...overrides,
@@ -93,6 +94,18 @@ describe('conversation scheduled-task menu item', () => {
     await waitFor(() => expect(onArchive).toHaveBeenCalledWith(conversation));
     fireEvent.click(createCronTask);
     await waitFor(() => expect(onCreateCronTask).toHaveBeenCalledWith(conversation));
+  });
+
+  it('shows Delete beside Archive and invokes the delete action for that row', async () => {
+    const onDelete = vi.fn();
+    const onArchive = vi.fn();
+    render(<ConversationRow {...makeProps({ onDelete, onArchive })} />);
+    const archive = await screen.findByText('conversation.history.archive');
+    const deletion = screen.getByText('conversation.history.deleteTitle');
+    expect(archive.compareDocumentPosition(deletion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(deletion);
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(conversation));
+    expect(onArchive).not.toHaveBeenCalled();
   });
 
   it('keeps row actions hidden while batch selection is active', () => {

@@ -6,7 +6,8 @@
 
 import { ipcBridge } from '@/common';
 import type { TChatConversation } from '@/common/config/storage';
-import { addEventListener } from '@/renderer/utils/emitter';
+import { addEventListener, emitter } from '@/renderer/utils/emitter';
+import { mutate } from 'swr';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 /**
@@ -264,6 +265,8 @@ let completionUnreadConversationIdsState = new Set<string>();
 let manualUnreadConversationIdsState = readStoredManualUnread();
 let completedConversationIdsState = new Set<string>();
 let conversation_idsState = new Set<string>();
+// Tombstones prevent a request started before DELETE from restoring stale rows.
+const deletedConversationIds = new Set<string>();
 // Full id → owning project_id map over ALL loaded conversations (incl. the team
 // member rows filtered out of `conversationsState`). Every row from
 // GET /api/conversations carries project_id, so this lets the route publish the
@@ -338,7 +341,8 @@ const refreshConversations = () => {
     .then((result) => {
       const items = result?.items;
       if (items && Array.isArray(items)) {
-        const filteredData = items.filter((conv) => {
+        const visibleItems = items.filter((conv) => !deletedConversationIds.has(conv.id));
+        const filteredData = visibleItems.filter((conv) => {
           // Legacy rows from the pre-provider-probe health check flow are hidden
           // from normal history. New health checks must not create conversations.
           const extra = conv.extra as { is_health_check?: boolean; team_id?: string; teamId?: string } | undefined;
@@ -348,10 +352,12 @@ const refreshConversations = () => {
         // Use ALL conversation IDs (including team/legacy health-check rows) so the
         // responseStream listener recognises them as known and doesn't
         // trigger an infinite refreshConversations loop.
-        conversation_idsState = new Set(items.map((conversation) => conversation.id));
+        conversation_idsState = new Set(visibleItems.map((conversation) => conversation.id));
         // Map ALL rows (unfiltered) so a team member conversation's project_id is
         // resolvable too — the team route looks up its leader conversation here.
-        projectIdByIdState = new Map(items.map((conversation) => [conversation.id, conversation.project_id ?? null]));
+        projectIdByIdState = new Map(
+          visibleItems.map((conversation) => [conversation.id, conversation.project_id ?? null])
+        );
         emitStoreChange();
         return;
       }
@@ -388,6 +394,7 @@ const logGeneratingTransition = (conversation_id: string, next: boolean, source:
 };
 
 const markGenerating = (conversation_id: string, source: GeneratingTransitionSource = 'stream') => {
+  if (deletedConversationIds.has(conversation_id)) return;
   if (generatingConversationIdsState.has(conversation_id)) {
     return;
   }
@@ -469,6 +476,7 @@ const applyWaitingConfirmation = (conversation_id: string, transition: WaitingCo
 };
 
 const markWaitingConfirmation = (conversation_id: string, confirmationId: string) => {
+  if (deletedConversationIds.has(conversation_id)) return;
   applyWaitingConfirmation(conversation_id, { kind: 'mark', confirmationId });
 };
 
@@ -576,6 +584,25 @@ const logLateStreamIgnored = (conversation_id: string, type: string) => {
     .catch(() => {});
 };
 
+/** Reconcile a confirmed deletion synchronously across sidebar and cached routes. */
+export const removeDeletedConversation = (conversation_id: string): void => {
+  if (!conversation_id || deletedConversationIds.has(conversation_id)) return;
+  deletedConversationIds.add(conversation_id);
+  conversationsState = conversationsState.filter((conversation) => conversation.id !== conversation_id);
+  conversation_idsState = new Set(conversation_idsState);
+  conversation_idsState.delete(conversation_id);
+  projectIdByIdState = new Map(projectIdByIdState);
+  projectIdByIdState.delete(conversation_id);
+  clearGenerating(conversation_id, 'deleted');
+  clearAllWaitingConfirmation(conversation_id);
+  clearCompletionUnreadState(conversation_id);
+  clearManualUnreadState(conversation_id);
+  clearCompleted(conversation_id);
+  emitStoreChange();
+  // History/back navigation must never render a retained SWR response.
+  void mutate(`conversation/${conversation_id}`, null, false);
+};
+
 const setActiveConversationState = (conversation_id: string | null) => {
   activeConversationIdState = conversation_id;
 };
@@ -589,13 +616,11 @@ const initializeConversationListSyncStore = () => {
   refreshConversations();
 
   addEventListener('chat.history.refresh', refreshConversations);
+  addEventListener('conversation.deleted', removeDeletedConversation);
   ipcBridge.conversation.listChanged.on((event) => {
     if (event.action === 'deleted') {
-      clearGenerating(event.conversation_id, 'deleted');
-      clearAllWaitingConfirmation(event.conversation_id);
-      clearCompletionUnreadState(event.conversation_id);
-      clearManualUnreadState(event.conversation_id);
-      clearCompleted(event.conversation_id);
+      removeDeletedConversation(event.conversation_id);
+      emitter.emit('conversation.deleted', event.conversation_id);
     }
     refreshConversations();
   });
@@ -607,7 +632,7 @@ const initializeConversationListSyncStore = () => {
   });
   ipcBridge.conversation.responseStream.on((message) => {
     const conversation_id = message.conversation_id;
-    if (!conversation_id) {
+    if (!conversation_id || deletedConversationIds.has(conversation_id)) {
       return;
     }
 
@@ -654,6 +679,7 @@ const initializeConversationListSyncStore = () => {
     }
   });
   ipcBridge.conversation.turnCompleted.on((event) => {
+    if (deletedConversationIds.has(event.session_id)) return;
     if (isTerminalTurnState(event.state) && activeConversationIdState !== event.session_id) {
       markCompletionUnread(event.session_id);
     }

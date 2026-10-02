@@ -11,6 +11,7 @@ import { setCurrentProject } from '@/renderer/pages/conversation/explorer/curren
 import { setCurrentConversation } from '@/renderer/pages/conversation/explorer/currentConversationStore';
 import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
+import { addEventListener } from '@/renderer/utils/emitter';
 import { getSnapshotConversationProjectId } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 
 const ChatConversationIndex: React.FC = () => {
@@ -74,6 +75,13 @@ const ChatConversationIndex: React.FC = () => {
   // `conversation.listChanged` (action 'updated') once when the backfill lands;
   // this listener refetches → the now-populated project_id flows to
   // `setCurrentProject` above → the Explorer host appears. Responsive, no poll.
+  useEffect(() => {
+    if (!id) return;
+    return addEventListener('conversation.deleted', (conversationId) => {
+      if (conversationId === id) void navigate('/', { replace: true });
+    });
+  }, [id, navigate]);
+
   useEffect(() => {
     if (!id) return;
 

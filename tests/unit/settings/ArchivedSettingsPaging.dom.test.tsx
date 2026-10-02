@@ -5,13 +5,15 @@
  */
 
 import React from 'react';
+import { Message, Modal } from '@arco-design/web-react';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { getMock, itemsMock } = vi.hoisted(() => ({
+const { getMock, itemsMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   itemsMock: vi.fn(),
+  deleteMock: vi.fn(),
 }));
 
 // The component reads `ipcBridge` from `@/common`. Only the sidebar surface is
@@ -22,7 +24,7 @@ vi.mock('@/common', () => ({
       get: { invoke: getMock },
       items: { invoke: itemsMock },
       unarchive: { invoke: vi.fn(() => Promise.resolve()) },
-      deleteArchivedItem: { invoke: vi.fn(() => Promise.resolve()) },
+      deleteArchivedItem: { invoke: deleteMock },
       deleteArchivedProject: { invoke: vi.fn(() => Promise.resolve()) },
     },
   },
@@ -91,12 +93,17 @@ const renderPage = () =>
 
 describe('ArchivedSettings paging', () => {
   beforeEach(() => {
+    vi.spyOn(Message, 'success').mockImplementation(vi.fn());
+    vi.spyOn(Message, 'error').mockImplementation(vi.fn());
     getMock.mockReset();
     itemsMock.mockReset();
+    deleteMock.mockReset();
+    deleteMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it('requests the first screen with an explicit page-size limit and the archived flag', async () => {
@@ -162,5 +169,57 @@ describe('ArchivedSettings paging', () => {
     await waitFor(() =>
       expect(itemsMock).toHaveBeenLastCalledWith({ scope: 'project:P1', cursor: 'cursor-2', limit: 10, archived: true })
     );
+  });
+  it('hides a successfully deleted archived row while the refresh is still pending, including a stale refresh', async () => {
+    const stale = {
+      groups: [
+        projectGroup(
+          'P1',
+          'Alpha',
+          [conv('deleted-archive', 'Deleted archive'), conv('kept-archive', 'Kept archive')],
+          false
+        ),
+      ],
+    };
+    getMock.mockResolvedValueOnce(stale);
+    const modal = vi.spyOn(Modal, 'confirm').mockReturnValue({ close: vi.fn(), update: vi.fn() });
+    renderPage();
+    await screen.findByText('Deleted archive');
+    let finish!: (value: unknown) => void;
+    getMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'settings.archived.delete' })[0]);
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = modal.mock.calls[0][0].onOk!() as Promise<void>;
+    });
+    expect(deleteMock).toHaveBeenCalledWith({ item_type: 'conversation', item_id: 'deleted-archive' });
+    expect(screen.queryByText('Deleted archive')).toBeNull();
+    expect(screen.getByText('Kept archive')).toBeTruthy();
+    await act(async () => {
+      finish(stale);
+      await pending;
+    });
+    expect(screen.queryByText('Deleted archive')).toBeNull();
+  });
+
+  it('keeps an archived row visible when its delete request fails', async () => {
+    getMock.mockResolvedValue({
+      groups: [projectGroup('P1', 'Alpha', [conv('failed-delete', 'Still present')], false)],
+    });
+    deleteMock.mockRejectedValue(new Error('request failed'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const modal = vi.spyOn(Modal, 'confirm').mockReturnValue({ close: vi.fn(), update: vi.fn() });
+    renderPage();
+    await screen.findByText('Still present');
+    fireEvent.click(screen.getByRole('button', { name: 'settings.archived.delete' }));
+    await act(async () => {
+      await modal.mock.calls[0][0].onOk!();
+    });
+    expect(screen.getByText('Still present')).toBeTruthy();
+    expect(getMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,11 +12,12 @@ import { isLegacyReadOnlyConversationType } from '@/renderer/pages/conversation/
 import { emitter } from '@/renderer/utils/emitter';
 import { blockMobileInputFocus, blurActiveElement } from '@/renderer/utils/ui/focus';
 import { Message, Modal } from '@arco-design/web-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { isConversationPinned } from '../utils/groupingHelpers';
+import { removeDeletedConversation } from './useConversationListSync';
 
 type UseConversationActionsParams = {
   batchMode: boolean;
@@ -49,6 +50,8 @@ export const useConversationActions = ({
   const [renameLoading, setRenameLoading] = useState(false);
   const [dropdownVisibleId, setDropdownVisibleId] = useState<string | null>(null);
   const { id } = useParams();
+  const activeIdRef = useRef(id);
+  activeIdRef.current = id;
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -82,17 +85,51 @@ export const useConversationActions = ({
   const removeConversation = useCallback(
     async (conversation_id: string) => {
       const success = await ipcBridge.conversation.remove.invoke({ id: conversation_id });
-      if (!success) {
+      if (success === false) {
         return false;
       }
 
+      removeDeletedConversation(conversation_id);
       emitter.emit('conversation.deleted', conversation_id);
-      if (id === conversation_id) {
-        void navigate('/');
+      if (activeIdRef.current === conversation_id) {
+        void navigate('/', { replace: true });
       }
       return true;
     },
-    [id, navigate]
+    [navigate]
+  );
+
+  const handleDelete = useCallback(
+    (conversation: TChatConversation) => {
+      setDropdownVisibleId(null);
+      Modal.confirm({
+        title: t('conversation.history.deleteTitle'),
+        content: t('conversation.history.deleteConfirm'),
+        okText: t('conversation.history.deleteTitle'),
+        cancelText: t('common.cancel'),
+        okButtonProps: { status: 'danger' },
+        onOk: async () => {
+          try {
+            if (!(await removeConversation(conversation.id))) {
+              Message.error(t('conversation.history.deleteFailed'));
+              return;
+            }
+            setSelectedConversationIds((previous) => {
+              const next = new Set(previous);
+              next.delete(conversation.id);
+              return next;
+            });
+            Message.success(t('conversation.history.deleteSuccess'));
+          } catch {
+            Message.error(t('conversation.history.deleteFailed'));
+          }
+        },
+        style: { borderRadius: '12px' },
+        alignCenter: true,
+        getPopupContainer: () => document.body,
+      });
+    },
+    [removeConversation, setSelectedConversationIds, t]
   );
 
   const handleBatchArchive = useCallback(() => {
@@ -325,6 +362,7 @@ export const useConversationActions = ({
     handleConversationClick,
     handleBatchArchive,
     handleArchive,
+    handleDelete,
     handleEditStart,
     handleRenameConfirm,
     handleRenameCancel,

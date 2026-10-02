@@ -51,6 +51,7 @@ const baseProps: ConversationRowProps = {
   onEditStart: vi.fn(),
   onCreateCronTask: vi.fn(),
   onArchive: vi.fn(),
+  onDelete: vi.fn(),
   onTogglePin: vi.fn(),
   onToggleManualUnread: vi.fn(),
   getJobStatus: () => 'none',

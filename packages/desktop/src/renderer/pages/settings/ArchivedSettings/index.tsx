@@ -9,6 +9,7 @@ import { scopeToToken } from '@/common/adapter/sidebarMapper';
 import type { SidebarItem } from '@/common/types/sidebar';
 import { useAgentLogos } from '@/renderer/utils/model/agentLogo';
 import { emitter } from '@/renderer/utils/emitter';
+import { removeDeletedConversation } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 import { Button, Checkbox, Empty, Message, Modal, Spin } from '@arco-design/web-react';
 import { DeleteOne, FolderClose, ListCheckbox, MessageOne, Peoples, Robot } from '@icon-park/react';
 import React from 'react';
@@ -78,6 +79,7 @@ type ProjectBlock = {
 const ArchivedSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const logos = useAgentLogos();
+  const [deletedKeys, setDeletedKeys] = React.useState<ReadonlySet<string>>(() => new Set());
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedKeys, setSelectedKeys] = React.useState<ReadonlySet<string>>(() => new Set<string>());
   // Appended "load more" windows, keyed by scope token. Reset on any refetch
@@ -140,6 +142,7 @@ const ArchivedSettings: React.FC = () => {
     // double-render across groups is not expected).
     const toRow = (item: SidebarItem): ArchivedRow | null => {
       if (item.type === 'conversation') {
+        if (deletedKeys.has(`conversation:${item.conversation.id}`)) return null;
         const key = `conversation:${item.conversation.id}`;
         if (seen.has(key)) return null;
         seen.add(key);
@@ -152,6 +155,7 @@ const ArchivedSettings: React.FC = () => {
           updatedAt: item.conversation.created_at,
         };
       }
+      if (deletedKeys.has(`team:${item.team_id}`)) return null;
       const key = `team:${item.team_id}`;
       if (seen.has(key)) return null;
       seen.add(key);
@@ -207,7 +211,7 @@ const ArchivedSettings: React.FC = () => {
       });
     }
     return { archivedBlocks, total: seen.size };
-  }, [data, extraPages, logos, t]);
+  }, [data, deletedKeys, extraPages, logos, t]);
 
   const allRows = React.useMemo(() => archivedBlocks.flatMap((block) => block.rows), [archivedBlocks]);
 
@@ -323,6 +327,14 @@ const ArchivedSettings: React.FC = () => {
     [t]
   );
 
+  const reconcileDeletedRow = React.useCallback((row: ArchivedRow) => {
+    setDeletedKeys((previous) => new Set(previous).add(row.key));
+    if (row.item_type === 'conversation') {
+      removeDeletedConversation(row.item_id);
+      emitter.emit('conversation.deleted', row.item_id);
+    }
+  }, []);
+
   const handleDelete = React.useCallback(
     (row: ArchivedRow) => {
       Modal.confirm({
@@ -334,6 +346,7 @@ const ArchivedSettings: React.FC = () => {
         onOk: async () => {
           try {
             await ipcBridge.sidebar.deleteArchivedItem.invoke({ item_type: row.item_type, item_id: row.item_id });
+            reconcileDeletedRow(row);
             await refresh();
             Message.success(t('settings.archived.deleteSuccess'));
           } catch (error) {
@@ -346,7 +359,7 @@ const ArchivedSettings: React.FC = () => {
         getPopupContainer: () => document.body,
       });
     },
-    [refresh, t]
+    [reconcileDeletedRow, refresh, t]
   );
 
   const handleDeleteSelected = React.useCallback(() => {
@@ -369,12 +382,14 @@ const ArchivedSettings: React.FC = () => {
           const selectedSingleRows = selectedRows.filter((row) => !projectSelectedKeys.has(row.key));
 
           await Promise.all([
-            ...selectedProjectBlocks.map((block) =>
-              ipcBridge.sidebar.deleteArchivedProject.invoke({ project_id: block.projectId as string })
-            ),
-            ...selectedSingleRows.map((row) =>
-              ipcBridge.sidebar.deleteArchivedItem.invoke({ item_type: row.item_type, item_id: row.item_id })
-            ),
+            ...selectedProjectBlocks.map(async (block) => {
+              await ipcBridge.sidebar.deleteArchivedProject.invoke({ project_id: block.projectId as string });
+              block.rows.forEach(reconcileDeletedRow);
+            }),
+            ...selectedSingleRows.map(async (row) => {
+              await ipcBridge.sidebar.deleteArchivedItem.invoke({ item_type: row.item_type, item_id: row.item_id });
+              reconcileDeletedRow(row);
+            }),
           ]);
 
           setSelectedKeys(new Set<string>());
@@ -390,7 +405,7 @@ const ArchivedSettings: React.FC = () => {
       alignCenter: true,
       getPopupContainer: () => document.body,
     });
-  }, [refresh, archivedBlocks, selectedKeys, selectedRows, t]);
+  }, [reconcileDeletedRow, refresh, archivedBlocks, selectedKeys, selectedRows, t]);
 
   const formatArchivedTime = React.useCallback(
     (timestamp?: number) => {
@@ -440,6 +455,7 @@ const ArchivedSettings: React.FC = () => {
             type='text'
             size='small'
             status='danger'
+            aria-label={t('settings.archived.delete')}
             icon={<DeleteOne theme='outline' size='14' />}
             onClick={() => handleDelete(row)}
           />
