@@ -752,6 +752,41 @@ describe('saved widget source versions', () => {
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 
+  it('opens current VM work from the latest card while older cards keep their saved preview', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url.includes('/source-versions?'))
+          return Response.json({
+            ...sourceHistory(),
+            versions: [source(), source(sourceB)],
+            latestSavedVersionId: sourceB,
+          });
+        if (url.includes('/conversations/')) return new Response(null, { status: 404 });
+        return publishing();
+      })
+    );
+    view(true);
+    await screen.findByRole('region', { name: `${key('sourceVersion')} 2` });
+    fireEvent.click(sourceCard(1).getByRole('button', { name: 'preview.preview' }));
+    expect(openPreview).toHaveBeenLastCalledWith(
+      window.location.origin + source().previewUrl,
+      'url',
+      expect.objectContaining({ editable: false })
+    );
+    fireEvent.click(sourceCard(2).getByRole('button', { name: 'preview.preview' }));
+    expect(openPreview).toHaveBeenLastCalledWith('http://localhost/', 'url', {
+      title: key('currentWork'),
+      editable: false,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
+    expect(screen.getByRole('combobox')).toHaveTextContent(key('currentWork'));
+    expect(
+      within(screen.getByRole('tooltip')).getByRole('button', { name: 'preview.preview' }).closest('form')
+    ).toHaveAttribute('action', '/api/platform/preview');
+  });
+
   it('previews and publishes the same saved source without native restore or a live runtime', async () => {
     nativeActive.current = false;
     let published = false;
@@ -851,8 +886,8 @@ describe('saved widget source versions', () => {
     vi.stubGlobal('fetch', fetcher);
     view(true);
     await screen.findByRole('region', { name: `${key('sourceVersion')} 1` });
-    expect(sourceCard(1).getByRole('button', { name: 'preview.preview' })).toBeDisabled();
-    expect(sourceCard(1).getByText(key('dynamicPreviewUnavailable'))).toBeVisible();
+    expect(sourceCard(1).getByRole('button', { name: 'preview.preview' })).toBeEnabled();
+    expect(sourceCard(1).queryByText(key('dynamicPreviewUnavailable'))).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true }));
     const panel = within(await screen.findByRole('tooltip'));
     const currentPreview = panel.getByRole('button', { name: 'preview.preview' });

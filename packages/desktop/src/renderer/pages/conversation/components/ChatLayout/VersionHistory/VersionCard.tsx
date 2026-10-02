@@ -1,6 +1,14 @@
 import { Button } from '@arco-design/web-react';
 import { History, PreviewOpen } from '@icon-park/react';
-import React, { useId, useState } from 'react';
+import React, { useId, useState, useSyncExternalStore } from 'react';
+import {
+  getActiveNativeRuntimeContext,
+  getBuilderWorkspace,
+  isNativeRuntimeActive,
+  nativeRuntimeActivationEpoch,
+  subscribeNativeRuntimeActivation,
+} from '@/common/adapter/httpBridge';
+import { isHostedPreviewUrl } from '@/renderer/utils/platform';
 import { useTranslation } from 'react-i18next';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import { useVersionHistory } from './context';
@@ -12,6 +20,7 @@ export const VersionCard: React.FC<{ version: SavedVersion | SourceVersion }> = 
   const { t } = useTranslation();
   const history = useVersionHistory();
   const { openPreview } = usePreviewContext();
+  useSyncExternalStore(subscribeNativeRuntimeActivation, nativeRuntimeActivationEpoch);
   const [details, setDetails] = useState(false);
   const detailsId = useId();
   const source = isSourceVersion(version);
@@ -23,6 +32,16 @@ export const VersionCard: React.FC<{ version: SavedVersion | SourceVersion }> = 
   const active = source
     ? history.sourceHistory?.latestSavedVersionId === version.id
     : history.data?.activeRevisionId === version.id;
+  const currentCoreId = history.data?.activeCoreConversationId ?? history.logicalConversationId;
+  // Loopback is the existing live-preview handoff marker, not a chosen listener port.
+  // WebviewHost asks the gateway to resolve this conversation's owned VM listener.
+  const livePreview =
+    source &&
+    active &&
+    history.continuationResolved &&
+    isNativeRuntimeActive() &&
+    isHostedPreviewUrl('http://localhost/') &&
+    (!getBuilderWorkspace() || getActiveNativeRuntimeContext()?.coreId === currentCoreId);
   const selected = source
     ? history.selection.kind === 'source' && history.selection.sourceVersionId === version.id
     : history.selectedVersion?.id === version.id;
@@ -65,8 +84,16 @@ export const VersionCard: React.FC<{ version: SavedVersion | SourceVersion }> = 
         <Button
           size='small'
           icon={<PreviewOpen size={15} />}
-          disabled={!previewUrl}
+          disabled={!livePreview && !previewUrl}
           onClick={() => {
+            if (livePreview) {
+              history.selectCurrent();
+              openPreview('http://localhost/', 'url', {
+                title: t('conversation.versions.currentWork'),
+                editable: false,
+              });
+              return;
+            }
             if (!previewUrl) return;
             if (source) history.selectSourceVersion(version.id);
             else history.selectVersion(version.id);
@@ -79,10 +106,10 @@ export const VersionCard: React.FC<{ version: SavedVersion | SourceVersion }> = 
           {t('preview.preview')}
         </Button>
       </div>
-      {source && version.sourceKind === 'node' && (
+      {source && version.sourceKind === 'node' && !livePreview && (
         <p className={styles.meta}>{t('conversation.versions.dynamicPreviewUnavailable')}</p>
       )}
-      {source && version.sourceKind === 'static' && !previewUrl && (
+      {source && version.sourceKind === 'static' && !previewUrl && !livePreview && (
         <p className={styles.meta}>{t('conversation.versions.previewUnavailable')}</p>
       )}
       {details && (
