@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import classNames from 'classnames';
 import { ArrowCircleLeft, ArrowLeft, ArrowRight, ExpandLeft, ExpandRight, Peoples, Search } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
@@ -396,14 +396,14 @@ const Titlebar: React.FC<TitlebarProps> = ({ workspaceAvailable }) => {
             }
             const isTeamRoute = TEAM_MODE_ENABLED && /^\/team\/[^/]+/.test(location.pathname);
             return (
-              <span className='app-titlebar__brand-mobile'>
+              <Link to='/guid' className='app-titlebar__brand-mobile app-titlebar__brand-home' aria-label={appTitle}>
                 {isTeamRoute && (
                   <span className='app-titlebar__brand-icon' aria-hidden='true'>
                     <Peoples theme='outline' size='16' fill='currentColor' />
                   </span>
                 )}
                 <span className='app-titlebar__brand-text'>{mobileCenterTitle}</span>
-              </span>
+              </Link>
             );
           })()}
       </div>

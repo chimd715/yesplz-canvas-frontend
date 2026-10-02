@@ -9,6 +9,8 @@ import { AgentLogoIcon } from '@/renderer/components/agent/AgentBadge';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { resolveConversationBackend } from '@/renderer/pages/conversation/utils/conversationAssistantIdentity';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import useSWR from 'swr';
 
 type MobileConversationBrandProps = {
@@ -17,6 +19,7 @@ type MobileConversationBrandProps = {
 };
 
 const MobileConversationBrand: React.FC<MobileConversationBrandProps> = ({ conversation_id, fallbackTitle }) => {
+  const { t } = useTranslation();
   const { data: conversation } = useSWR(
     conversation_id ? `mobile-titlebar.conversation.${conversation_id}` : null,
     () => ipcBridge.conversation.get.invoke({ id: conversation_id })
@@ -28,7 +31,7 @@ const MobileConversationBrand: React.FC<MobileConversationBrandProps> = ({ conve
   const title = conversation?.name || fallbackTitle;
 
   return (
-    <span className='app-titlebar__brand-mobile'>
+    <Link to='/guid' className='app-titlebar__brand-mobile app-titlebar__brand-home' aria-label={t('login.brand')}>
       {showLogo && (
         <AgentLogoIcon
           backend={backend}
@@ -39,7 +42,7 @@ const MobileConversationBrand: React.FC<MobileConversationBrandProps> = ({ conve
         />
       )}
       <span className='app-titlebar__brand-text'>{title}</span>
-    </span>
+    </Link>
   );
 };
 

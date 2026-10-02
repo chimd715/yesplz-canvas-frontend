@@ -9,11 +9,11 @@ import brandLogo from '@renderer/assets/logos/brand/yesplz-ai.svg';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
 import PwaPullToRefresh from '@/renderer/components/layout/PwaPullToRefresh';
 import Titlebar from '@/renderer/components/layout/Titlebar';
-import { Layout as ArcoLayout, Tooltip } from '@arco-design/web-react';
+import { Layout as ArcoLayout } from '@arco-design/web-react';
 import classNames from 'classnames';
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { setGlobalNavigate } from '@/renderer/utils/navigation';
 import { usePreviewContext } from '@renderer/pages/conversation/Preview';
 import { ProjectPanelHost } from '@renderer/components/layout/ProjectPanelHost';
@@ -145,26 +145,6 @@ const Layout: React.FC<{
     return () => setGlobalNavigate(null);
   }, [navigate]);
   const { t } = useTranslation();
-  // The product wordmark acts as Home / Back-to-Chat, but only from settings routes.
-  // In non-settings routes the user is already "home", so it is a no-op (and not actionable).
-  const isSettingsRoute = location.pathname.startsWith('/settings');
-  // Only wired to the wordmark in the isSettingsRoute branch below, so the
-  // "no-op outside settings" contract is enforced structurally — no internal
-  // route guard needed (the chat-route wordmark is a plain, inert div).
-  const handleBrandHome = useCallback(() => {
-    // Mirror Titlebar's handleBackToChat convention: return to the last non-settings path.
-    let target: string | null = null;
-    try {
-      target = sessionStorage.getItem('aion:last-non-settings-path');
-    } catch {
-      // ignore
-    }
-    if (target && !target.startsWith('/settings')) {
-      void navigate(target);
-      return;
-    }
-    void navigate('/guid');
-  }, [navigate]);
   // Close preview whenever the user leaves the conversation route entirely
   // (e.g. switches to a team, /guid, or settings). Within /conversation/:id
   // the finer-grained closePreviewIfScopeChanged in conversation/index.tsx
@@ -399,37 +379,26 @@ const Layout: React.FC<{
                   }
                 )}
               >
-                <div
-                  className={classNames('shrink-0 size-32px relative', {
-                    '!size-24px': collapsed,
-                  })}
-                  onClick={onClick}
+                <Link
+                  to='/guid'
+                  className='flex items-center gap-12px min-w-0 text-t-primary no-underline hover:no-underline'
+                  aria-label={t('login.brand')}
+                  onClick={(event) => {
+                    if (isElectronDesktop() && event.target instanceof HTMLImageElement) onClick();
+                    if (isMobile) setCollapsed(true);
+                  }}
                 >
-                  <img src={brandLogo} alt={t('login.brand')} className='block size-full' />
-                </div>
-                {isSettingsRoute ? (
-                  <Tooltip content={t('common.back', { defaultValue: 'Back to Chat' })} position='bottom'>
-                    <div
-                      className='text-16px text-t-primary collapsed-hidden font-semibold min-w-0 leading-tight cursor-pointer'
-                      role='button'
-                      tabIndex={0}
-                      aria-label={t('common.back', { defaultValue: 'Back to Chat' })}
-                      onClick={handleBrandHome}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          handleBrandHome();
-                        }
-                      }}
-                    >
-                      {t('login.brand')}
-                    </div>
-                  </Tooltip>
-                ) : (
-                  <div className='text-16px text-t-primary collapsed-hidden font-semibold min-w-0 leading-tight'>
+                  <span
+                    className={classNames('shrink-0 size-32px relative', {
+                      '!size-24px': collapsed,
+                    })}
+                  >
+                    <img src={brandLogo} alt={t('login.brand')} className='block size-full' />
+                  </span>
+                  <span className='text-16px text-t-primary collapsed-hidden font-semibold min-w-0 leading-tight'>
                     {t('login.brand')}
-                  </div>
-                )}
+                  </span>
+                </Link>
                 {isMobile && !collapsed && (
                   <button
                     type='button'

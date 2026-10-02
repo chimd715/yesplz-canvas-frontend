@@ -7,6 +7,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 // Mirror the project convention: t() echoes the key so labels/tooltips are assertable.
 vi.mock('react-i18next', () => ({
@@ -16,7 +18,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-// react-router-dom: control location, capture navigate.
+// Observe real router navigation so link behavior is exercised without a custom link mock.
 const navigate = vi.fn();
 let currentPathname = '/guid';
 const platformMocks = vi.hoisted(() => ({
@@ -27,12 +29,6 @@ const shortcutMocks = vi.hoisted(() => ({
 }));
 const featureMocks = vi.hoisted(() => ({
   teamModeEnabled: false,
-}));
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigate,
-  useLocation: () => ({ pathname: currentPathname, search: '', hash: '' }),
-  useNavigationType: () => 'POP',
-  Outlet: () => null,
 }));
 
 // Hidden devtools easter-egg target (icon) — assert it is independent of navigation.
@@ -75,9 +71,24 @@ vi.mock('@renderer/pages/conversation/Preview/context/PreviewContext', () => ({
 
 import Layout from '@renderer/components/layout/Layout';
 
-const renderLayout = () => render(<Layout sider={<div>sider</div>} />);
+const NavigationObserver = () => {
+  const location = useLocation();
+  const previous = React.useRef(location.key);
+  React.useEffect(() => {
+    if (location.key !== previous.current) navigate(location.pathname);
+    previous.current = location.key;
+  }, [location]);
+  return null;
+};
+const renderLayout = () =>
+  render(
+    <MemoryRouter initialEntries={[currentPathname]}>
+      <NavigationObserver />
+      <Layout sider={<div>sider</div>} />
+    </MemoryRouter>
+  );
 
-const BACK_KEY = 'common.back';
+const BRAND = 'Build Your Own';
 
 describe('Layout sider brand Home button', () => {
   beforeEach(() => {
@@ -107,20 +118,20 @@ describe('Layout sider brand Home button', () => {
     vi.clearAllMocks();
   });
 
-  it('navigates to the recorded last non-settings path when clicked in a settings route', () => {
+  it('navigates home from settings even when a last chat is recorded', () => {
     currentPathname = '/settings/about';
     sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
     renderLayout();
 
-    fireEvent.click(screen.getByLabelText(BACK_KEY));
-    expect(navigate).toHaveBeenCalledWith('/conversation/abc');
+    fireEvent.click(screen.getByRole('link', { name: BRAND }));
+    expect(navigate).toHaveBeenCalledWith('/guid');
   });
 
   it('falls back to /guid in a settings route when no path is recorded', () => {
     currentPathname = '/settings/system';
     renderLayout();
 
-    fireEvent.click(screen.getByLabelText(BACK_KEY));
+    fireEvent.click(screen.getByRole('link', { name: BRAND }));
     expect(navigate).toHaveBeenCalledWith('/guid');
   });
 
@@ -129,20 +140,21 @@ describe('Layout sider brand Home button', () => {
     sessionStorage.setItem('aion:last-non-settings-path', '/settings/system');
     renderLayout();
 
-    fireEvent.click(screen.getByLabelText(BACK_KEY));
+    fireEvent.click(screen.getByRole('link', { name: BRAND }));
     expect(navigate).toHaveBeenCalledWith('/guid');
   });
 
-  it('activates via keyboard (Enter and Space) in a settings route', () => {
+  it('activates the home link with Enter and retains native keyboard focus', async () => {
     currentPathname = '/settings/about';
     sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
     renderLayout();
 
-    const brand = screen.getByLabelText(BACK_KEY);
-    fireEvent.keyDown(brand, { key: 'Enter' });
-    fireEvent.keyDown(brand, { key: ' ' });
-    expect(navigate).toHaveBeenCalledTimes(2);
-    expect(navigate).toHaveBeenCalledWith('/conversation/abc');
+    const brand = screen.getByRole('link', { name: BRAND });
+    brand.focus();
+    expect(brand).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith('/guid');
   });
 
   it('ignores non-activation keys in a settings route', () => {
@@ -150,29 +162,30 @@ describe('Layout sider brand Home button', () => {
     sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
     renderLayout();
 
-    const brand = screen.getByLabelText(BACK_KEY);
+    const brand = screen.getByRole('link', { name: BRAND });
     fireEvent.keyDown(brand, { key: 'Tab' });
     fireEvent.keyDown(brand, { key: 'a' });
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('renders the wordmark as a non-actionable element in a non-settings route', () => {
+  it('renders the logo and wordmark in one native home link on the home page', () => {
     currentPathname = '/guid';
     renderLayout();
 
-    // No actionable role/label in chat routes.
-    expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
-    const wordmark = screen.getByText('Build Your Own');
-    fireEvent.click(wordmark);
-    expect(navigate).not.toHaveBeenCalled();
+    const link = screen.getByRole('link', { name: BRAND });
+    expect(link).toHaveAttribute('href', '/guid');
+    expect(link).toContainElement(screen.getByRole('img', { name: BRAND }));
+    expect(link).toContainElement(screen.getByText(BRAND));
   });
 
-  it('does not navigate when the wordmark is clicked in a non-settings route', () => {
+  it('navigates home from a conversation without clearing its persisted draft', () => {
     currentPathname = '/conversation/xyz';
+    sessionStorage.setItem('conversation-draft-fixture', 'unfinished prompt');
     renderLayout();
 
     fireEvent.click(screen.getByText('Build Your Own'));
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/guid');
+    expect(sessionStorage.getItem('conversation-draft-fixture')).toBe('unfinished prompt');
   });
 
   it('provides common shortcuts with a functional sider toggle', () => {
@@ -199,17 +212,27 @@ describe('Layout sider brand Home button', () => {
     expect(shortcutMocks.params?.toggleSider).toEqual(expect.any(Function));
   });
 
-  it('clicking the logo icon counts toward the devtools easter-egg and never navigates', () => {
+  it('keeps the desktop logo debug shortcut while also navigating home', () => {
+    platformMocks.isElectronDesktopMock.mockReturnValue(true);
     currentPathname = '/settings/about';
     sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
     renderLayout();
 
-    // The supplied brand image retains the existing independent icon action.
-    const icon = screen.getByRole('img', { name: 'Build Your Own' }).parentElement as HTMLElement;
+    // Desktop retains its icon shortcut inside the same accessible home link.
+    const icon = screen.getByRole('img', { name: 'Build Your Own' });
     expect(icon).toBeTruthy();
     for (let i = 0; i < 4; i++) fireEvent.click(icon);
     expect(openDevTools).toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/guid');
+  });
+
+  it('clicking the browser logo navigates home without requesting desktop devtools', () => {
+    currentPathname = '/conversation/xyz';
+    renderLayout();
+    const logo = screen.getByRole('img', { name: BRAND });
+    for (let i = 0; i < 4; i++) fireEvent.click(logo);
+    expect(navigate).toHaveBeenCalledWith('/guid');
+    expect(openDevTools).not.toHaveBeenCalled();
   });
 
   it('opens the update notification directly for tray update checks', () => {
