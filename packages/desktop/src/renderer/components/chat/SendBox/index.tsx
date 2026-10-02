@@ -234,6 +234,8 @@ const SendBox: React.FC<{
   value?: string;
   onChange?: (value: string) => void;
   onSend: (message: string) => Promise<void | false>;
+  /** Customer queues acknowledge local admission before releasing the draft. */
+  clearAfterAccepted?: boolean;
   onStop?: () => Promise<void>;
   disabled?: boolean;
   /**
@@ -299,6 +301,7 @@ const SendBox: React.FC<{
   topRightOverlay?: React.ReactNode;
 }> = ({
   onSend,
+  clearAfterAccepted = false,
   onStop,
   prefix,
   className,
@@ -350,6 +353,7 @@ const SendBox: React.FC<{
   const conversationContext = useConversationContextSafe();
   const { t, i18n } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
+  const submissionInFlightRef = useRef(false);
   const [isSingleLine, setIsSingleLine] = useState(!effectiveDefaultMultiLine);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const isInputActive = isInputFocused;
@@ -1547,6 +1551,7 @@ const SendBox: React.FC<{
 
   const sendMessageHandler = () => {
     if (isUploading) return;
+    if (clearAfterAccepted && submissionInFlightRef.current) return;
     if (enableBtw && btwQuestion !== null) {
       const normalizedQuestion = btwQuestion.trim();
       if (!normalizedQuestion) {
@@ -1613,20 +1618,28 @@ const SendBox: React.FC<{
       finalMessage = input + snippetsHtml;
     }
 
-    // 立即清空输入框，避免异步 onSend 完成后覆盖用户新输入
-    // Clear input immediately to prevent async onSend completion from overwriting new user input
-    setInput('');
-    clearDomSnippets();
-    setReplyQuote(null);
+    // Customer queues retain the draft until local admission. Desktop clears
+    // immediately; neither path overwrites newer text after acceptance.
+    if (clearAfterAccepted) submissionInFlightRef.current = true;
+    else {
+      setInput('');
+      clearDomSnippets();
+      setReplyQuote(null);
+    }
 
     onSend(finalMessage)
       .then((result) => {
-        if (result === false) {
+        if (clearAfterAccepted && result !== false) {
+          if (latestInputRef.current === input) setInput('');
+          clearDomSnippets();
+          setReplyQuote(null);
+        } else if (!clearAfterAccepted && result === false) {
           setInput(finalMessage);
         }
       })
       .catch(() => {})
       .finally(() => {
+        submissionInFlightRef.current = false;
         setIsLoading(false);
       });
   };

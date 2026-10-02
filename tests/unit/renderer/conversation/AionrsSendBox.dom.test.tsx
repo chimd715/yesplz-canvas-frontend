@@ -6,6 +6,7 @@ import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
+import { resetCustomerPromptQueuesForTest } from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue/state';
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 const {
@@ -43,6 +44,7 @@ const {
 vi.mock('@/common', () => ({
   ipcBridge: {
     conversation: {
+      turnCompleted: { on: vi.fn(() => () => {}) },
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
@@ -156,6 +158,25 @@ vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
   useLayoutContext: () => ({ isMobile: false }),
 }));
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ status: 'authenticated', user: { id: 'customer' } }),
+}));
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/PromptQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/pages/conversation/platforms/aionrs/PromptQueue')>();
+  return {
+    ...actual,
+    useCustomerPromptQueue: (...args: Parameters<typeof actual.useCustomerPromptQueue>) => {
+      const queue = actual.useCustomerPromptQueue(...args);
+      return {
+        ...queue,
+        enqueue: (...input: Parameters<typeof queue.enqueue>) => {
+          enqueueMock(...input);
+          return queue.enqueue(...input);
+        },
+      };
+    },
+  };
+});
 vi.mock('@/renderer/hooks/chat/useAutoTitle', () => ({
   useAutoTitle: () => ({
     checkAndUpdateTitle: vi.fn(),
@@ -186,9 +207,6 @@ vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
     openFileSelector: vi.fn(),
     onSlashBuiltinCommand: vi.fn(),
   }),
-}));
-vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({
-  useLatestRef: <T,>(value: T) => ({ current: value }),
 }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
   useConversationCommandQueue: () => ({
@@ -325,9 +343,11 @@ const ChatNavigation = () => {
 
 describe('AionrsSendBox', () => {
   beforeEach(() => {
+    vi.stubGlobal('electronAPI', undefined);
     vi.clearAllMocks();
     sessionStorage.clear();
-    sendMessageInvokeMock.mockResolvedValue({ msg_id: 'message', turn_id: 'turn', runtime: {} });
+    resetCustomerPromptQueuesForTest();
+    sendMessageInvokeMock.mockResolvedValue({ msg_id: 'message', turn_id: 'turn', runtime: { is_processing: false } });
     ensureConversationRuntimeMock.mockResolvedValue({ recovered: false, config_options: [], runtime: null });
     useTeamPermissionMock.mockReturnValue(null);
     draftContentRef.current = '';
@@ -487,7 +507,7 @@ describe('AionrsSendBox', () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
     expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
-    await act(async () => accepted({ msg_id: 'message', turn_id: 'turn', runtime: {} }));
+    await act(async () => accepted({ msg_id: 'message', turn_id: 'turn', runtime: { is_processing: false } }));
   });
 
   it('waits for automatic preparation before forwarding a stored initial message exactly once', async () => {
@@ -550,8 +570,59 @@ describe('AionrsSendBox', () => {
     expect(onFocus).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks a racing fourth submission and retains the draft and attachments when the queue is full', async () => {
+    runtimeViewIsProcessingRef.current = true;
+    draftContentRef.current = 'fourth draft';
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('first'));
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('second'));
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('third'));
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].sendDisabled).toBe(true);
+    let accepted: unknown;
+    await act(async () => {
+      accepted = await sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('fourth');
+    });
+    expect(accepted).toBe(false);
+    expect(clearFilesMock).toHaveBeenCalledTimes(3);
+    expect(draftMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the latest selected model when an accepted draft leaves the queue', async () => {
+    runtimeViewIsProcessingRef.current = true;
+    const deepseek = {
+      ...modelSelection,
+      current_model: { ...modelSelection.current_model!, use_model: 'deepseek/deepseek-v4.1-flash' },
+    };
+    const glm = {
+      ...modelSelection,
+      current_model: { ...modelSelection.current_model!, use_model: 'z-ai/glm-5.3-flash' },
+    };
+    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={deepseek} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('x'.repeat(250_000)));
+    runtimeViewIsProcessingRef.current = false;
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={glm} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('conversation.customerQueue.failed'));
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={deepseek} />);
+    await act(async () => screen.getByRole('button', { name: 'common.retry' }).click());
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('preserves desktop busy-send behavior and its existing explicit draft queue', async () => {
+    vi.stubGlobal('electronAPI', {});
+    runtimeViewIsProcessingRef.current = true;
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('busy'));
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].sendDisabled).toBe(true);
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
   describe('mid-turn interjection controls', () => {
-    it('disables the send button and blocks Enter with a toast while replying, without implicitly enqueuing', async () => {
+    it('keeps send available and queues Enter while replying without interrupting the active turn', async () => {
       runtimeViewIsProcessingRef.current = true;
       draftContentRef.current = 'hello world';
 
@@ -559,18 +630,16 @@ describe('AionrsSendBox', () => {
       await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1'));
 
       const props = sendBoxPropsSpy.mock.calls.at(-1)?.[0] as { sendDisabled?: boolean };
-      expect(props.sendDisabled).toBe(true);
+      expect(props.sendDisabled).toBe(false);
 
       await act(async () => {
         screen.getByRole('button', { name: 'send' }).click();
       });
 
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
-      expect(enqueueMock).not.toHaveBeenCalled();
-      expect(clearFilesMock).not.toHaveBeenCalled();
-      expect(Message.warning).toHaveBeenCalledWith(
-        'This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.'
-      );
+      expect(enqueueMock).toHaveBeenCalledWith({ input: 'Hello', files: [], sessions: undefined });
+      expect(clearFilesMock).toHaveBeenCalledTimes(1);
+      expect(Message.warning).not.toHaveBeenCalled();
     });
 
     it('sends normally while idle', async () => {
@@ -589,7 +658,7 @@ describe('AionrsSendBox', () => {
       await waitFor(() => {
         expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
       });
-      expect(enqueueMock).not.toHaveBeenCalled();
+      expect(enqueueMock).toHaveBeenCalledTimes(1);
       expect(Message.warning).not.toHaveBeenCalled();
     });
 

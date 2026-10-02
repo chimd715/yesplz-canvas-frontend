@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React, { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -213,5 +213,60 @@ describe('SendBox scheduled-task prefill', () => {
 
     querySelectorSpy.mockRestore();
     outsideTarget.remove();
+  });
+});
+
+const QueueAdmissionHarness = ({ onSend }: { onSend: (value: string) => Promise<void | false> }) => {
+  const [value, setValue] = useState('Keep this draft');
+  return <SendBox value={value} onChange={setValue} onSend={onSend} clearAfterAccepted allowSendWhileLoading />;
+};
+
+describe('SendBox customer queue admission', () => {
+  it('keeps a rejected draft intact without clearing and restoring it', async () => {
+    layoutState.isMobile = false;
+    const send = vi.fn().mockResolvedValue(false);
+    render(<QueueAdmissionHarness onSend={send} />);
+    await act(async () => screen.getByTestId('sendbox-send-btn').click());
+    expect(screen.getByTestId('sendbox-input')).toHaveValue('Keep this draft');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks rapid Enter/click submission until admission succeeds and then clears once', async () => {
+    layoutState.isMobile = false;
+    let accept!: () => void;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        })
+    );
+    render(<QueueAdmissionHarness onSend={send} />);
+    act(() => {
+      fireEvent.keyDown(screen.getByTestId('sendbox-input'), { key: 'Enter', code: 'Enter' });
+      fireEvent.keyDown(screen.getByTestId('sendbox-input'), { key: 'Enter', code: 'Enter' });
+      screen.getByTestId('sendbox-send-btn').click();
+    });
+    expect(screen.getByTestId('sendbox-input')).toHaveValue('Keep this draft');
+    expect(send).toHaveBeenCalledTimes(1);
+    await act(async () => accept());
+    expect(screen.getByTestId('sendbox-input')).toHaveValue('');
+  });
+
+  it('preserves a new draft typed while the earlier admission is pending', async () => {
+    layoutState.isMobile = false;
+    let accept!: () => void;
+    render(
+      <QueueAdmissionHarness
+        onSend={() =>
+          new Promise<void>((resolve) => {
+            accept = resolve;
+          })
+        }
+      />
+    );
+    act(() => screen.getByTestId('sendbox-send-btn').click());
+    fireEvent.change(screen.getByTestId('sendbox-input'), { target: { value: 'Next draft' } });
+    await act(async () => accept());
+    expect(screen.getByTestId('sendbox-input')).toHaveValue('Next draft');
   });
 });

@@ -846,5 +846,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "La saisie dépasse la limite sûre du modèle ({{limit}} octets encodés). Raccourcissez le texte ou retirez des pièces jointes."
+  "promptTooLarge": "La saisie dépasse la limite sûre du modèle ({{limit}} octets encodés). Raccourcissez le texte ou retirez des pièces jointes.",
+  "customerQueue": {
+    "title": "Messages en attente",
+    "count": "{{count}} messages sur 3 en attente",
+    "ready": "En attente de la réponse actuelle",
+    "sending": "Envoi du message",
+    "failed": "Le message n’a pas pu démarrer. Réessayez ou supprimez-le.",
+    "uncertain": "La livraison est incertaine. Vérifiez la conversation puis supprimez cet élément. Il ne sera pas renvoyé automatiquement.",
+    "full": "Vous pouvez mettre 3 messages en attente. Supprimez-en un ou attendez une réponse.",
+    "storageFailed": "Impossible d’enregistrer les modifications de la file dans ce navigateur."
+  }
 }

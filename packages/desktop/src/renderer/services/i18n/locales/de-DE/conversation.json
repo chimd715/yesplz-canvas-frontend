@@ -847,5 +847,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "Die Eingabe überschreitet das sichere Modellbudget ({{limit}} kodierte Bytes). Kürzen Sie den Text oder entfernen Sie Anhänge."
+  "promptTooLarge": "Die Eingabe überschreitet das sichere Modellbudget ({{limit}} kodierte Bytes). Kürzen Sie den Text oder entfernen Sie Anhänge.",
+  "customerQueue": {
+    "title": "Wartende Eingaben",
+    "count": "{{count}} von 3 Eingaben warten",
+    "ready": "Warten auf die aktuelle Antwort",
+    "sending": "Eingabe wird gesendet",
+    "failed": "Die Eingabe konnte nicht starten. Erneut versuchen oder entfernen.",
+    "uncertain": "Die Zustellung ist unklar. Prüfen Sie den Chat und entfernen Sie diesen Eintrag. Er wird nicht automatisch erneut gesendet.",
+    "full": "Bis zu 3 Eingaben können warten. Entfernen Sie eine oder warten Sie auf eine Antwort.",
+    "storageFailed": "Änderungen an der Warteschlange konnten in diesem Browser nicht gespeichert werden."
+  }
 }

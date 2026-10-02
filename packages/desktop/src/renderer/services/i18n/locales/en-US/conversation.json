@@ -846,5 +846,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "Input exceeds this model’s safe budget ({{limit}} encoded bytes). Shorten the prompt or remove attachments."
+  "promptTooLarge": "Input exceeds this model’s safe budget ({{limit}} encoded bytes). Shorten the prompt or remove attachments.",
+  "customerQueue": {
+    "title": "Pending prompts",
+    "count": "{{count}} of 3 prompts waiting",
+    "ready": "Waiting for the current turn",
+    "sending": "Starting this prompt",
+    "failed": "This prompt could not start. Retry or remove it to continue.",
+    "uncertain": "Delivery is uncertain. Check the conversation, then remove this item; it will not be sent again automatically.",
+    "full": "You can queue up to 3 prompts. Remove one or wait for a reply.",
+    "storageFailed": "Could not save queue changes in this browser."
+  }
 }

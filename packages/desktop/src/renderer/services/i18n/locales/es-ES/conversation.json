@@ -847,5 +847,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "La entrada supera el límite seguro del modelo ({{limit}} bytes codificados). Acorta el texto o elimina adjuntos."
+  "promptTooLarge": "La entrada supera el límite seguro del modelo ({{limit}} bytes codificados). Acorta el texto o elimina adjuntos.",
+  "customerQueue": {
+    "title": "Mensajes pendientes",
+    "count": "{{count}} de 3 mensajes en espera",
+    "ready": "Esperando la respuesta actual",
+    "sending": "Enviando el mensaje",
+    "failed": "No se pudo iniciar. Reintenta o elimina el mensaje para continuar.",
+    "uncertain": "La entrega es incierta. Revisa la conversación y elimina este mensaje. No se reenviará automáticamente.",
+    "full": "Puedes dejar hasta 3 mensajes en espera. Elimina uno o espera una respuesta.",
+    "storageFailed": "No se pudieron guardar los cambios de la cola en este navegador."
+  }
 }

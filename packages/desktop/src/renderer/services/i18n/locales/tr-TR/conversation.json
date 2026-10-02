@@ -848,5 +848,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "Girdi, modelin güvenli sınırını ({{limit}} kodlanmış bayt) aşıyor. İstemi kısaltın veya ekleri kaldırın."
+  "promptTooLarge": "Girdi, modelin güvenli sınırını ({{limit}} kodlanmış bayt) aşıyor. İstemi kısaltın veya ekleri kaldırın.",
+  "customerQueue": {
+    "title": "Bekleyen istemler",
+    "count": "3 istemden {{count}} tanesi bekliyor",
+    "ready": "Geçerli yanıt bekleniyor",
+    "sending": "İstem gönderiliyor",
+    "failed": "İstem başlatılamadı. Yeniden deneyin veya kaldırın.",
+    "uncertain": "Teslim durumu belirsiz. Sohbeti kontrol edip bu öğeyi kaldırın. Otomatik olarak tekrar gönderilmez.",
+    "full": "En fazla 3 istem bekleyebilir. Birini kaldırın veya yanıtı bekleyin.",
+    "storageFailed": "Kuyruk değişiklikleri bu tarayıcıda kaydedilemedi."
+  }
 }

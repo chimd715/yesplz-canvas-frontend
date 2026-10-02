@@ -846,5 +846,15 @@
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
   },
-  "promptTooLarge": "輸入超過此模型的安全限額（{{limit}} 編碼位元組）。請縮短提示或移除附件。"
+  "promptTooLarge": "輸入超過此模型的安全限額（{{limit}} 編碼位元組）。請縮短提示或移除附件。",
+  "customerQueue": {
+    "title": "待傳送提示",
+    "count": "{{count}}/3 則提示等待中",
+    "ready": "等待目前回覆完成",
+    "sending": "正在傳送提示",
+    "failed": "無法開始傳送。請重試或刪除後繼續。",
+    "uncertain": "無法確認是否送達。請檢查對話後刪除此項；不會自動重新傳送。",
+    "full": "最多可排隊 3 則提示。請刪除一則或等待回覆。",
+    "storageFailed": "無法在此瀏覽器中儲存佇列變更。"
+  }
 }

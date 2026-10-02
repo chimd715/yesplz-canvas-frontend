@@ -22,6 +22,7 @@ import HorizontalFileList from '@/renderer/components/media/HorizontalFileList';
 import { classifyConfigSetError, useAcpConfigOptions } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getSendBoxDraftHook, type FileOrFolderItem } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { createSetUploadFile, useSendBoxFiles } from '@/renderer/hooks/chat/useSendBoxFiles';
@@ -57,6 +58,7 @@ import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
+import { PromptQueuePanel, PromptQueueAdmissionError, useCustomerPromptQueue } from './PromptQueue';
 
 const configErrorMessageKey = (error: unknown) => {
   const errorKind = classifyConfigSetError(error);
@@ -131,6 +133,9 @@ const AionrsSendBox: React.FC<{
   const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
+  const auth = useAuth();
+  // Team API owns its own slot queue and accepts mid-turn messages separately.
+  const isCustomerChat = !window.electronAPI && !teamSendMessage && !teamRuntime;
   const conversationContext = useConversationContextSafe();
   const loadedSkills = conversationContext?.loadedSkills ?? [];
   const loadedMcpStatuses =
@@ -257,12 +262,13 @@ const AionrsSendBox: React.FC<{
 
   const executeCommand = useCallback(
     async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
-      if (!entryReadyRef.current) throw new Error('Conversation runtime is not ready');
-      if (!validatePrompt(input, files.length)) throw new Error('Prompt exceeds the selected model budget');
+      if (!entryReadyRef.current) throw new PromptQueueAdmissionError('Conversation runtime is not ready');
+      if (!validatePrompt(input, files.length))
+        throw new PromptQueueAdmissionError('Prompt exceeds the selected model budget');
       if (teamPermission) await teamPermission.warmupSession();
       if (!current_model?.use_model) {
         Message.warning(t('conversation.chat.noModelSelected'));
-        throw new Error('No model selected');
+        throw new PromptQueueAdmissionError('No model selected');
       }
 
       // The message body is plain user text; the backend resolves each
@@ -276,7 +282,7 @@ const AionrsSendBox: React.FC<{
           if (files.length > 0) {
             emitter.emit('aionrs.workspace.refresh');
           }
-          return;
+          return undefined;
         }
 
         markSendStarted();
@@ -295,6 +301,7 @@ const AionrsSendBox: React.FC<{
         if (files.length > 0) {
           emitter.emit('aionrs.workspace.refresh');
         }
+        return { turnId: res.turn_id, isProcessing: res.runtime.is_processing };
       } catch (error) {
         const errorMessage =
           getConversationRuntimeWorkspaceErrorMessage(error, t) ||
@@ -339,7 +346,6 @@ const AionrsSendBox: React.FC<{
     enqueue,
     remove,
     prioritize,
-    sendNow,
     clear,
     reorder,
     toggleMode,
@@ -348,11 +354,28 @@ const AionrsSendBox: React.FC<{
     resetActiveExecution,
   } = useConversationCommandQueue({
     conversation_id: conversation_id,
-    enabled: true,
+    enabled: !isCustomerChat,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
+    onExecute: async (item) => {
+      await executeCommand(item);
+    },
+  });
+  const customerQueue = useCustomerPromptQueue({
+    accountId: auth.status === 'authenticated' ? auth.user?.id : undefined,
+    conversationId: conversation_id,
+    enabled: isCustomerChat,
+    runtimeGate: commandQueueRuntimeGate,
+    validate: validatePrompt,
     onExecute: executeCommand,
   });
+  useAddEventListener(
+    'conversation.deleted',
+    (id) => {
+      if (isCustomerChat && id === conversation_id) customerQueue.clear();
+    },
+    [conversation_id, isCustomerChat, customerQueue.clear]
+  );
 
   // Handle initial message from Guid page — wait until model is ready
   useEffect(() => {
@@ -392,10 +415,7 @@ const AionrsSendBox: React.FC<{
   const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
   const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
-  // aionrs backends never support mid-turn delivery: while the agent is
-  // replying, sending is hard-blocked with a toast instead of implicitly
-  // enqueuing. The only way to queue a message while busy is the explicit
-  // "add to queue" entry (handleAddToQueue below).
+  // Browser submissions enter the scoped FIFO; the active turn is never interrupted.
   const directSendInFlight = useRef(false);
   const onSendHandler = async (message: string): Promise<void | false> => {
     if (!validatePrompt(message, uploadFile.length + atPath.length)) return false;
@@ -404,6 +424,26 @@ const AionrsSendBox: React.FC<{
       return false;
     }
     if (directSendInFlight.current) return false;
+    if (isCustomerChat) {
+      directSendInFlight.current = true;
+      try {
+        const accepted = customerQueue.enqueue({
+          input: message,
+          files: collectChatFileRefs(uploadFile, atPath),
+          sessions: selectedSessions.length ? selectedSessions : undefined,
+        });
+        if (!accepted) return false;
+        clearFiles();
+        setSelectedSessions([]);
+        emitter.emit('aionrs.selected.file.clear');
+        return;
+      } finally {
+        // Block repeated Enter from the same committed draft in this event tick.
+        queueMicrotask(() => {
+          directSendInFlight.current = false;
+        });
+      }
+    }
     if (isBusy) {
       Message.warning(
         t('conversation.commandQueue.midturnBlocked', {
@@ -452,25 +492,47 @@ const AionrsSendBox: React.FC<{
   // the same way a send would.
   const canQueueCurrentDraft = content.trim().length > 0;
   const handleAddToQueue = useCallback(() => {
+    if (isCustomerChat && directSendInFlight.current) return;
     if (!validatePrompt(content, uploadFile.length + atPath.length)) return;
     const filesToSend = collectChatFileRefs(uploadFile, atPath);
     // `@@` references must ride along, and must be released from the send box
     // the same way the draft text is — otherwise they leak into whatever the
     // user sends next.
-    enqueue({
+    const accepted = (isCustomerChat ? customerQueue.enqueue : enqueue)({
       input: content,
       files: filesToSend,
       sessions: selectedSessions.length > 0 ? selectedSessions : undefined,
     });
+    if (!accepted) return;
+    if (isCustomerChat) {
+      directSendInFlight.current = true;
+      queueMicrotask(() => {
+        directSendInFlight.current = false;
+      });
+    }
     setContent('');
     clearFiles();
     setSelectedSessions([]);
     emitter.emit('aionrs.selected.file.clear');
-  }, [atPath, clearFiles, content, enqueue, selectedSessions, setContent, uploadFile, validatePrompt]);
+  }, [
+    atPath,
+    clearFiles,
+    content,
+    enqueue,
+    selectedSessions,
+    setContent,
+    uploadFile,
+    validatePrompt,
+    isCustomerChat,
+    customerQueue.enqueue,
+  ]);
 
   const handleEditQueuedCommand = useCallback(
     (item: ConversationCommandQueueItem) => {
-      remove(item.id);
+      if (isCustomerChat && (contentRef.current.trim() || uploadFile.length || atPathRef.current.length)) return;
+      if (isCustomerChat) {
+        if (!customerQueue.remove(item.id)) return;
+      } else remove(item.id);
       setContent(item.input);
       // Restore the two selection lanes: upload refs → uploadFile paths,
       // project refs → atPath items carrying their chatRef (so a re-send
@@ -478,9 +540,10 @@ const AionrsSendBox: React.FC<{
       const { uploadFiles, atPath: restoredAtPath } = splitChatFileRefs(item.files);
       setUploadFile(uploadFiles);
       setAtPath(restoredAtPath);
+      setSelectedSessions(item.sessions ?? []);
       emitter.emit('aionrs.selected.file.clear');
     },
-    [remove, setAtPath, setContent, setUploadFile]
+    [remove, setAtPath, setContent, setUploadFile, isCustomerChat, customerQueue.remove, uploadFile.length]
   );
 
   const appendSelectedFiles = useCallback(
@@ -720,6 +783,7 @@ const AionrsSendBox: React.FC<{
     if (!turnId) {
       resetState();
       resetActiveExecution('stop');
+      customerQueue.resetActiveExecution();
       return;
     }
     runtimeView.markStopRequested(turnId);
@@ -732,6 +796,7 @@ const AionrsSendBox: React.FC<{
     } finally {
       resetState();
       resetActiveExecution('stop');
+      customerQueue.resetActiveExecution();
     }
   };
   const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
@@ -751,20 +816,31 @@ const AionrsSendBox: React.FC<{
 
   return (
     <div className={`${sendBoxWidthClass} flex flex-col mt-auto mb-16px`}>
-      <CommandQueuePanel
-        items={queuedCommands}
-        mode={queueMode}
-        isMobile={isMobile}
-        interactionLocked={isQueueInteractionLocked}
-        onInteractionLock={lockInteraction}
-        onInteractionUnlock={unlockInteraction}
-        onEdit={handleEditQueuedCommand}
-        onSendNow={handleSendNowQueued}
-        onToggleMode={toggleMode}
-        onReorder={reorder}
-        onRemove={remove}
-        onClear={clear}
-      />
+      {isCustomerChat ? (
+        <PromptQueuePanel
+          items={customerQueue.items}
+          active={customerQueue.active}
+          onRetry={customerQueue.retry}
+          onRemove={customerQueue.remove}
+          onEdit={handleEditQueuedCommand}
+          canEdit={!content.trim() && uploadFile.length === 0 && atPath.length === 0}
+        />
+      ) : (
+        <CommandQueuePanel
+          items={queuedCommands}
+          mode={queueMode}
+          isMobile={isMobile}
+          interactionLocked={isQueueInteractionLocked}
+          onInteractionLock={lockInteraction}
+          onInteractionUnlock={unlockInteraction}
+          onEdit={handleEditQueuedCommand}
+          onSendNow={handleSendNowQueued}
+          onToggleMode={toggleMode}
+          onReorder={reorder}
+          onRemove={remove}
+          onClear={clear}
+        />
+      )}
       <ThoughtDisplay
         thought={thought}
         running={teamRuntime?.loading ?? running}
@@ -811,18 +887,23 @@ const AionrsSendBox: React.FC<{
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={!current_model?.use_model}
-        sendDisabled={isBusy || !promptBudget.allowed}
+        clearAfterAccepted={isCustomerChat}
+        sendDisabled={
+          (isCustomerChat ? !entryRuntime.isReady || customerQueue.isFull : isBusy) || !promptBudget.allowed
+        }
         sendDisabledTooltip={
           !promptBudget.allowed
             ? t('conversation.promptTooLarge', { limit: promptBudget.maxBytes })
             : !entryRuntime.isReady
               ? t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`)
-              : isBusy
-                ? t('conversation.commandQueue.midturnBlockedSendHint', {
-                    defaultValue:
-                      'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
-                  })
-                : undefined
+              : isCustomerChat && customerQueue.isFull
+                ? t('conversation.customerQueue.full')
+                : !isCustomerChat && isBusy
+                  ? t('conversation.commandQueue.midturnBlockedSendHint', {
+                      defaultValue:
+                        'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
+                    })
+                  : undefined
         }
         placeholder={
           current_model?.use_model
@@ -911,7 +992,7 @@ const AionrsSendBox: React.FC<{
         slash_commands={slash_commands}
         onSlashBuiltinCommand={onSlashBuiltinCommand}
         onAddToDraft={handleAddToQueue}
-        addToDraftDisabled={!canQueueCurrentDraft || !promptBudget.allowed}
+        addToDraftDisabled={!canQueueCurrentDraft || !promptBudget.allowed || (isCustomerChat && customerQueue.isFull)}
         addToDraftTooltip={
           isBusy
             ? t('conversation.commandQueue.addToQueueBusyHint', {
