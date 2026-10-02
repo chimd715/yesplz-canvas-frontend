@@ -474,6 +474,16 @@ describe('saved widget source versions', () => {
   const mirroredCompletion = (id = 'done-b') => ({
     items: [{ id, conversation_id: 'logical', type: 'text', position: 'left', status: 'finish', hidden: false }],
   });
+  const completionTip = () => ({
+    id: 'success-tip',
+    conversation_id: 'logical',
+    type: 'tips',
+    position: 'left',
+    status: 'finish',
+    hidden: false,
+    backend_turn_id: 'provider-turn-b',
+    content: { type: 'success', content: 'Cache full miss: TtlExpiry', code: null, params: null, supersedes_key: null },
+  });
   const autoSaveFixture = (snapshot: () => Response) => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
@@ -492,6 +502,52 @@ describe('saved widget source versions', () => {
       messageId: 'done-b',
       cards: [{ messageId: 'done-b', sourceVersionId: sourceA }],
     });
+
+  it.each(['object', 'JSON string'])('anchors the card before a benign trailing success tip (%s)', async (encoding) => {
+    const tip = completionTip();
+    latestMessages.mockResolvedValue({
+      items: [
+        { ...mirroredCompletion().items[0], backend_turn_id: tip.backend_turn_id },
+        { ...tip, content: encoding === 'object' ? tip.content : JSON.stringify(tip.content) },
+      ],
+    });
+    const fetcher = autoSaveFixture(capturedCompletion);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    expect(await within(screen.getByTestId('completed-message')).findByRole('region')).toBeVisible();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body)).toEqual([
+      '{"conversationId":"logical","messageId":"done-b"}',
+    ]);
+  });
+
+  it.each([
+    ['a newer user message', { type: 'text', position: 'right' }],
+    ['pending work', { status: 'work' }],
+    ['an error tip', { content: { type: 'error', content: 'Failed' } }],
+    ['a coded success tip', { content: { type: 'success', content: 'Updated', code: 'runtime_changed' } }],
+    ['another provider turn', { backend_turn_id: 'provider-turn-new' }],
+    ['a hidden row', { hidden: true }],
+    ['a foreign conversation', { conversation_id: 'foreign' }],
+    ['a tool row', { type: 'tool_call' }],
+  ])('does not select older text across %s', async (_name, overrides) => {
+    const tip = completionTip();
+    latestMessages.mockResolvedValue({
+      items: [
+        { ...mirroredCompletion().items[0], backend_turn_id: tip.backend_turn_id },
+        { ...tip, id: 'intervening', ...overrides },
+        tip,
+      ],
+    });
+    const fetcher = autoSaveFixture(capturedCompletion);
+    view(true, 'done-b');
+    await screen.findByRole('button', { name: 'conversation.publishing.publish', exact: true });
+    vi.useFakeTimers();
+    await emitCompleted(completed({ last_message: { content: null, created_at: 1780000000000 } }));
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(within(screen.getByTestId('completed-message')).queryByRole('region')).not.toBeInTheDocument();
+  });
 
   it('waits briefly for the completed message to reach the central mirror before saving its card', async () => {
     latestMessages.mockResolvedValueOnce({ items: [] }).mockResolvedValue(mirroredCompletion());
@@ -636,7 +692,7 @@ describe('saved widget source versions', () => {
       })
     ).toBeVisible();
     await emitCompleted(nativeEvent);
-    expect(latestMessages).toHaveBeenCalledWith({ conversation_id: 'logical', limit: 1 });
+    expect(latestMessages).toHaveBeenCalledWith({ conversation_id: 'logical', limit: 20 });
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => init?.body)).toEqual([
       '{"conversationId":"logical","messageId":"done-b"}',
     ]);

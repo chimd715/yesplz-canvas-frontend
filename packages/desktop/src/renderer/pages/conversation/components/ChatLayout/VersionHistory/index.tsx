@@ -154,17 +154,57 @@ export function useVersionHistoryState(logicalConversationId: string | undefined
             if (completedTurn && !messageId) {
               const page = await ipcBridge.database.getConversationMessages.invoke({
                 conversation_id: activeConversationId,
-                limit: 1,
+                limit: 20,
               });
               checkCompletion();
-              const latest = page?.items.length === 1 ? page.items[0] : undefined;
+              // Core can append a success notice after its final assistant text.
+              // Walk only that benign suffix; never cross another turn or work row.
+              let latest: (typeof page.items)[number] | undefined;
+              const tipTurns = new Set<string>();
+              if (page?.items.length <= 20) {
+                for (let index = page.items.length - 1; index >= 0; index -= 1) {
+                  const row = page.items[index];
+                  if (
+                    row.conversation_id !== activeConversationId ||
+                    row.position !== 'left' ||
+                    row.status !== 'finish' ||
+                    row.hidden !== false
+                  )
+                    break;
+                  if (row.type !== 'tips') {
+                    latest = row;
+                    break;
+                  }
+                  let content: unknown = row.content;
+                  try {
+                    if (typeof content === 'string') content = JSON.parse(content);
+                  } catch {
+                    break;
+                  }
+                  if (!content || typeof content !== 'object' || Array.isArray(content)) break;
+                  const tip = content as Record<string, unknown>;
+                  if (
+                    tip.type !== 'success' ||
+                    typeof tip.content !== 'string' ||
+                    ![tip.code, tip.params, tip.supersedes_key, tip.error].every(
+                      (value) => value === null || value === undefined
+                    )
+                  )
+                    break;
+                  if (row.backend_turn_id != null) {
+                    if (typeof row.backend_turn_id !== 'string' || !row.backend_turn_id) break;
+                    tipTurns.add(row.backend_turn_id);
+                  }
+                }
+              }
               if (
                 !latest?.id ||
                 latest.conversation_id !== activeConversationId ||
                 latest.type !== 'text' ||
                 latest.position !== 'left' ||
                 latest.status !== 'finish' ||
-                latest.hidden !== false
+                latest.hidden !== false ||
+                [...tipTurns].some((turn) => turn !== latest.backend_turn_id)
               ) {
                 throw new VersionRequestError(409, 'mirror_not_ready');
               }
