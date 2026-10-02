@@ -26,8 +26,8 @@ export const fetchProviders = async (): Promise<IProvider[]> => {
   return (await ipcBridge.mode.listProviders.invoke()) ?? [];
 };
 
-export const useProvidersQuery = () => {
-  return useSWR<IProvider[]>(PROVIDERS_SWR_KEY, fetchProviders, PROVIDERS_SWR_OPTIONS);
+export const useProvidersQuery = (options?: SWRConfiguration<IProvider[], Error>) => {
+  return useSWR<IProvider[]>(PROVIDERS_SWR_KEY, fetchProviders, { ...PROVIDERS_SWR_OPTIONS, ...options });
 };
 
 /**

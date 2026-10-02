@@ -1,4 +1,5 @@
 import { isChatFileRef } from '@/common/types/chatFile';
+import { uuid } from '@/common/utils';
 import type { ConversationCommandQueueItem } from '../../useConversationCommandQueue';
 
 export const MAX_PENDING_PROMPTS = 3;
@@ -81,6 +82,19 @@ export const saveQueue = (scope: string, state: PromptQueueState, accepted = fal
     listeners.forEach((listener) => listener());
   }
   return persisted;
+};
+
+/** Persist the home page's first prompt before opening its conversation. */
+export const stageCustomerInitialPrompt = (
+  accountId: string,
+  conversationId: string,
+  item: Pick<ConversationCommandQueueItem, 'input' | 'files'>
+): 'accepted' | 'full' | 'storage_failed' => {
+  const scope = queueScope(accountId, conversationId);
+  const current = getQueue(scope);
+  if (current.items.length >= MAX_PENDING_PROMPTS) return 'full';
+  const queued = { ...item, id: uuid(), created_at: Date.now() };
+  return saveQueue(scope, { ...current, items: [...current.items, queued] }) ? 'accepted' : 'storage_failed';
 };
 
 export const subscribeQueue = (listener: () => void): (() => void) => {

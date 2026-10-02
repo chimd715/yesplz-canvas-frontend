@@ -13,6 +13,7 @@ import { resolveLocaleKey } from '@/common/utils';
 import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
 
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { getFuzzyMatchIndices, useSlashCommandController } from '@/renderer/hooks/chat/useSlashCommandController';
 import { isElectronDesktop, openExternalUrl } from '@/renderer/utils/platform';
@@ -59,6 +60,7 @@ const GuidPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const customerHome = !isElectronDesktop();
+  const auth = useAuth();
   const guidContainerRef = useRef<HTMLDivElement>(null);
   const { activeBorderColor, inactiveBorderColor, activeShadow } = useInputFocusRing();
 
@@ -283,6 +285,8 @@ const GuidPage: React.FC = () => {
   });
 
   const send = useGuidSend({
+    customerHome,
+    customerAccountId: auth.status === 'authenticated' ? auth.user?.id : undefined,
     // Input state
     input: guidInput.input,
     shopWidgetSelected,
@@ -340,9 +344,8 @@ const GuidPage: React.FC = () => {
 
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        // Empty input is allowed — it creates an empty conversation ("start
-        // chat"). Mirror the send button's gate so Enter and click behave
-        // identically (blocked only while loading or with no assistant).
+        // Empty input may open idle chat. Enter shares the button's readiness
+        // and prompt validation, including the configured customer model.
         if (send.isButtonDisabled) return;
         send.sendMessageHandler();
       }

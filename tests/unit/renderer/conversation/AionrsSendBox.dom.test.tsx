@@ -6,7 +6,12 @@ import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
-import { resetCustomerPromptQueuesForTest } from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue/state';
+import {
+  getQueue,
+  queueScope,
+  stageCustomerInitialPrompt,
+  resetCustomerPromptQueuesForTest,
+} from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue/state';
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 const {
@@ -377,6 +382,35 @@ const ChatNavigation = () => {
 };
 
 describe('AionrsSendBox', () => {
+  it('automatically prepares chat and sends the home-staged prompt and upload exactly once', async () => {
+    const files = [{ kind: 'upload' as const, path: 'customer-upload.csv' }];
+    expect(stageCustomerInitialPrompt('customer', 'conv-1', { input: '$report summarize', files })).toBe('accepted');
+    const { unmount } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(ensureConversationRuntimeMock).toHaveBeenCalled();
+    expect(sendMessageInvokeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: 'conv-1',
+        input: '$report summarize',
+        files,
+        inject_skills: ['report'],
+      })
+    );
+    unmount();
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a rejected first prompt visible in the scoped queue without silently resending it', async () => {
+    sendMessageInvokeMock.mockRejectedValue(
+      new BackendHttpError({ method: 'POST', path: '/api/conversations/conv-1/messages', status: 400, body: {} })
+    );
+    stageCustomerInitialPrompt('customer', 'conv-1', { input: 'first request', files: [] });
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(getQueue(queueScope('customer', 'conv-1')).active?.status).toBe('failed'));
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
+    expect(screen.getByText('first request')).toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.stubGlobal('electronAPI', undefined);
     vi.clearAllMocks();

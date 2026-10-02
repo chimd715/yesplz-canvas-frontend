@@ -12,8 +12,9 @@ import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { toSessionMcpServer } from '@/renderer/hooks/mcp/catalog';
 import { emitter } from '@/renderer/utils/emitter';
 import { updateWorkspaceTime } from '@/renderer/utils/workspace/workspaceHistory';
+import { stageCustomerInitialPrompt } from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue';
 import { Message } from '@arco-design/web-react';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
@@ -21,6 +22,8 @@ import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation
 import shopWidgetSkill from '../utils/shop-widget.md?raw';
 
 export type GuidSendDeps = {
+  customerHome?: boolean;
+  customerAccountId?: string;
   // Input state
   input: string;
   shopWidgetSelected?: boolean;
@@ -63,7 +66,7 @@ export type GuidSendDeps = {
 };
 
 export type GuidSendResult = {
-  handleSend: () => Promise<void>;
+  handleSend: () => Promise<boolean>;
   sendMessageHandler: () => void;
   isButtonDisabled: boolean;
   promptError?: string;
@@ -74,6 +77,8 @@ export type GuidSendResult = {
  */
 export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const {
+    customerHome = false,
+    customerAccountId,
     input,
     shopWidgetSelected = false,
     setInput,
@@ -106,11 +111,27 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     localeKey,
   } = deps;
   const sendingRef = useRef(false);
+  const mounted = useRef(true);
+  const account = useRef(customerAccountId);
+  account.current = customerAccountId;
+  const knownCreation = useRef<{
+    signature: string;
+    accountId: string;
+    conversationId: string;
+    staged: boolean;
+  } | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const handleSend = useCallback(async () => {
     if (!selectedAssistantId || (shopWidgetSelected && !input.trim())) {
-      return;
+      return false;
     }
+    if (customerHome && (!customerAccountId || selectedAssistantBackend !== 'aionrs')) return false;
 
     const initialInput = shopWidgetSelected ? `${shopWidgetSkill.trim()}\n\n## User request\n\n${input}` : input;
     if (selectedAssistantBackend === 'aionrs' && !getPromptBudget(initialInput, current_model, files.length).allowed) {
@@ -197,62 +218,81 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     if (assistantBackend === 'aionrs') {
       if (!current_model) {
         Message.warning(t('conversation.noModelConfigured'));
-        return;
+        return false;
       }
-      try {
-        const conversation = await ipcBridge.conversation.create.invoke({
-          name: input,
-          model: current_model,
-          assistant: {
-            id: assistantConversationId,
-            locale: localeKey,
-            conversation_overrides: assistantOverrides,
-          },
-          extra: {
-            ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
-            default_files: files.map(chatFileRefPath),
-            workspace: finalWorkspace,
-            custom_workspace: isCustomWorkspace,
-            selected_mcp_server_ids: selectedUserMcpServerIdsToSend,
-            selected_session_mcp_servers: selectedSessionMcpServersToSend,
-          },
-        });
+      const request = {
+        name: input,
+        model: current_model,
+        assistant: {
+          id: assistantConversationId,
+          locale: localeKey,
+          conversation_overrides: assistantOverrides,
+        },
+        extra: {
+          ...(shopWidgetSelected ? { outputType: 'widget' as const } : {}),
+          default_files: files.map(chatFileRefPath),
+          workspace: finalWorkspace,
+          custom_workspace: isCustomWorkspace,
+          selected_mcp_server_ids: selectedUserMcpServerIdsToSend,
+          selected_session_mcp_servers: selectedSessionMcpServersToSend,
+        },
+      };
+      const signature = JSON.stringify({ request, files });
+      const previous = knownCreation.current;
+      // Only a definitely returned ID may be reused after a local handoff
+      // failure. A rejected/ambiguous network create is never auto-retried.
+      const conversation =
+        customerHome && previous?.accountId === customerAccountId && previous.signature === signature
+          ? { id: previous.conversationId }
+          : await ipcBridge.conversation.create.invoke(request);
 
-        if (!conversation || !conversation.id) {
-          Message.error(t('conversation.createFailed'));
-          return;
-        }
-
-        if (isCustomWorkspace) {
-          updateWorkspaceTime(finalWorkspace);
-        }
-
-        if (assistantConversationId) {
-          await Promise.all([
-            swrMutate(`guid.assistant.detail.${assistantConversationId}.${localeKey}`),
-            swrMutate('assistants.list'),
-          ]);
-        }
-
-        emitter.emit('chat.history.refresh');
-
-        // Empty input = "start chat": create the conversation but do not stash an
-        // initial message, so the window opens idle on the empty state instead of
-        // auto-sending a blank first turn.
-        if (input.trim()) {
-          const initialMessage = {
-            input: initialInput,
-            files: files.length > 0 ? files : undefined,
+      if (!conversation || !conversation.id) {
+        Message.error(t('conversation.createFailed'));
+        return false;
+      }
+      if (customerHome) {
+        if (!mounted.current || account.current !== customerAccountId) return false;
+        if (
+          previous?.signature !== signature ||
+          previous.accountId !== customerAccountId ||
+          previous.conversationId !== conversation.id
+        ) {
+          knownCreation.current = {
+            signature,
+            accountId: customerAccountId!,
+            conversationId: conversation.id,
+            staged: false,
           };
-          sessionStorage.setItem(`aionrs_initial_message_${conversation.id}`, JSON.stringify(initialMessage));
         }
-
-        await navigate(`/conversation/${conversation.id}`);
-      } catch (error: unknown) {
-        console.error('Failed to create Aion CLI conversation:', error);
-        throw error;
+        const creation = knownCreation.current!;
+        if (input.trim() && !creation.staged) {
+          const staged = stageCustomerInitialPrompt(customerAccountId!, conversation.id, {
+            input: initialInput,
+            files,
+          });
+          if (staged !== 'accepted')
+            throw new Error(t(`conversation.customerQueue.${staged === 'full' ? 'full' : 'storageFailed'}`));
+          creation.staged = true;
+        }
+      } else if (input.trim()) {
+        // Desktop keeps its existing first-message handoff protocol.
+        const initialMessage = {
+          input: initialInput,
+          files: files.length > 0 ? files : undefined,
+        };
+        sessionStorage.setItem(`aionrs_initial_message_${conversation.id}`, JSON.stringify(initialMessage));
       }
-      return;
+
+      await navigate(`/conversation/${conversation.id}`);
+      if (isCustomWorkspace) updateWorkspaceTime(finalWorkspace);
+      emitter.emit('chat.history.refresh');
+      // Preference/catalog revalidation cannot hold the customer at home
+      // after its workspace and first prompt have already been accepted.
+      void Promise.allSettled([
+        swrMutate(`guid.assistant.detail.${assistantConversationId}.${localeKey}`),
+        swrMutate('assistants.list'),
+      ]);
+      return true;
     }
 
     try {
@@ -275,7 +315,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       });
       if (!conversation || !conversation.id) {
         console.error('Failed to create ACP conversation - conversation object is null or missing id');
-        return;
+        return false;
       }
 
       if (isCustomWorkspace) {
@@ -303,11 +343,14 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       }
 
       await navigate(`/conversation/${conversation.id}`);
+      return true;
     } catch (error: unknown) {
       console.error('Failed to create ACP conversation:', error);
       throw error;
     }
   }, [
+    customerHome,
+    customerAccountId,
     input,
     shopWidgetSelected,
     files,
@@ -342,18 +385,19 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     sendingRef.current = true;
     setLoading(true);
     handleSend()
-      .then(() => {
-        setInput('');
+      .then((accepted) => {
+        if (!accepted || !mounted.current || (customerHome && account.current !== customerAccountId)) return;
+        setInput((current) => (current === input ? '' : current));
         setMentionOpen(false);
         setMentionQuery(null);
         setMentionSelectorOpen(false);
         setMentionActiveIndex(0);
-        setFiles([]);
-        setDir('');
+        setFiles((current) => (current === files ? [] : current));
+        setDir((current) => (current === dir ? '' : current));
       })
       .catch((error) => {
-        console.error('Failed to send message:', error);
-        Message.error(getConversationCreateErrorMessage(error, t));
+        if (mounted.current && (!customerHome || account.current === customerAccountId))
+          Message.error(getConversationCreateErrorMessage(error, t));
       })
       .finally(() => {
         sendingRef.current = false;
@@ -375,6 +419,10 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     current_model,
     files.length,
     selectedAssistantBackend,
+    customerHome,
+    customerAccountId,
+    dir,
+    files,
   ]);
 
   // Ordinary chat can start empty; widget mode needs a feature description.
@@ -388,7 +436,12 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       ? t('conversation.promptTooLarge', { limit: budget.maxBytes })
       : undefined;
   const isButtonDisabled =
-    loading || !selectedAssistantId || (shopWidgetSelected && !input.trim()) || Boolean(promptError);
+    loading ||
+    !selectedAssistantId ||
+    (selectedAssistantBackend === 'aionrs' && !current_model) ||
+    (customerHome && (!customerAccountId || selectedAssistantBackend !== 'aionrs')) ||
+    (shopWidgetSelected && !input.trim()) ||
+    Boolean(promptError);
 
   return {
     handleSend,

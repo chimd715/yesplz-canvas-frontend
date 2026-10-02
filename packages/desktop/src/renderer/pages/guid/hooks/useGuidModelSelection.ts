@@ -52,7 +52,21 @@ export type GuidModelSelectionResult = {
  */
 export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'aionrs'): GuidModelSelectionResult => {
   const { isGoogleAuth } = useGoogleAuthModels();
-  const { data: modelConfig } = useProvidersQuery();
+  const customerHome = !isElectronDesktop();
+  // Local startup registers the mock provider after the web host becomes
+  // reachable. Recover an initially empty catalog without a setup action.
+  const { data: modelConfig } = useProvidersQuery(
+    customerHome
+      ? {
+          refreshInterval: (providers) => (getCustomerModelProviders(providers ?? []).length ? 0 : 1000),
+          revalidateOnFocus: true,
+          revalidateOnReconnect: true,
+          shouldRetryOnError: true,
+          errorRetryCount: 3,
+          errorRetryInterval: 1000,
+        }
+      : undefined
+  );
 
   const modelList = useMemo(() => {
     const allProviders: IProvider[] = (modelConfig || []).filter((platform) => !!platform.models.length);
@@ -104,6 +118,10 @@ export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'aionrs'): Gu
   useEffect(() => {
     const setDefaultModel = async () => {
       if (!modelList || modelList.length === 0) {
+        if (!isElectronDesktop()) {
+          selectedModelKeyRef.current = null;
+          _setCurrentModel(undefined);
+        }
         return;
       }
       const currentKey = selectedModelKeyRef.current || buildModelKey(current_model?.id, current_model?.use_model);

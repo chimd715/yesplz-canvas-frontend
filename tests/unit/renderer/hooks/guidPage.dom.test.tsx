@@ -125,6 +125,9 @@ const {
   navigateMock: vi.fn(),
 }));
 const platform = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ status: 'authenticated', user: { id: 'customer' } }),
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -303,6 +306,14 @@ const guidInputCardProps = {
 };
 
 describe('GuidPage', () => {
+  it('renders the home composer immediately with the authenticated scope and no workspace-start action', () => {
+    render(<GuidPage />);
+    expect(screen.getByTestId('guid-input-card')).toBeInTheDocument();
+    expect(screen.queryByText(/start workspace|resume/i)).not.toBeInTheDocument();
+    expect(capturedGuidSendDeps.at(-1)).toEqual(
+      expect.objectContaining({ customerHome: true, customerAccountId: 'customer' })
+    );
+  });
   it('selects and clears Shop Widget without overwriting a draft or starting a conversation', () => {
     render(<GuidPage />);
     guidInputMock.setInput.mockClear();

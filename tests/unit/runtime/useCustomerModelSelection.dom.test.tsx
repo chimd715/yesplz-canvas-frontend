@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import { useAionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { getCustomerModelProviders } from '@/common/utils/modelCapabilities';
+import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 
 const environment = vi.hoisted(() => ({ desktop: false, providers: [] as IProvider[] }));
 vi.mock('@/renderer/utils/platform', () => ({ isElectronDesktop: () => environment.desktop }));
 vi.mock('@/renderer/hooks/agent/useModelProviderList', () => ({
+  useProvidersQuery: () => ({ data: environment.providers }),
   useModelProviderList: () => ({
     providers: environment.providers,
     getAvailableModels: (provider: IProvider) => provider.models,
     formatModelLabel: (_provider: IProvider, model: string) => model,
   }),
+}));
+vi.mock('@/renderer/hooks/agent/useGoogleAuthModels', () => ({
+  useGoogleAuthModels: () => ({ isGoogleAuth: false }),
 }));
 
 const provider = {
@@ -30,6 +35,17 @@ const deferred = () => {
 };
 
 describe('customer model selection', () => {
+  it('automatically selects a configured home model when startup catalog arrives and clears an unavailable selection', async () => {
+    environment.providers = [];
+    const { result, rerender } = renderHook(() => useGuidModelSelection());
+    expect(result.current.current_model).toBeUndefined();
+    environment.providers = [{ ...provider, api_key: 'fixture' }];
+    await act(async () => rerender());
+    expect(result.current.current_model?.use_model).toBe(provider.models[0]);
+    environment.providers = [];
+    await act(async () => rerender());
+    expect(result.current.current_model).toBeUndefined();
+  });
   beforeEach(() => {
     environment.desktop = false;
     environment.providers = [provider];

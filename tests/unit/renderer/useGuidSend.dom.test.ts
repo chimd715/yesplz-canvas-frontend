@@ -4,10 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
+import {
+  getQueue,
+  queueScope,
+  resetCustomerPromptQueuesForTest,
+} from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue/state';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -74,7 +79,176 @@ const createDeps = (): GuidSendDeps => ({
   localeKey: 'zh-CN',
 });
 
+const customerDeps = (): GuidSendDeps => ({
+  ...createDeps(),
+  customerHome: true,
+  customerAccountId: 'alice',
+  selectedAssistantId: 'bare:aionrs',
+  selectedAssistantBackend: 'aionrs',
+  current_model: { id: 'configured-mock', use_model: 'mock-local' } as NonNullable<GuidSendDeps['current_model']>,
+});
+const deferredCreation = () => {
+  let resolve!: (conversation: { id: string }) => void;
+  const promise = new Promise<{ id: string }>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 describe('useGuidSend', () => {
+  it('creates an automatic standalone workspace, stages the uploaded first prompt, then opens chat directly', async () => {
+    const deps = customerDeps();
+    deps.files = [{ kind: 'upload', path: 'opaque-upload-ref' }];
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(true);
+    });
+    const request = createConversationInvokeMock.mock.calls[0][0];
+    expect(request.extra).toEqual(
+      expect.objectContaining({ workspace: '', custom_workspace: false, default_files: ['opaque-upload-ref'] })
+    );
+    expect(request.extra.teamId).toBeUndefined();
+    expect(getQueue(queueScope('alice', 'conv-1')).items).toEqual([
+      expect.objectContaining({ input: 'hello', files: deps.files }),
+    ]);
+    expect(deps.navigate).toHaveBeenCalledWith('/conversation/conv-1');
+    expect(sessionStorage.getItem('aionrs_initial_message_conv-1')).toBeNull();
+  });
+
+  it.each(['missing model', 'missing assistant', 'missing account', 'invalid response'])(
+    'keeps the draft when first submission has %s',
+    async (reason) => {
+      const deps = customerDeps();
+      if (reason === 'missing model') deps.current_model = undefined;
+      if (reason === 'missing assistant') deps.selectedAssistantId = null;
+      if (reason === 'missing account') deps.customerAccountId = undefined;
+      if (reason === 'invalid response') createConversationInvokeMock.mockResolvedValue(null);
+      const { result } = renderHook(() => useGuidSend(deps));
+      act(() => result.current.sendMessageHandler());
+      await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+      expect(deps.setInput).not.toHaveBeenCalled();
+      expect(deps.setFiles).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      if (reason !== 'invalid response') expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not wait for unrelated catalog refresh promises before entering chat', async () => {
+    swrMutateMock.mockReturnValue(new Promise(() => {}));
+    const deps = customerDeps();
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(true);
+    });
+    expect(deps.navigate).toHaveBeenCalledOnce();
+  });
+
+  it('synchronously prevents rapid Enter submissions from creating duplicate conversations or first prompts', async () => {
+    const creation = deferredCreation();
+    createConversationInvokeMock.mockReturnValue(creation.promise);
+    const deps = customerDeps();
+    const { result } = renderHook(() => useGuidSend(deps));
+    act(() => {
+      result.current.sendMessageHandler();
+      result.current.sendMessageHandler();
+      result.current.sendMessageHandler();
+    });
+    expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+    await act(async () => creation.resolve({ id: 'conv-1' }));
+    await waitFor(() => expect(deps.navigate).toHaveBeenCalledOnce());
+    expect(getQueue(queueScope('alice', 'conv-1')).items).toHaveLength(1);
+  });
+
+  it('reuses only a known returned conversation after storage failure and keeps the draft until handoff succeeds', async () => {
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    const deps = customerDeps();
+    const { result } = renderHook(() => useGuidSend(deps));
+    act(() => result.current.sendMessageHandler());
+    await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+    expect(deps.setInput).not.toHaveBeenCalled();
+    expect(deps.navigate).not.toHaveBeenCalled();
+    storage.mockRestore();
+    act(() => result.current.sendMessageHandler());
+    await waitFor(() => expect(deps.navigate).toHaveBeenCalledOnce());
+    expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+    expect(getQueue(queueScope('alice', 'conv-1')).items).toHaveLength(1);
+  });
+
+  it('retries failed navigation to the same conversation without duplicating its staged prompt', async () => {
+    const deps = customerDeps();
+    vi.mocked(deps.navigate).mockRejectedValueOnce(new Error('navigation failed'));
+    const { result } = renderHook(() => useGuidSend(deps));
+    await expect(result.current.handleSend()).rejects.toThrow('navigation failed');
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+    expect(getQueue(queueScope('alice', 'conv-1')).items).toHaveLength(1);
+    expect(deps.navigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not automatically retry an ambiguous network create', async () => {
+    createConversationInvokeMock.mockRejectedValue(new TypeError('connection lost'));
+    const deps = customerDeps();
+    const { result } = renderHook(() => useGuidSend(deps));
+    act(() => result.current.sendMessageHandler());
+    await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+    expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+    expect(deps.setInput).not.toHaveBeenCalled();
+    expect(deps.navigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a named-skill draft when its startup catalog is unavailable', async () => {
+    const deps = customerDeps();
+    deps.input = '$report summarize';
+    const { result } = renderHook(() => useGuidSend(deps));
+    act(() => result.current.sendMessageHandler());
+    await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.setInput).not.toHaveBeenCalled();
+  });
+
+  it('clears only the accepted draft and preserves text/files edited while provisioning', async () => {
+    const creation = deferredCreation();
+    createConversationInvokeMock.mockReturnValue(creation.promise);
+    const deps = customerDeps();
+    const { result } = renderHook(() => useGuidSend(deps));
+    act(() => result.current.sendMessageHandler());
+    await act(async () => creation.resolve({ id: 'conv-1' }));
+    await waitFor(() => expect(deps.setInput).toHaveBeenCalledOnce());
+    const updateInput = vi.mocked(deps.setInput).mock.calls[0][0] as (value: string) => string;
+    expect(updateInput('hello')).toBe('');
+    expect(updateInput('next prompt')).toBe('next prompt');
+    const updateFiles = vi.mocked(deps.setFiles).mock.calls[0][0] as (
+      value: GuidSendDeps['files']
+    ) => GuidSendDeps['files'];
+    const newFiles = [{ kind: 'upload' as const, path: 'new-upload' }];
+    expect(updateFiles(newFiles)).toBe(newFiles);
+  });
+
+  it.each(['account change', 'unmount'])('does not stage or navigate after %s during creation', async (reason) => {
+    const creation = deferredCreation();
+    createConversationInvokeMock.mockReturnValue(creation.promise);
+    const deps = customerDeps();
+    const { result, rerender, unmount } = renderHook(() => useGuidSend(deps));
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.handleSend();
+    });
+    if (reason === 'account change') {
+      deps.customerAccountId = 'bob';
+      rerender();
+    } else unmount();
+    await act(async () => {
+      creation.resolve({ id: 'conv-1' });
+      expect(await pending).toBe(false);
+    });
+    expect(deps.navigate).not.toHaveBeenCalled();
+    expect(getQueue(queueScope('alice', 'conv-1')).items).toHaveLength(0);
+    expect(getQueue(queueScope('bob', 'conv-1')).items).toHaveLength(0);
+  });
   it('rejects an unknown named skill before creating a conversation and keeps the draft', async () => {
     const deps = createDeps();
     deps.selectedAssistantBackend = 'aionrs';
@@ -159,6 +333,8 @@ describe('useGuidSend', () => {
   });
 
   beforeEach(() => {
+    sessionStorage.clear();
+    resetCustomerPromptQueuesForTest();
     createConversationInvokeMock.mockReset();
     createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
     swrMutateMock.mockReset();
@@ -167,7 +343,7 @@ describe('useGuidSend', () => {
 
   it('passes selected mode into assistant conversation overrides when creating a preset ACP conversation', async () => {
     const deps = createDeps();
-    (deps as any).selectedThoughtLevelValue = 'high';
+    deps.selectedThoughtLevelValue = 'high';
 
     const { result } = renderHook(() => useGuidSend(deps));
 
