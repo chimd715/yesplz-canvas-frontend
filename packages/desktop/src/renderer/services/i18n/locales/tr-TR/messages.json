@@ -103,5 +103,19 @@
   "requestDetails": "İstek ayrıntıları:",
   "delivery": {
     "pending": "Okunmadı"
+  },
+  "activity": {
+    "thinking": "Düşünüyor",
+    "running": "Çalışıyor",
+    "pending": "Bekliyor",
+    "completed": "İşlem tamamlandı",
+    "error": "Başarısız",
+    "canceled": "İptal edildi",
+    "stopped": "Durduruldu",
+    "show": "Bu turun işlemlerini göster",
+    "hide": "Bu turun işlemlerini gizle",
+    "input": "Girdi",
+    "output": "Çıktı",
+    "loadFailed": "İşlemlerin tamamı yüklenemedi. Tekrar deneyin."
   }
 }

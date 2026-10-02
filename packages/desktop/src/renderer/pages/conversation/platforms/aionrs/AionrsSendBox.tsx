@@ -36,6 +36,11 @@ import {
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
+import { useMessageList, useMessagePaginationState } from '@/renderer/pages/conversation/Messages/hooks';
+import {
+  hasCurrentTurnActivity,
+  useActivityTurnGate,
+} from '@/renderer/pages/conversation/Messages/components/TurnActivity';
 import { useConversationEntryRuntime } from '@/renderer/pages/conversation/runtime/useConversationEntryRuntime';
 import { getConversationRuntimeWorkspaceErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
@@ -138,7 +143,10 @@ const AionrsSendBox: React.FC<{
   const isMobile = Boolean(layout?.isMobile);
   const auth = useAuth();
   // Team API owns its own slot queue and accepts mid-turn messages separately.
-  const isCustomerChat = !window.electronAPI && !teamSendMessage && !teamRuntime;
+  const teamPermission = useTeamPermission();
+  const isCustomerChat = !window.electronAPI && !teamSendMessage && !teamRuntime && !teamPermission?.isTeamMode;
+  const activityMessages = useMessageList();
+  const activityPagination = useMessagePaginationState();
   const { data: explicitSkills } = useSWR(
     auth.status === 'authenticated' && auth.user?.id ? ['customer.skills', auth.user.id] : null,
     () => ipcBridge.fs.listAvailableSkills.invoke()
@@ -156,7 +164,6 @@ const AionrsSendBox: React.FC<{
   const { t } = useTranslation();
   const { checkAndUpdateTitle } = useAutoTitle();
   const { current_model } = modelSelection;
-  const teamPermission = useTeamPermission();
   const propagateMode = teamPermission?.propagateMode;
 
   const { thought, running, turnStartedAtMs, tokenUsage, setActiveMsgId, setWaitingResponse, resetState } =
@@ -169,6 +176,21 @@ const AionrsSendBox: React.FC<{
       },
     });
   const runtimeView = useConversationRuntimeView(conversation_id);
+  const activityIsProcessing = useActivityTurnGate(
+    conversation_id,
+    activityMessages,
+    {
+      isProcessing: runtimeView.isProcessing,
+      activeTurnId: runtimeView.activeTurnId,
+      localSubmitting: runtimeView.view?.localSubmitting,
+      hydrated: runtimeView.hydrated,
+    },
+    !activityPagination.hasMoreAfter
+  );
+  const hasInlineActivity = useMemo(
+    () => isCustomerChat && activityIsProcessing && hasCurrentTurnActivity(activityMessages),
+    [isCustomerChat, activityIsProcessing, activityMessages]
+  );
   const { markSendStarted, markSendAccepted, markSendFailed } = runtimeView;
 
   const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
@@ -872,15 +894,17 @@ const AionrsSendBox: React.FC<{
           onClear={clear}
         />
       )}
-      <ThoughtDisplay
-        thought={thought}
-        running={teamRuntime?.loading ?? running}
-        statusText={teamRuntime?.statusText}
-        externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
-        startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
-        onStop={effectiveHandleStop}
-        onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
-      />
+      {!hasInlineActivity && (
+        <ThoughtDisplay
+          thought={thought}
+          running={teamRuntime?.loading ?? running}
+          statusText={teamRuntime?.statusText}
+          externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
+          startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
+          onStop={effectiveHandleStop}
+          onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
+        />
+      )}
       <CrossSessionDisabledBanner />
       {!promptBudget.allowed && (
         <div role='alert' className='mb-8px text-t-secondary'>

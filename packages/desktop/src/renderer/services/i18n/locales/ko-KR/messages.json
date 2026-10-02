@@ -103,5 +103,19 @@
   "requestDetails": "요청 내용:",
   "delivery": {
     "pending": "읽지 않음"
+  },
+  "activity": {
+    "thinking": "생각 중",
+    "running": "실행 중",
+    "pending": "대기 중",
+    "completed": "작업 완료",
+    "error": "실패",
+    "canceled": "취소됨",
+    "stopped": "중지됨",
+    "show": "이번 턴의 활동 보기",
+    "hide": "이번 턴의 활동 접기",
+    "input": "입력",
+    "output": "결과",
+    "loadFailed": "전체 활동을 불러오지 못했습니다. 다시 시도해 주세요."
   }
 }

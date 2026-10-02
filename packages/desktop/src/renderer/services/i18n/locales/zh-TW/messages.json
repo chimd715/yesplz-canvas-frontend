@@ -103,5 +103,19 @@
   "requestDetails": "請求內容：",
   "delivery": {
     "pending": "未讀"
+  },
+  "activity": {
+    "thinking": "思考中",
+    "running": "執行中",
+    "pending": "等待中",
+    "completed": "活動已完成",
+    "error": "失敗",
+    "canceled": "已取消",
+    "stopped": "已停止",
+    "show": "查看本輪活動",
+    "hide": "收起本輪活動",
+    "input": "輸入",
+    "output": "輸出",
+    "loadFailed": "無法載入完整活動，請重試。"
   }
 }

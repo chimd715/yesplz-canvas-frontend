@@ -103,5 +103,19 @@
   "requestDetails": "Détails de la demande :",
   "delivery": {
     "pending": "Non lu"
+  },
+  "activity": {
+    "thinking": "Réflexion en cours",
+    "running": "En cours",
+    "pending": "En attente",
+    "completed": "Activité terminée",
+    "error": "Échec",
+    "canceled": "Annulé",
+    "stopped": "Arrêté",
+    "show": "Afficher les actions de ce tour",
+    "hide": "Masquer les actions de ce tour",
+    "input": "Entrée",
+    "output": "Sortie",
+    "loadFailed": "Impossible de charger toutes les actions. Réessayez."
   }
 }

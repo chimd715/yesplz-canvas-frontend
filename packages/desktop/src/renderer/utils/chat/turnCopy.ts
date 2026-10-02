@@ -32,7 +32,7 @@ export interface AiCopyRows {
 }
 
 /** Pseudo timeline entries that neither end a turn nor carry copyable text. */
-const PSEUDO_TYPES = new Set(['file_summary', 'tool_summary', 'artifact']);
+const PSEUDO_TYPES = new Set(['file_summary', 'tool_summary', 'activity_summary', 'artifact']);
 
 /**
  * Group the visible timeline into AI turns. A turn runs until the next user

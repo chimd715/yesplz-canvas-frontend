@@ -6,7 +6,7 @@
 
 import React, { type PropsWithChildren } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpToolCall, IMessageText, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import type { MessageFileChangesProps } from '@/renderer/pages/conversation/Messages/MessageFileChanges';
 import {
@@ -36,6 +36,18 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('@arco-design/web-react', () => ({
+  Button: ({
+    children,
+    long: _long,
+    type: _type,
+    size: _size,
+    ...props
+  }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <button type='button' {...props}>
+      {children}
+    </button>
+  ),
+  Spin: () => <span role='progressbar' />,
   Image: {
     PreviewGroup: ({ children }: PropsWithChildren) => <>{children}</>,
   },
@@ -158,6 +170,9 @@ vi.mock('@/renderer/pages/conversation/Messages/components/SelectionReplyButton'
 
 vi.mock('@icon-park/react', () => ({
   Down: () => <span>down</span>,
+  Right: () => <span>right</span>,
+  CheckOne: () => <span>done</span>,
+  CloseOne: () => <span>failed</span>,
 }));
 
 function createTextMessage(): IMessageText {
@@ -233,11 +248,12 @@ function Wrapper({
   children,
   messages = [createTextMessage()],
   loading = false,
-}: PropsWithChildren<{ messages?: TMessage[]; loading?: boolean }>): JSX.Element {
+  hasMoreAfter = false,
+}: PropsWithChildren<{ messages?: TMessage[]; loading?: boolean; hasMoreAfter?: boolean }>): JSX.Element {
   return (
     <MessageListLoadingProvider value={loading}>
       <MessagePaginationProvider
-        value={{ hasMoreBefore: false, hasMoreAfter: false, isLoadingBefore: false, isLoadingAnchor: false }}
+        value={{ hasMoreBefore: false, hasMoreAfter, isLoadingBefore: false, isLoadingAnchor: false }}
       >
         <MessageListProvider value={messages}>{children}</MessageListProvider>
       </MessagePaginationProvider>
@@ -251,6 +267,7 @@ function ReplaceMessagesButton({ messages }: { messages: TMessage[] }): JSX.Elem
 }
 
 describe('MessageList', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     mockIsProcessing = false;
     parseDiffMock.mockReset();
@@ -262,6 +279,193 @@ describe('MessageList', () => {
       diff: 'diff',
     });
     useTeamPermissionMock.mockReturnValue(null);
+  });
+
+  it('renders one retained activity row per customer turn while leaving answer text in the stream', () => {
+    vi.stubGlobal('electronAPI', undefined);
+    const messages = [
+      {
+        id: 'user-1',
+        type: 'text',
+        position: 'right',
+        conversation_id: 'conversation-1',
+        created_at: 1,
+        content: { content: 'Build it' },
+      },
+      {
+        id: 'think-1',
+        type: 'thinking',
+        msg_id: 'minted-thinking-1',
+        conversation_id: 'conversation-1',
+        created_at: 2,
+        content: { content: 'Inspect the requirements', status: 'done' },
+      },
+      {
+        id: 'answer-1',
+        type: 'text',
+        position: 'left',
+        msg_id: 'minted-text-1',
+        conversation_id: 'conversation-1',
+        created_at: 3,
+        content: { content: 'First result' },
+      },
+      {
+        id: 'tool-1',
+        type: 'tool_call',
+        msg_id: 'aionrs-read-1',
+        conversation_id: 'conversation-1',
+        created_at: 4,
+        content: { call_id: 'read-1', name: 'Read', args: {}, status: 'completed', output: 'Checked file' },
+      },
+      {
+        id: 'answer-2',
+        type: 'text',
+        position: 'left',
+        msg_id: 'minted-text-2',
+        conversation_id: 'conversation-1',
+        created_at: 5,
+        content: { content: 'Final result' },
+      },
+    ] as TMessage[];
+    render(
+      <Wrapper messages={messages}>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getAllByTestId('turn-activity')).toHaveLength(1);
+    expect(screen.getByText('First result')).toBeInTheDocument();
+    expect(screen.getByText('Final result')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'messages.activity.show' }));
+    expect(screen.getByText('Inspect the requirements')).toBeInTheDocument();
+    expect(screen.getByText('Checked file')).toBeInTheDocument();
+  });
+
+  it('keeps question and secret tool data out of the customer activity and history', () => {
+    vi.stubGlobal('electronAPI', undefined);
+    const messages = ['AskUserQuestion', 'request_secret'].map((name, index) => ({
+      id: `private-${index}`,
+      type: 'tool_call',
+      msg_id: 'native-turn',
+      conversation_id: 'conversation-1',
+      created_at: 1,
+      content: {
+        call_id: `private-call-${index}`,
+        name,
+        args: { text: 'Private input' },
+        output: 'Private output',
+        status: 'completed',
+      },
+    })) as TMessage[];
+    render(
+      <Wrapper messages={messages}>
+        <MessageList emptySlot={<div>Customer chat</div>} />
+      </Wrapper>
+    );
+    expect(screen.queryByTestId('turn-activity')).not.toBeInTheDocument();
+    expect(screen.getByText('Customer chat')).toBeInTheDocument();
+    expect(screen.queryByText('Private output')).not.toBeInTheDocument();
+  });
+
+  it('keeps an earlier customer history turn finished while a different live turn is processing', () => {
+    vi.stubGlobal('electronAPI', undefined);
+    mockIsProcessing = true;
+    const messages = [
+      {
+        id: 'historic-thinking',
+        type: 'thinking',
+        msg_id: 'historic-segment',
+        conversation_id: 'conversation-1',
+        created_at: 1,
+        content: { content: 'Earlier reasoning', status: 'done' },
+      },
+    ] as TMessage[];
+    render(
+      <Wrapper messages={messages} hasMoreAfter>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getByRole('button', { name: 'messages.activity.show' })).toHaveTextContent(
+      'messages.activity.completed'
+    );
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'messages.activity.show' }));
+    expect(screen.getByText('Earlier reasoning')).toBeInTheDocument();
+  });
+
+  it('keeps customer activity expanded when live user and activity row IDs are replaced by persisted IDs', () => {
+    vi.stubGlobal('electronAPI', undefined);
+    const messages: TMessage[] = [
+      {
+        id: 'live-user-uuid',
+        msg_id: 'logical-user-1',
+        type: 'text',
+        position: 'right',
+        conversation_id: 'conversation-1',
+        created_at: 1,
+        content: { content: 'Build it' },
+      },
+      {
+        id: 'live-thinking-uuid',
+        msg_id: 'logical-thinking-1',
+        type: 'thinking',
+        conversation_id: 'conversation-1',
+        created_at: 2,
+        content: { content: 'Retained reasoning', status: 'done' },
+      },
+    ];
+    const persisted = messages.map((message, index) => ({ ...message, id: `persisted-${index}` }));
+    render(
+      <Wrapper messages={messages}>
+        <MessageList />
+        <ReplaceMessagesButton messages={persisted} />
+      </Wrapper>
+    );
+    const button = screen.getByRole('button', { name: 'messages.activity.show' });
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole('button', { name: 'replace messages' }));
+    expect(screen.getByRole('button', { name: 'messages.activity.hide' })).toBe(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Retained reasoning')).toBeInTheDocument();
+  });
+
+  it('preserves the native browser Team tool summary instead of adding a customer activity status', () => {
+    vi.stubGlobal('electronAPI', undefined);
+    useTeamPermissionMock.mockReturnValue({ isTeamMode: true });
+    const toolGroup = createToolGroup([
+      {
+        call_id: 'team-call',
+        name: 'Read',
+        status: 'Success',
+        description: 'Read file',
+        render_output_as_markdown: false,
+      },
+    ]);
+    render(
+      <Wrapper messages={[toolGroup]}>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getByTestId('tool-summary')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-activity')).not.toBeInTheDocument();
+  });
+
+  it('preserves the native desktop tool summary', () => {
+    const toolGroup = createToolGroup([
+      {
+        call_id: 'desktop-call',
+        name: 'Read',
+        status: 'Success',
+        description: 'Read file',
+        render_output_as_markdown: false,
+      },
+    ]);
+    render(
+      <Wrapper messages={[toolGroup]}>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getByTestId('tool-summary')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-activity')).not.toBeInTheDocument();
   });
 
   it('never renders a plan as a stream row (it belongs to ConversationPlanBar)', () => {

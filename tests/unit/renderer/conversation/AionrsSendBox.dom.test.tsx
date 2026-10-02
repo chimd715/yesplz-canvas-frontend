@@ -13,6 +13,12 @@ import {
   resetCustomerPromptQueuesForTest,
 } from '@/renderer/pages/conversation/platforms/aionrs/PromptQueue/state';
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import {
+  MessageListProvider,
+  MessagePaginationProvider,
+  useUpdateMessagePaginationState,
+} from '@/renderer/pages/conversation/Messages/hooks';
+import type { TMessage } from '@/common/chat/chatLib';
 
 const {
   ensureConversationRuntimeMock,
@@ -31,6 +37,7 @@ const {
   runtimeViewIsProcessingRef,
   skillCatalogRef,
   mobileRef,
+  thoughtDisplaySpy,
 } = vi.hoisted(() => ({
   ensureConversationRuntimeMock: vi.fn().mockResolvedValue({ recovered: false, config_options: [], runtime: null }),
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +59,7 @@ const {
       | undefined,
   },
   mobileRef: { current: false },
+  thoughtDisplaySpy: vi.fn(),
 }));
 
 vi.mock('swr', () => ({ default: () => ({ data: skillCatalogRef.current }) }));
@@ -172,7 +180,12 @@ vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
   ),
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
 }));
-vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({ default: () => null }));
+vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({
+  default: () => {
+    thoughtDisplaySpy();
+    return null;
+  },
+}));
 vi.mock('@/renderer/components/media/FileAttachButton', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/FilePreview', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
@@ -367,6 +380,15 @@ const ExistingChatRoute = () => {
   return <AionrsSendBox conversation_id={id!} modelSelection={modelSelection} />;
 };
 
+const BrowseEarlierHistory = () => {
+  const updatePagination = useUpdateMessagePaginationState();
+  return (
+    <button onClick={() => updatePagination((state) => ({ ...state, hasMoreAfter: true }))}>
+      browse earlier history
+    </button>
+  );
+};
+
 const ChatNavigation = () => {
   const navigate = useNavigate();
   return (
@@ -423,6 +445,89 @@ describe('AionrsSendBox', () => {
     runtimeViewIsProcessingRef.current = false;
     skillCatalogRef.current = [{ name: 'report', description: 'Create reports' }];
     mobileRef.current = false;
+  });
+
+  it('shows one customer activity status while preserving independent live status on earlier history pages', async () => {
+    runtimeViewIsProcessingRef.current = true;
+    const messages: TMessage[] = [
+      {
+        id: 'thinking-1',
+        type: 'thinking',
+        conversation_id: 'conv-1',
+        msg_id: 'thinking-segment-1',
+        content: { content: 'Working', status: 'thinking' },
+      },
+    ];
+    render(
+      <MessagePaginationProvider
+        value={{
+          hasMoreBefore: false,
+          hasMoreAfter: false,
+          isLoadingBefore: false,
+          isLoadingAnchor: false,
+        }}
+      >
+        <MessageListProvider value={messages}>
+          <AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />
+          <BrowseEarlierHistory />
+        </MessageListProvider>
+      </MessagePaginationProvider>
+    );
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(thoughtDisplaySpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'browse earlier history' }));
+    await waitFor(() => expect(thoughtDisplaySpy).toHaveBeenCalled());
+  });
+
+  it('keeps the initial processing status available before the first activity of a new turn', async () => {
+    const messages: TMessage[] = [
+      {
+        id: 'thinking-old',
+        type: 'thinking',
+        conversation_id: 'conv-1',
+        content: { content: 'Old work', status: 'done' },
+      },
+      {
+        id: 'user-new',
+        type: 'text',
+        position: 'right',
+        conversation_id: 'conv-1',
+        content: { content: 'New request' },
+      },
+    ];
+    render(
+      <MessageListProvider value={messages}>
+        <AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />
+      </MessageListProvider>
+    );
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(thoughtDisplaySpy).toHaveBeenCalled();
+  });
+
+  it('preserves the browser Team status when activity messages exist', async () => {
+    useTeamPermissionMock.mockReturnValue({
+      isTeamMode: true,
+      isLeaderAgent: true,
+      leaderConversationId: 'conv-1',
+      allConversationIds: ['conv-1'],
+      propagateMode: vi.fn(),
+      warmupSession: vi.fn().mockResolvedValue(undefined),
+    });
+    const messages: TMessage[] = [
+      {
+        id: 'team-thinking',
+        type: 'thinking',
+        conversation_id: 'conv-1',
+        content: { content: 'Team work', status: 'thinking' },
+      },
+    ];
+    render(
+      <MessageListProvider value={messages}>
+        <AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />
+      </MessageListProvider>
+    );
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(thoughtDisplaySpy).toHaveBeenCalled();
   });
 
   it('sends an exact available skill reference through the native skill injection contract', async () => {

@@ -103,5 +103,19 @@
   "requestDetails": "Detalles de la solicitud:",
   "delivery": {
     "pending": "No leído"
+  },
+  "activity": {
+    "thinking": "Pensando",
+    "running": "Ejecutando",
+    "pending": "Esperando",
+    "completed": "Actividad completada",
+    "error": "Error",
+    "canceled": "Cancelado",
+    "stopped": "Detenido",
+    "show": "Mostrar actividad de este turno",
+    "hide": "Ocultar actividad de este turno",
+    "input": "Entrada",
+    "output": "Salida",
+    "loadFailed": "No se pudo cargar toda la actividad. Inténtalo de nuevo."
   }
 }

@@ -103,5 +103,19 @@
   "requestDetails": "Anfragedetails:",
   "delivery": {
     "pending": "Ungelesen"
+  },
+  "activity": {
+    "thinking": "Denkt nach",
+    "running": "Wird ausgeführt",
+    "pending": "Wartet",
+    "completed": "Aktivität abgeschlossen",
+    "error": "Fehlgeschlagen",
+    "canceled": "Abgebrochen",
+    "stopped": "Gestoppt",
+    "show": "Aktivität dieses Gesprächsschritts anzeigen",
+    "hide": "Aktivität dieses Gesprächsschritts ausblenden",
+    "input": "Eingabe",
+    "output": "Ausgabe",
+    "loadFailed": "Die vollständige Aktivität konnte nicht geladen werden. Erneut versuchen."
   }
 }

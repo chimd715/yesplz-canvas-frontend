@@ -8,6 +8,7 @@ import type { IConversationArtifact } from '@/common/adapter/ipcBridge';
 import type { IMessageAcpToolCall, IMessageToolCall, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
+import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import { iconColors } from '@/renderer/styles/colors';
 import { CHAT_MESSAGE_JUMP_EVENT, type ChatMessageJumpDetail } from '@/renderer/utils/chat/chatMinimapEvents';
@@ -45,12 +46,19 @@ import MessageCronTrigger from './components/MessageCronTrigger';
 import MessageSkillSuggest from './components/MessageSkillSuggest';
 import MessageText from './components/MessageText';
 import MessageThinking from './components/MessageThinking';
+import {
+  TurnActivity,
+  projectTurnActivities,
+  useActivityTurnGate,
+  type TurnActivitySummary,
+} from './components/TurnActivity';
 import type { WriteFileResult } from './types';
 import { useAutoScroll } from './useAutoScroll';
 import SelectionReplyButton from './components/SelectionReplyButton';
 
 type IMessageVO =
   | TMessage
+  | TurnActivitySummary
   | { type: 'file_summary'; id: string; diffs: FileChangeInfo[]; sourceMessageIds: string[]; created_at: number }
   | {
       type: 'tool_summary';
@@ -113,7 +121,7 @@ const getProcessedItemSourceMessageIds = (item: IProcessedItem): string[] => {
   if ('type' in item && item.type === 'artifact') {
     return [item.id];
   }
-  if ('type' in item && item.type === 'tool_summary') {
+  if ('type' in item && (item.type === 'tool_summary' || item.type === 'activity_summary')) {
     return item.sourceMessageIds;
   }
   if ('type' in item && item.type === 'file_summary') {
@@ -135,7 +143,7 @@ const getProcessedItemAnchorId = (item: IProcessedItem): string => {
 };
 
 const getProcessedItemCreatedAt = (item: IProcessedItem): number => {
-  if ('type' in item && ['file_summary', 'tool_summary', 'artifact'].includes(item.type)) {
+  if ('type' in item && ['file_summary', 'tool_summary', 'activity_summary', 'artifact'].includes(item.type)) {
     return item.created_at;
   }
   return item.created_at ?? 0;
@@ -336,13 +344,27 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   const pagination = useMessagePaginationState();
   const artifacts = useConversationArtifacts();
   const conversationContext = useConversationContextSafe();
+  const teamPermission = useTeamPermission();
+  const compactActivity = conversationContext?.type === 'aionrs' && !window.electronAPI && !teamPermission?.isTeamMode;
   const rowWidthClass = getChatSurfaceWidthClass();
   const loadPreviousMessagePage = useLoadPreviousMessagePage(conversationContext?.conversation_id);
   const loadAnchorMessageWindow = useLoadAnchorMessageWindow(conversationContext?.conversation_id);
   // While the agent is still streaming, the in-progress turn's last text keeps
   // moving down, so we defer its copy/timestamp row until the turn finishes to
   // avoid the row flashing in and the layout reflowing mid-stream.
-  const { isProcessing } = useConversationRuntimeView(conversationContext?.conversation_id ?? '');
+  const runtime = useConversationRuntimeView(conversationContext?.conversation_id ?? '');
+  const { isProcessing } = runtime;
+  const activityIsProcessing = useActivityTurnGate(
+    conversationContext?.conversation_id ?? '',
+    list,
+    {
+      isProcessing,
+      activeTurnId: runtime.activeTurnId,
+      localSubmitting: runtime.view?.localSubmitting,
+      hydrated: runtime.hydrated,
+    },
+    !pagination.hasMoreAfter
+  );
   const { t } = useTranslation();
   const location = useLocation();
   const locationState = (location.state || {}) as ConversationLocationState;
@@ -401,7 +423,12 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       result.push(message);
     };
 
-    for (let i = 0, len = list.length; i < len; i++) {
+    if (compactActivity) {
+      result.push(
+        ...projectTurnActivities(list, { isProcessing: activityIsProcessing, atLatest: !pagination.hasMoreAfter })
+      );
+    }
+    for (let i = 0, len = compactActivity ? 0 : list.length; i < len; i++) {
       const message = list[i];
       // Skip hidden and available_commands messages
       if (message.hidden) continue;
@@ -456,7 +483,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     return [...result, ...visibleArtifacts].toSorted(
       (a, b) => getProcessedItemCreatedAt(a) - getProcessedItemCreatedAt(b)
     );
-  }, [artifacts, list]);
+  }, [artifacts, list, compactActivity, activityIsProcessing, pagination.hasMoreAfter]);
 
   // An AI reply can be split into several messages (thinking / multiple text /
   // tool blocks). The hover copy + timestamp row should appear once per turn,
@@ -480,7 +507,10 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       const item = processedList[i];
       if (
         'type' in item &&
-        (item.type === 'file_summary' || item.type === 'tool_summary' || item.type === 'artifact')
+        (item.type === 'file_summary' ||
+          item.type === 'tool_summary' ||
+          item.type === 'activity_summary' ||
+          item.type === 'artifact')
       ) {
         continue;
       }
@@ -499,7 +529,10 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     for (const item of processedList) {
       if (
         'type' in item &&
-        (item.type === 'file_summary' || item.type === 'tool_summary' || item.type === 'artifact')
+        (item.type === 'file_summary' ||
+          item.type === 'tool_summary' ||
+          item.type === 'activity_summary' ||
+          item.type === 'artifact')
       ) {
         continue;
       }
@@ -616,6 +649,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
         if (
           (item as { type?: string }).type === 'file_summary' ||
           (item as { type?: string }).type === 'tool_summary' ||
+          (item as { type?: string }).type === 'activity_summary' ||
           (item as { type?: string }).type === 'artifact'
         ) {
           return false;
@@ -694,7 +728,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
         </div>
       );
     }
-    if ('type' in item && ['file_summary', 'tool_summary'].includes(item.type)) {
+    if ('type' in item && ['file_summary', 'tool_summary', 'activity_summary'].includes(item.type)) {
       return (
         <div
           key={item.id}
@@ -704,6 +738,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
         >
           {item.type === 'file_summary' && <MessageFileChanges diffsChanges={item.diffs} />}
           {item.type === 'tool_summary' && <MessageToolGroupSummary messages={item.messages}></MessageToolGroupSummary>}
+          {item.type === 'activity_summary' && <TurnActivity key={item.id} summary={item} />}
         </div>
       );
     }
@@ -759,7 +794,11 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
             >
               <div className='h-10px' />
               {processedList.map((item, index) => (
-                <React.Fragment key={getProcessedItemAnchorId(item) || index}>{renderItem(index, item)}</React.Fragment>
+                <React.Fragment
+                  key={item.type === 'activity_summary' ? item.id : getProcessedItemAnchorId(item) || index}
+                >
+                  {renderItem(index, item)}
+                </React.Fragment>
               ))}
               <div className='h-20px' />
             </div>

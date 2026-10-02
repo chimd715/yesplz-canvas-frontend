@@ -10,6 +10,7 @@ import {
   composeMessage,
   mergeAcpToolCallContent,
   mergeTextMessageContent,
+  mergeToolCallContent,
   normalizeAgentStreamError,
   normalizeTextMessageContent,
   preferTextMessageVersion,
@@ -197,8 +198,8 @@ export function composeMessageWithIndex(
       const existingMsg = list[existingIdx];
       if (existingMsg.type === 'tool_call') {
         const newList = list.slice();
-        const merged = { ...existingMsg.content, ...message.content };
-        newList[existingIdx] = { ...existingMsg, content: merged };
+        const merged = mergeToolCallContent(existingMsg.content, message.content);
+        newList[existingIdx] = { ...existingMsg, activity_updated_at: message.activity_updated_at, content: merged };
         return newList;
       }
     }
@@ -326,6 +327,7 @@ export function composeMessageWithIndex(
           const newList = list.slice();
           newList[existingIdx] = {
             ...existingMsg,
+            activity_updated_at: message.activity_updated_at,
             content: {
               ...existingMsg.content,
               status: 'done' as const,
@@ -342,6 +344,7 @@ export function composeMessageWithIndex(
       const newList = list.slice();
       newList[newList.length - 1] = {
         ...last,
+        activity_updated_at: message.activity_updated_at,
         content: {
           ...last.content,
           content: last.content.content + message.content.content,

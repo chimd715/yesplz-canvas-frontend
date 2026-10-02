@@ -103,5 +103,19 @@
   "requestDetails": "リクエスト内容:",
   "delivery": {
     "pending": "未読"
+  },
+  "activity": {
+    "thinking": "思考中",
+    "running": "実行中",
+    "pending": "待機中",
+    "completed": "処理完了",
+    "error": "失敗",
+    "canceled": "キャンセル済み",
+    "stopped": "停止済み",
+    "show": "このターンの処理を表示",
+    "hide": "このターンの処理を閉じる",
+    "input": "入力",
+    "output": "出力",
+    "loadFailed": "処理の詳細を読み込めませんでした。再試行してください。"
   }
 }

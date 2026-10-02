@@ -107,6 +107,8 @@ interface IMessage<T extends TMessageType, Content extends Record<string, any>> 
    * Hidden from UI display but persisted to DB and sent to agent.
    */
   hidden?: boolean;
+  /** Renderer-only ordering of in-place activity updates, never a turn/fork anchor. */
+  activity_updated_at?: number;
   /**
    * Backend turn anchor (codex `Turn.id`) stamped on rows persisted while that
    * turn streamed. Presence means a mid-history fork can anchor at (or after)
@@ -370,6 +372,19 @@ export const mergeTextMessageContent = (
     ...(incomingReplace ? { replace: true } : {}),
   };
 };
+
+/** Native result frames omit the already captured tool input. Keep it in both
+ * stream merge paths so expansion does not lose arguments when results arrive.
+ */
+export const mergeToolCallContent = (
+  existing: IMessageToolCall['content'],
+  incoming: IMessageToolCall['content']
+): IMessageToolCall['content'] => ({
+  ...existing,
+  ...incoming,
+  args: incoming.args ?? existing.args,
+  input: incoming.input ?? existing.input,
+});
 
 export const preferTextMessageVersion = (primary: IMessageText, secondary: IMessageText): IMessageText => {
   const primaryIsReplace = isTextContentReplacement(primary.content);
@@ -991,7 +1006,11 @@ export const composeMessage = (
       });
 
       if (!didMergeIntoThisMessage) return existingMessage;
-      const updatedMessage = { ...existingMessage, content: new_content } as TMessage;
+      const updatedMessage = {
+        ...existingMessage,
+        activity_updated_at: message.activity_updated_at,
+        content: new_content,
+      } as TMessage;
       updatesToReport.push(updatedMessage);
       return updatedMessage;
     });
@@ -1020,7 +1039,11 @@ export const composeMessage = (
       const msg = list[i];
       if (msg.type === 'tool_call' && msg.content.call_id === message.content.call_id) {
         // Create new object instead of mutating original
-        return updateMessage(i, { ...msg, content: { ...msg.content, ...message.content } });
+        return updateMessage(i, {
+          ...msg,
+          activity_updated_at: message.activity_updated_at,
+          content: mergeToolCallContent(msg.content, message.content),
+        });
       }
     }
     // If no existing tool call found, add new one
@@ -1034,7 +1057,7 @@ export const composeMessage = (
       if (msg.type === 'acp_tool_call' && msg.content.update?.tool_call_id === message.content.update?.tool_call_id) {
         // Create new object instead of mutating original
         const merged = mergeAcpToolCallContent(msg.content, message.content);
-        return updateMessage(i, { ...msg, content: merged });
+        return updateMessage(i, { ...msg, activity_updated_at: message.activity_updated_at, content: merged });
       }
     }
     // If no existing tool call found, add new one
@@ -1054,7 +1077,7 @@ export const composeMessage = (
           duration: message.content.duration,
           subject: message.content.subject || msg.content.subject,
         };
-        return updateMessage(i, { ...msg, content: merged });
+        return updateMessage(i, { ...msg, activity_updated_at: message.activity_updated_at, content: merged });
       }
     }
 
@@ -1065,7 +1088,11 @@ export const composeMessage = (
         content: last.content.content + message.content.content,
         subject: message.content.subject || last.content.subject,
       };
-      return updateMessage(list.length - 1, { ...last, content: merged });
+      return updateMessage(list.length - 1, {
+        ...last,
+        activity_updated_at: message.activity_updated_at,
+        content: merged,
+      });
     }
     return pushMessage(message);
   }
@@ -1112,8 +1139,19 @@ export const handleImageGenerationWithWorkspace = (message: TMessage, workspace:
   return processedMessage;
 };
 
+let activityUpdateClock = 0;
+
 export const transformMessage = (message: IResponseMessage): TMessage | undefined => {
   const transformed = transformMessageInner(message);
+  if (
+    transformed &&
+    ['thinking', 'tool_call', 'tool_group', 'acp_tool_call', 'agent_status'].includes(transformed.type)
+  ) {
+    // Two tools may settle in the same millisecond, in reverse creation order.
+    // This value orders arrivals only and never changes message chronology.
+    activityUpdateClock = Math.max(Date.now(), activityUpdateClock + 1);
+    transformed.activity_updated_at = activityUpdateClock;
+  }
   // Stamp the backend turn anchor so live-streamed messages gate the fork
   // entry exactly like history-loaded rows (see isForkEnabled).
   if (transformed && message.backend_turn_id) {

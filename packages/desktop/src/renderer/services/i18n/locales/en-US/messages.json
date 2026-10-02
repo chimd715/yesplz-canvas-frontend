@@ -103,5 +103,19 @@
   "requestDetails": "Request details:",
   "delivery": {
     "pending": "Unread"
+  },
+  "activity": {
+    "thinking": "Thinking",
+    "running": "Running",
+    "pending": "Waiting",
+    "completed": "Activity completed",
+    "error": "Failed",
+    "canceled": "Canceled",
+    "stopped": "Stopped",
+    "show": "Show turn activity",
+    "hide": "Hide turn activity",
+    "input": "Input",
+    "output": "Output",
+    "loadFailed": "Unable to load full activity. Try again."
   }
 }
