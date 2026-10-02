@@ -582,7 +582,11 @@
   },
   "skills": {
     "loaded": "Завантажені навички",
-    "slashHint": "Навичка"
+    "slashHint": "Навичка",
+    "availableTitle": "Доступні навички",
+    "dollarHint": "Введіть $, щоб вибрати навичку",
+    "unknownReference": "Невідома або недоступна навичка: {{names}}",
+    "catalogUnavailable": "Список навичок недоступний. Спробуйте ще раз."
   },
   "mcp": {
     "loaded": "Завантажений MCP",

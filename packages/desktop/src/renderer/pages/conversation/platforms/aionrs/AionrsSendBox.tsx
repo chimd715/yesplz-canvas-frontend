@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { getPromptBudget } from '@/common/utils/modelCapabilities';
+import { parseExplicitSkillNames, unknownExplicitSkills } from '@/common/chat/slash/explicitSkills';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import CommandQueuePanel from '@/renderer/components/chat/CommandQueuePanel';
@@ -55,6 +56,7 @@ import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import useSWR from 'swr';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
@@ -136,6 +138,11 @@ const AionrsSendBox: React.FC<{
   const auth = useAuth();
   // Team API owns its own slot queue and accepts mid-turn messages separately.
   const isCustomerChat = !window.electronAPI && !teamSendMessage && !teamRuntime;
+  const { data: explicitSkills } = useSWR(
+    auth.status === 'authenticated' && auth.user?.id ? ['customer.skills', auth.user.id] : null,
+    () => ipcBridge.fs.listAvailableSkills.invoke()
+  );
+  const explicitSkillsRef = useLatestRef(explicitSkills);
   const conversationContext = useConversationContextSafe();
   const loadedSkills = conversationContext?.loadedSkills ?? [];
   const loadedMcpStatuses =
@@ -173,6 +180,18 @@ const AionrsSendBox: React.FC<{
       const budget = getPromptBudget(input, options.model, attachmentCount, options.priorContextTokens);
       if (!budget.allowed) {
         Message.error(t('conversation.promptTooLarge', { limit: budget.maxBytes }));
+        return false;
+      }
+      const unknown = unknownExplicitSkills(input, explicitSkillsRef.current);
+      if (unknown.length) {
+        Message.error(
+          t(
+            explicitSkillsRef.current
+              ? 'conversation.skills.unknownReference'
+              : 'conversation.skills.catalogUnavailable',
+            { names: unknown.join(', ') }
+          )
+        );
         return false;
       }
       return true;
@@ -294,6 +313,7 @@ const AionrsSendBox: React.FC<{
           // `@@` references. Omitting this makes the whole feature silently
           // no-op for this platform.
           sessions,
+          inject_skills: parseExplicitSkillNames(input),
         });
         setActiveMsgId(res.msg_id);
         markSendAccepted(res.turn_id, res.runtime, res.msg_id);
@@ -990,6 +1010,7 @@ const AionrsSendBox: React.FC<{
         }
         onSend={onSendHandler}
         slash_commands={slash_commands}
+        explicitSkills={explicitSkills}
         onSlashBuiltinCommand={onSlashBuiltinCommand}
         onAddToDraft={handleAddToQueue}
         addToDraftDisabled={!canQueueCurrentDraft || !promptBudget.allowed || (isCustomerChat && customerQueue.isFull)}

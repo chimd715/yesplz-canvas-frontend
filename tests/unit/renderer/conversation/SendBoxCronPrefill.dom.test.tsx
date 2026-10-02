@@ -221,6 +221,60 @@ const QueueAdmissionHarness = ({ onSend }: { onSend: (value: string) => Promise<
   return <SendBox value={value} onChange={setValue} onSend={onSend} clearAfterAccepted allowSendWhileLoading />;
 };
 
+const SkillHarness = ({ onSend }: { onSend: (value: string) => Promise<void | false> }) => {
+  const [value, setValue] = useState('');
+  return (
+    <SendBox
+      value={value}
+      onChange={setValue}
+      onSend={onSend}
+      explicitSkills={[
+        { name: 'report', description: 'Create reports' },
+        { name: 'review', description: 'Review work' },
+      ]}
+    />
+  );
+};
+
+describe('SendBox explicit skill menu', () => {
+  it('shows available skills above the composer and inserts the keyboard choice without sending', async () => {
+    layoutState.isMobile = false;
+    const send = vi.fn().mockResolvedValue(undefined);
+    render(<SkillHarness onSend={send} />);
+    const textarea = screen.getByTestId('sendbox-input') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '$', selectionStart: 1 } });
+    fireEvent.keyUp(textarea, { key: '$' });
+    await waitFor(() => expect(screen.getByText('$report')).toBeVisible());
+    expect(screen.getByText('$report').closest('.bottom-\\[calc\\(100\\%\\+8px\\)\\]')).toBeTruthy();
+    act(() => {
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    });
+    act(() => {
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+    });
+    expect(textarea).toHaveValue('$review ');
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+    });
+    expect(send).toHaveBeenCalledWith('$review ');
+  });
+  it('dismisses the menu on Escape and preserves ordinary prose', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    render(<SkillHarness onSend={send} />);
+    const textarea = screen.getByTestId('sendbox-input') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '$', selectionStart: 1 } });
+    fireEvent.keyUp(textarea, { key: '$' });
+    await waitFor(() => expect(screen.getByText('$report')).toBeVisible());
+    act(() => {
+      fireEvent.keyDown(screen.getByTestId('sendbox-input'), { key: 'Escape' });
+    });
+    expect(screen.queryByText('$report')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sendbox-input')).toHaveValue('$');
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('SendBox customer queue admission', () => {
   it('keeps a rejected draft intact without clearing and restoring it', async () => {
     layoutState.isMobile = false;

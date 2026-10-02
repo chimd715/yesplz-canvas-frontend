@@ -85,12 +85,13 @@ interface UseSlashCommandControllerOptions {
   input: string;
   commands: SlashCommandItem[];
   onExecuteBuiltin?: (name: string) => void;
-  onSelectTemplate?: (name: string) => void;
+  onSelectTemplate?: (name: string, liveInput?: string, liveCaret?: number) => void;
+  matchInput?: (input: string, caret?: number) => string | null;
 }
 
 export function useSlashCommandController(options: UseSlashCommandControllerOptions) {
-  const { input, commands, onExecuteBuiltin, onSelectTemplate } = options;
-  const query = useMemo(() => matchSlashQuery(input), [input]);
+  const { input, commands, onExecuteBuiltin, onSelectTemplate, matchInput = matchSlashQuery } = options;
+  const query = useMemo(() => matchInput(input), [input, matchInput]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
 
@@ -122,22 +123,24 @@ export function useSlashCommandController(options: UseSlashCommandControllerOpti
   activeIndexRef.current = activeIndex;
 
   const executeFromList = useCallback(
-    (list: SlashCommandItem[], index: number) => {
+    (list: SlashCommandItem[], index: number, liveInput?: string, liveCaret?: number) => {
       const command = list[index];
       if (!command) {
         return false;
       }
       if (getSelectionBehavior(command) === 'insert') {
-        onSelectTemplate?.(command.name);
+        if (matchInput === matchSlashQuery) onSelectTemplate?.(command.name);
+        else onSelectTemplate?.(command.name, liveInput, liveCaret);
       } else if (command.kind === 'builtin') {
         onExecuteBuiltin?.(command.name);
       } else {
-        onSelectTemplate?.(command.name);
+        if (matchInput === matchSlashQuery) onSelectTemplate?.(command.name);
+        else onSelectTemplate?.(command.name, liveInput, liveCaret);
       }
       setDismissed(true);
       return true;
     },
-    [onExecuteBuiltin, onSelectTemplate]
+    [onExecuteBuiltin, onSelectTemplate, matchInput]
   );
 
   const executeCommand = useCallback(
@@ -158,7 +161,9 @@ export function useSlashCommandController(options: UseSlashCommandControllerOpti
         // hook with the latest text; the captured state would then be stale and
         // let the raw "/command" text send instead of selecting the command.
         const liveValue = readInputValue(event) ?? input;
-        const liveQuery = matchSlashQuery(liveValue);
+        const target = event.currentTarget as { selectionStart?: number };
+        const liveCaret = target?.selectionStart;
+        const liveQuery = matchInput(liveValue, liveCaret);
         if (liveQuery === null || dismissedRef.current) {
           return false;
         }
@@ -168,7 +173,7 @@ export function useSlashCommandController(options: UseSlashCommandControllerOpti
         }
         event.preventDefault();
         const index = Math.min(activeIndexRef.current, liveFiltered.length - 1);
-        return executeFromList(liveFiltered, index);
+        return executeFromList(liveFiltered, index, liveValue, liveCaret);
       }
 
       // Navigation and dismissal only act on a menu that is actually open. A
@@ -197,7 +202,7 @@ export function useSlashCommandController(options: UseSlashCommandControllerOpti
 
       return false;
     },
-    [executeFromList, filteredCommands.length, input, isOpen]
+    [executeFromList, filteredCommands.length, input, isOpen, matchInput]
   );
 
   return {

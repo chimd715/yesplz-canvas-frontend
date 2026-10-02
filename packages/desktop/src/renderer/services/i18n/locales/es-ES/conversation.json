@@ -575,7 +575,11 @@
   },
   "skills": {
     "loaded": "Habilidades cargadas",
-    "slashHint": "Skill"
+    "slashHint": "Skill",
+    "availableTitle": "Skills disponibles",
+    "dollarHint": "Escribe $ para seleccionar un skill",
+    "unknownReference": "Skill desconocido o no disponible: {{names}}",
+    "catalogUnavailable": "La lista de skills no está disponible. Inténtalo de nuevo."
   },
   "mcp": {
     "loaded": "MCP cargado",

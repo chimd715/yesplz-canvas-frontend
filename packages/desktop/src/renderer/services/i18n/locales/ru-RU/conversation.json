@@ -582,7 +582,11 @@
   },
   "skills": {
     "loaded": "Загруженные навыки",
-    "slashHint": "Навык"
+    "slashHint": "Навык",
+    "availableTitle": "Доступные навыки",
+    "dollarHint": "Введите $, чтобы выбрать навык",
+    "unknownReference": "Неизвестный или недоступный навык: {{names}}",
+    "catalogUnavailable": "Список навыков недоступен. Попробуйте ещё раз."
   },
   "mcp": {
     "loaded": "Загруженный MCP",

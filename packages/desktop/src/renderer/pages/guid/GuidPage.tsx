@@ -7,6 +7,7 @@
 import { ipcBridge } from '@/common';
 import { buildGuidSlashCommands } from '@/common/chat/slash/guidSlashCommands';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
+import { getActiveExplicitSkillQuery, insertExplicitSkill } from '@/common/chat/slash/explicitSkills';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { resolveLocaleKey } from '@/common/utils';
 import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
@@ -79,6 +80,8 @@ const GuidPage: React.FC = () => {
   // skills default checked; the rest are opt-in per conversation or pre-checked
   // by assistant defaults.
   const [allSkills, setAllSkills] = useState<Array<{ name: string; description: string; isAuto: boolean }>>([]);
+  const [skillCatalogLoaded, setSkillCatalogLoaded] = useState(false);
+  const [skillCaret, setSkillCaret] = useState<number | undefined>(undefined);
   const [guidDisabledBuiltinSkills, setGuidDisabledBuiltinSkills] = useState<string[] | undefined>(undefined);
   const [guidEnabledSkills, setGuidEnabledSkills] = useState<string[] | undefined>(undefined);
   const [availableMcpServers, setAvailableMcpServers] = useState<IMcpServer[]>([]);
@@ -88,6 +91,7 @@ const GuidPage: React.FC = () => {
     ipcBridge.fs.listAvailableSkills
       .invoke()
       .then((availableSkills) => {
+        setSkillCatalogLoaded(true);
         setAllSkills(
           availableSkills.map((s) => ({
             name: s.name,
@@ -247,6 +251,36 @@ const GuidPage: React.FC = () => {
       })),
     [slashController.filteredCommands, slashController.query]
   );
+  const dollarCommands = useMemo<SlashCommandItem[]>(
+    () =>
+      allSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        kind: 'template',
+        source: 'skill',
+        selectionBehavior: 'insert',
+      })),
+    [allSkills]
+  );
+  const matchDollarInput = useCallback(
+    (input: string, caret?: number) => getActiveExplicitSkillQuery(input, caret ?? skillCaret),
+    [skillCaret]
+  );
+  const dollarController = useSlashCommandController({
+    input: guidInput.input,
+    commands: customerHome ? dollarCommands : [],
+    matchInput: matchDollarInput,
+    onSelectTemplate: (name, liveInput, liveCaret) => {
+      const insertion = insertExplicitSkill(liveInput ?? guidInput.input, name, liveCaret ?? skillCaret);
+      guidInput.setInput(insertion.value);
+      setSkillCaret(insertion.caret);
+      requestAnimationFrame(() => {
+        const textarea = guidContainerRef.current?.querySelector('textarea');
+        textarea?.focus();
+        textarea?.setSelectionRange(insertion.caret, insertion.caret);
+      });
+    },
+  });
 
   const send = useGuidSend({
     // Input state
@@ -267,6 +301,7 @@ const GuidPage: React.FC = () => {
     selectedAcpModel: agentSelection.selectedAcpModel,
     selectedThoughtLevelValue: agentSelection.selectedThoughtLevelValue,
     current_model: modelSelection.current_model,
+    availableSkills: skillCatalogLoaded ? allSkills : undefined,
 
     guidDisabledBuiltinSkills,
     guidEnabledSkills,
@@ -299,7 +334,7 @@ const GuidPage: React.FC = () => {
 
   const handleInputKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (slashController.onKeyDown(event)) {
+      if (dollarController.onKeyDown(event) || slashController.onKeyDown(event)) {
         return;
       }
 
@@ -312,7 +347,7 @@ const GuidPage: React.FC = () => {
         send.sendMessageHandler();
       }
     },
-    [send.isButtonDisabled, send.sendMessageHandler, slashController]
+    [send.isButtonDisabled, send.sendMessageHandler, slashController, dollarController]
   );
 
   const handleSelectAssistant = useCallback(
@@ -683,6 +718,25 @@ const GuidPage: React.FC = () => {
       emptyText={t('messages.slash.empty', { defaultValue: 'No commands found' })}
     />
   ) : null;
+  const skillCommandMenuNode = dollarController.isOpen ? (
+    <SlashCommandMenu
+      title={t('conversation.skills.availableTitle')}
+      hint={t('conversation.skills.dollarHint')}
+      items={dollarController.filteredCommands.map((command) => ({
+        key: command.name,
+        label: `$${command.name}`,
+        description: command.description,
+      }))}
+      activeIndex={dollarController.activeIndex}
+      onHoverItem={dollarController.setActiveIndex}
+      onSelectItem={(item) =>
+        dollarController.onSelectByIndex(
+          dollarController.filteredCommands.findIndex((command) => command.name === item.key)
+        )
+      }
+      emptyText={t('messages.slash.empty')}
+    />
+  ) : null;
 
   return (
     <ConfigProvider getPopupContainer={() => guidContainerRef.current || document.body}>
@@ -725,6 +779,8 @@ const GuidPage: React.FC = () => {
             onRemoveFile={guidInput.handleRemoveFile}
             actionRow={actionRowNode}
             slashCommandMenu={slashCommandMenuNode}
+            skillCommandMenu={skillCommandMenuNode}
+            onCaretChange={setSkillCaret}
             workspaceDir={guidInput.dir}
             onSelectWorkspace={(dir) => guidInput.setDir(dir)}
             onClearWorkspace={() => guidInput.setDir('')}

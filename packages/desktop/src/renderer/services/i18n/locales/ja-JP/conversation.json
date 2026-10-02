@@ -574,7 +574,11 @@
   },
   "skills": {
     "loaded": "ロード済みスキル",
-    "slashHint": "スキル"
+    "slashHint": "スキル",
+    "availableTitle": "利用可能なスキル",
+    "dollarHint": "$ を入力してスキルを選択",
+    "unknownReference": "不明または利用できないスキル: {{names}}",
+    "catalogUnavailable": "スキル一覧を取得できません。もう一度お試しください。"
   },
   "mcp": {
     "loaded": "ロード済み MCP",

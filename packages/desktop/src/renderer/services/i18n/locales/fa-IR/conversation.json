@@ -574,7 +574,11 @@
   },
   "skills": {
     "loaded": "مهارت‌های لود شده",
-    "slashHint": "مهارت"
+    "slashHint": "مهارت",
+    "availableTitle": "مهارت‌های موجود",
+    "dollarHint": "برای انتخاب مهارت $ بنویسید",
+    "unknownReference": "مهارت ناشناخته یا غیرقابل استفاده: {{names}}",
+    "catalogUnavailable": "فهرست مهارت‌ها در دسترس نیست. دوباره تلاش کنید."
   },
   "mcp": {
     "loaded": "MCP لود شد",

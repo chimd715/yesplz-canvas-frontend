@@ -51,6 +51,11 @@ import { CloseSmall, Plus, Quote } from '@icon-park/react';
 import { chatFileRefKey } from '@/common/types/chatFile';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { buildSkillSlashCommands, mergeSlashCommands } from '@/common/chat/slash/mergeSlashCommands';
+import {
+  getActiveExplicitSkillQuery,
+  insertExplicitSkill,
+  type ExplicitSkill,
+} from '@/common/chat/slash/explicitSkills';
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
@@ -262,6 +267,8 @@ const SendBox: React.FC<{
   addToDraftTooltip?: React.ReactNode;
   sendDisabledTooltip?: React.ReactNode;
   slash_commands?: SlashCommandItem[];
+  /** Authoritative available catalog for explicit dollar skill references. */
+  explicitSkills?: ExplicitSkill[];
   onSlashBuiltinCommand?: (name: string) => void;
   hasPendingAttachments?: boolean;
   enableBtw?: boolean;
@@ -323,6 +330,7 @@ const SendBox: React.FC<{
   addToDraftTooltip,
   sendDisabledTooltip,
   slash_commands = [],
+  explicitSkills,
   onSlashBuiltinCommand,
   hasPendingAttachments = false,
   enableBtw = false,
@@ -368,7 +376,7 @@ const SendBox: React.FC<{
   const [historyNavigationIndex, setHistoryNavigationIndex] = useState<number | null>(null);
   const historyDraftRef = useRef<string | null>(null);
   const [replyQuote, setReplyQuote] = useState<ReplyQuote | null>(null);
-  const [caretPosition, setCaretPosition] = useState(0);
+  const [caretPosition, setCaretPosition] = useState(input.length);
   const [prefillFocusRequest, setPrefillFocusRequest] = useState<{
     requestId: number;
     expectedValue: string;
@@ -694,7 +702,45 @@ const SendBox: React.FC<{
     [slashController.filteredCommands, slashController.query]
   );
 
-  const isCommandMenuOpen = conversationExport.isOpen || slashController.isOpen;
+  const dollarCommands = useMemo<SlashCommandItem[]>(
+    () =>
+      (explicitSkills ?? []).map((skill) => ({
+        name: skill.name,
+        description: skill.description ?? '',
+        kind: 'template',
+        source: 'skill',
+        selectionBehavior: 'insert',
+      })),
+    [explicitSkills]
+  );
+  const matchDollarInput = useCallback(
+    (text: string, caret?: number) => getActiveExplicitSkillQuery(text, caret ?? caretPosition),
+    [caretPosition]
+  );
+  const dollarController = useSlashCommandController({
+    input,
+    commands: dollarCommands,
+    matchInput: matchDollarInput,
+    onSelectTemplate: (name, liveInput, liveCaret) => {
+      const insertion = insertExplicitSkill(liveInput ?? input, name, liveCaret ?? caretPosition);
+      setInput(insertion.value);
+      setCaretPosition(insertion.caret);
+      requestAnimationFrame(() => {
+        const textarea = containerRef.current?.querySelector('textarea');
+        textarea?.focus();
+        textarea?.setSelectionRange(insertion.caret, insertion.caret);
+      });
+    },
+  });
+  const dollarMenuItems = dollarController.filteredCommands.map((command) => ({
+    key: command.name,
+    label: `$${command.name}`,
+    description: command.description,
+    highlightIndices: dollarController.query
+      ? getFuzzyMatchIndices(command.name, dollarController.query)?.map((index) => index + 1)
+      : undefined,
+  }));
+  const isCommandMenuOpen = conversationExport.isOpen || slashController.isOpen || dollarController.isOpen;
   const isAtFileMenuOpen =
     Boolean(conversationContext?.workspace) &&
     Boolean(activeAtFileQuery) &&
@@ -860,7 +906,9 @@ const SendBox: React.FC<{
   };
 
   const handleOverlayKeyDown = (event: React.KeyboardEvent) => {
-    return conversationExport.handleKeyDown(event) || slashController.onKeyDown(event);
+    return (
+      dollarController.onKeyDown(event) || conversationExport.handleKeyDown(event) || slashController.onKeyDown(event)
+    );
   };
 
   const handleTextAreaKeyUp = (event: React.KeyboardEvent) => {
@@ -2019,7 +2067,21 @@ const SendBox: React.FC<{
         )}
         {isCommandMenuOpen && (
           <div className='absolute start-12px end-12px bottom-[calc(100%+8px)] z-70'>
-            {conversationExport.step === 'menu' ? (
+            {dollarController.isOpen ? (
+              <SlashCommandMenu
+                title={t('conversation.skills.availableTitle')}
+                hint={t('conversation.skills.dollarHint')}
+                items={dollarMenuItems}
+                activeIndex={dollarController.activeIndex}
+                onHoverItem={dollarController.setActiveIndex}
+                onSelectItem={(item) =>
+                  dollarController.onSelectByIndex(
+                    dollarController.filteredCommands.findIndex((command) => command.name === item.key)
+                  )
+                }
+                emptyText={t('messages.slash.empty')}
+              />
+            ) : conversationExport.step === 'menu' ? (
               <SlashCommandMenu
                 title={t('messages.export.menuTitle')}
                 hint={t('messages.export.menuHint')}

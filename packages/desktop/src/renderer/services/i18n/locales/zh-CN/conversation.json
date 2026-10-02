@@ -574,7 +574,11 @@
   },
   "skills": {
     "loaded": "已加载技能",
-    "slashHint": "技能"
+    "slashHint": "技能",
+    "availableTitle": "可用技能",
+    "dollarHint": "输入 $ 选择技能",
+    "unknownReference": "未知或不可用的技能：{{names}}",
+    "catalogUnavailable": "无法获取技能列表，请重试。"
   },
   "mcp": {
     "loaded": "已加载 MCP",

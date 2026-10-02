@@ -75,6 +75,17 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it('rejects an unknown named skill before creating a conversation and keeps the draft', async () => {
+    const deps = createDeps();
+    deps.selectedAssistantBackend = 'aionrs';
+    deps.current_model = { id: 'test', use_model: 'mock-local' } as NonNullable<GuidSendDeps['current_model']>;
+    deps.input = '$reports create an overview';
+    deps.availableSkills = [{ name: 'report' }];
+    const { result } = renderHook(() => useGuidSend(deps));
+    await expect(result.current.handleSend()).rejects.toThrow('conversation.skills.unknownReference');
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.setInput).not.toHaveBeenCalled();
+  });
   it('rejects an oversized managed prompt at every submission edge without creating a conversation or clearing input', async () => {
     const deps = createDeps();
     deps.selectedAssistantBackend = 'aionrs';

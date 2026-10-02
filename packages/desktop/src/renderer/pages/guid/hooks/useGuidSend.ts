@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { getPromptBudget } from '@/common/utils/modelCapabilities';
+import { unknownExplicitSkills, type ExplicitSkill } from '@/common/chat/slash/explicitSkills';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { toSessionMcpServer } from '@/renderer/hooks/mcp/catalog';
@@ -38,6 +39,7 @@ export type GuidSendDeps = {
   selectedAcpModel: string | null;
   selectedThoughtLevelValue?: string;
   current_model: TProviderWithModel | undefined;
+  availableSkills?: ExplicitSkill[];
 
   guidDisabledBuiltinSkills: string[] | undefined;
   guidEnabledSkills: string[] | undefined;
@@ -87,6 +89,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAcpModel,
     selectedThoughtLevelValue,
     current_model,
+    availableSkills,
     guidDisabledBuiltinSkills,
     guidEnabledSkills,
     assistantDefaultSkillIds,
@@ -114,6 +117,15 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       throw new Error(
         t('conversation.promptTooLarge', { limit: getPromptBudget(initialInput, current_model, files.length).maxBytes })
       );
+    }
+    if (selectedAssistantBackend === 'aionrs') {
+      const unknown = unknownExplicitSkills(input, availableSkills);
+      if (unknown.length)
+        throw new Error(
+          t(availableSkills ? 'conversation.skills.unknownReference' : 'conversation.skills.catalogUnavailable', {
+            names: unknown.join(', '),
+          })
+        );
     }
 
     const isCustomWorkspace = !!dir;
@@ -306,6 +318,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAcpModel,
     selectedThoughtLevelValue,
     current_model,
+    availableSkills,
     guidDisabledBuiltinSkills,
     guidEnabledSkills,
     assistantDefaultSkillIds,

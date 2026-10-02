@@ -24,6 +24,7 @@ const {
   draftMutateMock,
   draftContentRef,
   runtimeViewIsProcessingRef,
+  skillCatalogRef,
 } = vi.hoisted(() => ({
   ensureConversationRuntimeMock: vi.fn().mockResolvedValue({ recovered: false, config_options: [], runtime: null }),
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
@@ -39,7 +40,14 @@ const {
   draftMutateMock: vi.fn(),
   draftContentRef: { current: '' },
   runtimeViewIsProcessingRef: { current: false },
+  skillCatalogRef: {
+    current: [{ name: 'report', description: 'Create reports' }] as
+      | Array<{ name: string; description: string }>
+      | undefined,
+  },
 }));
+
+vi.mock('swr', () => ({ default: () => ({ data: skillCatalogRef.current }) }));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -352,6 +360,43 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue(null);
     draftContentRef.current = '';
     runtimeViewIsProcessingRef.current = false;
+    skillCatalogRef.current = [{ name: 'report', description: 'Create reports' }];
+  });
+
+  it('sends an exact available skill reference through the native skill injection contract', async () => {
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('Please use $report'));
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageInvokeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ input: 'Please use $report', inject_skills: ['report'] })
+    );
+  });
+
+  it('rejects unavailable skill names before queue admission or API calls and preserves the draft', async () => {
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    let accepted: unknown;
+    await act(async () => {
+      accepted = await sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('$reports');
+    });
+    expect(accepted).toBe(false);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(clearFilesMock).not.toHaveBeenCalled();
+    expect(draftMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('revalidates skill availability before draining an accepted queued prompt', async () => {
+    runtimeViewIsProcessingRef.current = true;
+    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend('$report'));
+    skillCatalogRef.current = [];
+    runtimeViewIsProcessingRef.current = false;
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('conversation.customerQueue.failed'));
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('does not warm up team session when draft content changes', async () => {

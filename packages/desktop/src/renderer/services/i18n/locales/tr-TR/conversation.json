@@ -576,7 +576,11 @@
   },
   "skills": {
     "loaded": "Yüklenen Beceriler",
-    "slashHint": "Beceri"
+    "slashHint": "Beceri",
+    "availableTitle": "Kullanılabilir beceriler",
+    "dollarHint": "Beceri seçmek için $ yazın",
+    "unknownReference": "Bilinmeyen veya kullanılamayan beceri: {{names}}",
+    "catalogUnavailable": "Beceri listesi kullanılamıyor. Lütfen tekrar deneyin."
   },
   "mcp": {
     "loaded": "Yüklü MCP",
