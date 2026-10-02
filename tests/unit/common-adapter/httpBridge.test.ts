@@ -490,6 +490,7 @@ describe('httpBridge', () => {
       expect(result).toEqual({ result: 'ok' });
       expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/test'), {
         method: 'GET',
+        credentials: 'include',
         headers: {},
         body: undefined,
       });

@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const CLOSED = 3;
+const refreshFetch = vi.fn();
 
 type SocketListener = (event: unknown) => void;
 
@@ -113,6 +114,11 @@ const expectReconnectAt = async (delay: number, socketsSoFar: number): Promise<v
 describe('WebUI browser bridge socket', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // An expired access session is terminal only when the refresh credential
+    // is rejected. Keep real refresh logic, with no uncontrolled HTTP request.
+    refreshFetch.mockReset().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal('fetch', refreshFetch);
+    delete (window as Window & { __backendPort?: number }).__backendPort;
   });
 
   afterEach(() => {
@@ -191,13 +197,18 @@ describe('WebUI browser bridge socket', () => {
     expect(FakeWebSocket.instances).toHaveLength(before + 1);
   });
 
-  it('stops reconnecting after a terminal auth error, including on later emits', async () => {
+  it('stops reconnecting when expired credentials cannot be refreshed, including on later emits', async () => {
     const { bridge } = await loadBrowserAdapter();
 
     latestSocket().acceptUpgrade();
     latestSocket().deliver({ name: 'realtime.error', data: { code: 'REALTIME_AUTH_EXPIRED' } });
 
     expect(latestSocket().readyState).toBe(CLOSED);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refreshFetch).toHaveBeenCalledExactlyOnceWith(
+      '/api/auth/refresh',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
     const afterAuthFailure = FakeWebSocket.instances.length;
 
     // Emitting must not quietly resurrect the connection the auth handler just
@@ -210,11 +221,38 @@ describe('WebUI browser bridge socket', () => {
     expect(FakeWebSocket.instances).toHaveLength(afterAuthFailure);
   });
 
+  it('reconnects an expired session after successful cookie refresh', async () => {
+    refreshFetch.mockResolvedValue({ ok: true, status: 200 });
+    await loadBrowserAdapter();
+    latestSocket().acceptUpgrade();
+    latestSocket().deliver({ name: 'realtime.error', data: { code: 'REALTIME_AUTH_EXPIRED' } });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(refreshFetch).toHaveBeenCalledOnce();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(latestSocket().readyState).toBe(FakeWebSocket.CONNECTING);
+  });
+
+  it('retries with backoff when session refresh is temporarily unavailable', async () => {
+    refreshFetch.mockResolvedValue({ ok: false, status: 503 });
+    await loadBrowserAdapter();
+    latestSocket().acceptUpgrade();
+    latestSocket().deliver({ name: 'realtime.error', data: { code: 'REALTIME_AUTH_EXPIRED' } });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
   it('reconnects immediately when the login flow asks it to', async () => {
     await loadBrowserAdapter();
 
     latestSocket().acceptUpgrade();
     latestSocket().deliver({ name: 'realtime.error', data: { code: 'REALTIME_AUTH_EXPIRED' } });
+    await vi.advanceTimersByTimeAsync(0);
     const afterAuthFailure = FakeWebSocket.instances.length;
 
     const reconnect = (window as unknown as { __websocketReconnect?: () => void }).__websocketReconnect;
