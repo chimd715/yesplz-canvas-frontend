@@ -6,6 +6,7 @@ import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 const {
   ensureConversationRuntimeMock,
@@ -302,9 +303,30 @@ const modelSelection = {
   },
 } as AionrsModelSelection;
 
+const ExistingChatRoute = () => {
+  const { id } = useParams();
+  return <AionrsSendBox conversation_id={id!} modelSelection={modelSelection} />;
+};
+
+const ChatNavigation = () => {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => void navigate('/conversation/conv-1')}>open conversation</button>
+      <button onClick={() => void navigate(-1)}>browser back</button>
+      <Routes>
+        <Route path='/' element={<div>home</div>} />
+        <Route path='/conversation/:id' element={<ExistingChatRoute />} />
+      </Routes>
+    </>
+  );
+};
+
 describe('AionrsSendBox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    sendMessageInvokeMock.mockResolvedValue({ msg_id: 'message', turn_id: 'turn', runtime: {} });
     ensureConversationRuntimeMock.mockResolvedValue({ recovered: false, config_options: [], runtime: null });
     useTeamPermissionMock.mockReturnValue(null);
     draftContentRef.current = '';
@@ -386,6 +408,88 @@ describe('AionrsSendBox', () => {
     await waitFor(() => {
       expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1');
     });
+  });
+
+  it('automatically prepares a conversation again after leaving and reopening its route without sending a turn', async () => {
+    render(
+      <MemoryRouter>
+        <ChatNavigation />
+      </MemoryRouter>
+    );
+    await act(async () => screen.getByRole('button', { name: 'open conversation' }).click());
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledTimes(1));
+    await act(async () => screen.getByRole('button', { name: 'browser back' }).click());
+    expect(screen.queryByRole('button', { name: 'send' })).not.toBeInTheDocument();
+    await act(async () => screen.getByRole('button', { name: 'open conversation' }).click());
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'send' })).toBeInTheDocument();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the composer mounted and blocks racing Enter until automatic preparation completes', async () => {
+    let ready!: () => void;
+    ensureConversationRuntimeMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve;
+        })
+    );
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    expect(screen.getByRole('status')).toHaveTextContent('conversation.entryRuntime.preparing');
+    await act(async () => screen.getByRole('button', { name: 'send' }).click());
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(clearFilesMock).not.toHaveBeenCalled();
+    await act(async () => ready());
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows an actionable connection failure and retries without sending a duplicate turn', async () => {
+    ensureConversationRuntimeMock.mockRejectedValueOnce(new Error('offline'));
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('conversation.entryRuntime.failed'));
+    await act(async () => screen.getByRole('button', { name: 'send' }).click());
+    expect(clearFilesMock).not.toHaveBeenCalled();
+    await act(async () => screen.getByRole('button', { name: 'common.retry' }).click());
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(ensureConversationRuntimeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts only one message when Enter is pressed twice before the response', async () => {
+    let accepted!: (value: unknown) => void;
+    sendMessageInvokeMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          accepted = resolve;
+        })
+    );
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+    expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
+    await act(async () => accepted({ msg_id: 'message', turn_id: 'turn', runtime: {} }));
+  });
+
+  it('waits for automatic preparation before forwarding a stored initial message exactly once', async () => {
+    const key = 'aionrs_initial_message_conv-1';
+    sessionStorage.setItem(key, JSON.stringify({ input: 'first question', files: [] }));
+    let ready!: () => void;
+    ensureConversationRuntimeMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve;
+        })
+    );
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1'));
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    await act(async () => ready());
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
+    expect(sessionStorage.getItem(key)).toBeNull();
+    sessionStorage.clear();
   });
 
   it('suppresses visible error and preserves runtime gate for active-turn busy conflicts', async () => {

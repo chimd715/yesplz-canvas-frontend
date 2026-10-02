@@ -604,6 +604,8 @@ export type I18nKey =
   | 'conversation.embedding.title'
   | 'conversation.embedding.unavailable'
   | 'conversation.emptyState.greeting'
+  | 'conversation.entryRuntime.failed'
+  | 'conversation.entryRuntime.preparing'
   | 'conversation.explorer.addFolder'
   | 'conversation.explorer.addedToChat'
   | 'conversation.explorer.attachDuplicate'

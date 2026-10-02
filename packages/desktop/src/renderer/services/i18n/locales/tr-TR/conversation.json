@@ -831,5 +831,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "Sohbet hazırlanıyor…",
+    "failed": "Sohbete bağlanılamadı. Taslağınız korundu. Tekrar deneyin."
   }
 }

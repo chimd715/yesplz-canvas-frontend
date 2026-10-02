@@ -829,5 +829,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "Preparing chat…",
+    "failed": "Chat could not connect. Your draft is kept. Try again."
   }
 }

@@ -32,6 +32,7 @@ import {
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
+import { useConversationEntryRuntime } from '@/renderer/pages/conversation/runtime/useConversationEntryRuntime';
 import { getConversationRuntimeWorkspaceErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
@@ -50,7 +51,7 @@ import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/me
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
@@ -167,7 +168,6 @@ const AionrsSendBox: React.FC<{
     [setContent]
   );
 
-  const [agentWarmed, setAgentWarmed] = useState(false);
   const prepareRuntimeConfig = useCallback(async () => {
     if (teamPermission) return;
   }, [teamPermission]);
@@ -178,6 +178,8 @@ const AionrsSendBox: React.FC<{
     }
     await ensureConversationRuntime(conversation_id);
   }, [conversation_id, teamPermission]);
+  const entryRuntime = useConversationEntryRuntime(conversation_id, prepareRuntimeSync);
+  const entryReadyRef = useLatestRef(entryRuntime.isReady);
   const runtimeConfig = useAcpConfigOptions({
     conversation_id,
     prepareRuntime: prepareRuntimeConfig,
@@ -193,28 +195,16 @@ const AionrsSendBox: React.FC<{
     setCurrentMode(runtimeMode.currentValue);
   }, [runtimeMode?.currentValue]);
 
-  useEffect(() => {
-    if (!conversation_id) return;
-    setAgentWarmed(false);
-    void prepareRuntimeSync()
-      .then(() => {
-        setAgentWarmed(true);
-      })
-      .catch((error) => {
-        Message.error(getConversationRuntimeWorkspaceErrorMessage(error, t));
-      });
-  }, [conversation_id, prepareRuntimeSync, t]);
-
   const slash_commands = useSlashCommands(conversation_id, {
     conversation_type: 'aionrs',
-    agentStatus: agentWarmed ? 'active' : null,
+    agentStatus: entryRuntime.isReady ? 'active' : null,
     prepareRuntime: teamPermission ? prepareRuntimeSync : undefined,
   });
 
   const { setSendBoxHandler } = usePreviewContext();
   const commandQueueRuntimeGate = teamRuntime?.runtimeGate ?? {
-    hydrated: runtimeView.hydrated,
-    canSendMessage: runtimeView.canSendMessage,
+    hydrated: runtimeView.hydrated && entryRuntime.isReady,
+    canSendMessage: runtimeView.canSendMessage && entryRuntime.isReady,
     isProcessing: runtimeView.isProcessing,
   };
   const isCancelling = runtimeView.state === 'cancelling';
@@ -253,6 +243,7 @@ const AionrsSendBox: React.FC<{
 
   const executeCommand = useCallback(
     async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
+      if (!entryReadyRef.current) throw new Error('Conversation runtime is not ready');
       if (teamPermission) await teamPermission.warmupSession();
       if (!current_model?.use_model) {
         Message.warning(t('conversation.chat.noModelSelected'));
@@ -349,7 +340,7 @@ const AionrsSendBox: React.FC<{
 
   // Handle initial message from Guid page — wait until model is ready
   useEffect(() => {
-    if (!conversation_id || !current_model?.use_model) return;
+    if (!conversation_id || !current_model?.use_model || !entryRuntime.isReady) return;
 
     const storageKey = `aionrs_initial_message_${conversation_id}`;
     const processedKey = `aionrs_initial_processed_${conversation_id}`;
@@ -378,7 +369,7 @@ const AionrsSendBox: React.FC<{
     };
 
     void processInitialMessage();
-  }, [conversation_id, current_model?.use_model, executeCommand]);
+  }, [conversation_id, current_model?.use_model, entryRuntime.isReady, executeCommand]);
 
   // `@@` session references the user picked. Declared before the handlers that
   // read it — every send path has to both forward and release it.
@@ -389,7 +380,13 @@ const AionrsSendBox: React.FC<{
   // replying, sending is hard-blocked with a toast instead of implicitly
   // enqueuing. The only way to queue a message while busy is the explicit
   // "add to queue" entry (handleAddToQueue below).
+  const directSendInFlight = useRef(false);
   const onSendHandler = async (message: string): Promise<void | false> => {
+    if (!entryReadyRef.current) {
+      Message.warning(t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`));
+      return false;
+    }
+    if (directSendInFlight.current) return false;
     if (isBusy) {
       Message.warning(
         t('conversation.commandQueue.midturnBlocked', {
@@ -400,12 +397,17 @@ const AionrsSendBox: React.FC<{
       return false;
     }
 
-    const filesToSend = collectChatFileRefs(uploadFile, atPath);
-    const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
-    clearFiles();
-    setSelectedSessions([]);
-    emitter.emit('aionrs.selected.file.clear');
-    await executeCommand({ input: message, files: filesToSend, sessions });
+    directSendInFlight.current = true;
+    try {
+      const filesToSend = collectChatFileRefs(uploadFile, atPath);
+      const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
+      clearFiles();
+      setSelectedSessions([]);
+      emitter.emit('aionrs.selected.file.clear');
+      await executeCommand({ input: message, files: filesToSend, sessions });
+    } finally {
+      directSendInFlight.current = false;
+    }
   };
 
   const [interrupting, setInterrupting] = useState(false);
@@ -752,6 +754,19 @@ const AionrsSendBox: React.FC<{
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
+      {entryRuntime.phase !== 'ready' && (
+        <div
+          role={entryRuntime.phase === 'failed' ? 'alert' : 'status'}
+          className='flex items-center gap-8px mb-8px text-t-secondary'
+        >
+          <span>{t(`conversation.entryRuntime.${entryRuntime.phase}`)}</span>
+          {entryRuntime.phase === 'failed' && (
+            <Button size='mini' onClick={entryRuntime.retry}>
+              {t('common.retry')}
+            </Button>
+          )}
+        </div>
+      )}
       <SendBox
         data-testid='aionrs-sendbox'
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}
@@ -766,18 +781,20 @@ const AionrsSendBox: React.FC<{
         onSelectedSessionsChange={setSelectedSessions}
         crossSessionEnabled={crossSessionEnabled}
         isTeamConversation={Boolean(teamRuntime)}
-        loading={teamRuntime?.loading ?? isBusy}
+        loading={teamRuntime?.loading ?? (isBusy && entryRuntime.isReady)}
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={!current_model?.use_model}
         sendDisabled={isBusy}
         sendDisabledTooltip={
-          isBusy
-            ? t('conversation.commandQueue.midturnBlockedSendHint', {
-                defaultValue:
-                  'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
-              })
-            : undefined
+          !entryRuntime.isReady
+            ? t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`)
+            : isBusy
+              ? t('conversation.commandQueue.midturnBlockedSendHint', {
+                  defaultValue:
+                    'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
+                })
+              : undefined
         }
         placeholder={
           current_model?.use_model

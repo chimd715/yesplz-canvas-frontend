@@ -845,5 +845,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "Підготовка чату…",
+    "failed": "Не вдалося підключитися до чату. Чернетку збережено. Спробуйте ще раз."
   }
 }

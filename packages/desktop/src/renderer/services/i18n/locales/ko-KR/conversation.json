@@ -829,5 +829,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "대화를 준비하고 있습니다…",
+    "failed": "대화에 연결할 수 없습니다. 작성한 내용은 유지됩니다. 다시 시도해 주세요."
   }
 }

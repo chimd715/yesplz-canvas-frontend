@@ -829,5 +829,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "正在准备对话…",
+    "failed": "无法连接对话。草稿已保留，请重试。"
   }
 }

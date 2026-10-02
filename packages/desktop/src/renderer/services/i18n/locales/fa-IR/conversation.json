@@ -829,5 +829,9 @@
     "pending": "Publishing is in progress. Installation code will be available when it finishes.",
     "checking": "Checking the published version…",
     "unavailable": "The published version could not be confirmed. Check the Publish status and try again."
+  },
+  "entryRuntime": {
+    "preparing": "در حال آماده‌سازی گفتگو…",
+    "failed": "اتصال به گفتگو ممکن نشد. پیش‌نویس شما حفظ شده است. دوباره تلاش کنید."
   }
 }
