@@ -688,9 +688,9 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
         >
           {item.artifact.kind === 'cron_trigger' ? (
             <MessageCronTrigger artifact={item.artifact} />
-          ) : (
+          ) : item.artifact.kind === 'skill_suggest' ? (
             <MessageSkillSuggest artifact={item.artifact} />
-          )}
+          ) : null}
         </div>
       );
     }

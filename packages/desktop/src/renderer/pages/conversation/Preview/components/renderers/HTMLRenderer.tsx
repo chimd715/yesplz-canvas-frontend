@@ -9,6 +9,7 @@ import { useTypingAnimation } from '@/renderer/hooks/chat/useTypingAnimation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useScrollSyncTarget } from '../../hooks/useScrollSyncHelpers';
 import { generateInspectScript } from './htmlInspectScript';
+import { isolateGeneratedHtml } from '../../generated';
 
 /** 选中元素的数据结构 / Selected element data structure */
 export interface InspectedElement {
@@ -19,6 +20,7 @@ export interface InspectedElement {
 }
 
 interface HTMLRendererProps {
+  isolated?: boolean;
   content: string;
   file_path?: string;
   workspace?: string;
@@ -264,6 +266,7 @@ async function inlineRelativeResources(html: string, basePath: string, workspace
  * Renders HTML content in iframe/webview (auto-detect environment)
  */
 const HTMLRenderer: React.FC<HTMLRendererProps> = ({
+  isolated = false,
   content,
   file_path,
   workspace,
@@ -287,7 +290,7 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
   });
 
   // 检测是否在 Electron 环境 / Detect if in Electron environment
-  const isElectron = useMemo(() => typeof window !== 'undefined' && window.electronAPI !== undefined, []);
+  const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined && !isolated;
 
   // 监听主题变化 / Monitor theme changes
   useEffect(() => {
@@ -343,7 +346,7 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
       return;
     }
 
-    if (!hasRelativeResources || !file_path) {
+    if (isolated || !hasRelativeResources || !file_path) {
       // 没有相对资源或没有文件路径，使用原始内容
       // No relative resources or no file path, use original content
       setInlinedHtmlContent(content);
@@ -369,16 +372,17 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [content, file_path, isElectron, hasRelativeResources, workspace]);
+  }, [content, file_path, isElectron, hasRelativeResources, workspace, isolated]);
 
   // 用于 browser iframe 的最终 HTML 内容
   // Final HTML content for browser iframe
   const browserHtmlContent = useMemo(() => {
+    if (isolated) return isolateGeneratedHtml(content);
     if (hasRelativeResources && file_path) {
       return inlinedHtmlContent || content; // 在内联化完成前显示原始内容 / Show original content before inlining completes
     }
     return displayedContent;
-  }, [hasRelativeResources, file_path, inlinedHtmlContent, content, displayedContent]);
+  }, [hasRelativeResources, file_path, inlinedHtmlContent, content, displayedContent, isolated]);
 
   // 计算 webview 的 src
   // Calculate webview src
@@ -755,7 +759,8 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
             width: '100%',
             height: '100%',
           }}
-          sandbox='allow-scripts allow-forms allow-popups allow-modals'
+          sandbox={isolated ? '' : 'allow-scripts allow-forms allow-popups allow-modals'}
+          referrerPolicy={isolated ? 'no-referrer' : undefined}
         />
       )}
     </div>

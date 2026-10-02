@@ -994,6 +994,7 @@ const PreviewPanel: React.FC = () => {
           return (
             <div className='flex-1 overflow-hidden'>
               <HTMLRenderer
+                isolated={metadata?.generatedArtifact}
                 content={content}
                 file_path={metadata?.file_path}
                 workspace={metadata?.workspace}
@@ -1037,6 +1038,7 @@ const PreviewPanel: React.FC = () => {
                 {/* prettier-ignore */}
                 {/* eslint-disable-next-line max-len */}
                 <HTMLRenderer
+                  isolated={metadata?.generatedArtifact}
                   content={content}
                   file_path={metadata?.file_path}
                   workspace={metadata?.workspace}
@@ -1070,6 +1072,7 @@ const PreviewPanel: React.FC = () => {
         return (
           <div className='flex-1 overflow-hidden'>
             <HTMLRenderer
+              isolated={metadata?.generatedArtifact}
               content={content}
               file_path={metadata?.file_path}
               workspace={metadata?.workspace}

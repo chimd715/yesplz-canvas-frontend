@@ -32,6 +32,7 @@ import { getConversationOrNull, refreshConversationCache } from '@/renderer/page
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import GoogleModelSelector from '../platforms/gemini/GoogleModelSelector';
 import AionrsChat from '../platforms/aionrs/AionrsChat';
+import GeneratedArtifactPreview from '../Preview/generated';
 import AionrsModelSelector from '../platforms/aionrs/AionrsModelSelector';
 import { useAionrsModelSelection } from '../platforms/aionrs/useAionrsModelSelection';
 import { useConversationRuntimeView } from '../runtime/useConversationRuntimeView';
@@ -261,6 +262,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
 
   return (
     <ChatLayout {...chatLayoutProps} conversation_id={conversation.id}>
+      <GeneratedArtifactPreview conversationId={conversation.id} projectId={conversation.project_id} />
       <AionrsChat
         conversation_id={conversation.id}
         workspace={conversation.extra.workspace}

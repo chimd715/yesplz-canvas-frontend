@@ -30,6 +30,10 @@ export interface DomSnippet {
 }
 
 export interface PreviewMetadata {
+  /** Server-validated customer output; HTML uses an opaque, network-isolated iframe. */
+  generatedArtifact?: boolean;
+  /** Per-tab optimistic-save version when a generated output preserves another dirty tab. */
+  saveIfMatch?: number;
   language?: string;
   title?: string;
   diff?: string;
@@ -84,6 +88,8 @@ export interface OpenPreviewOptions {
    * tab to avoid losing changes).
    */
   replace?: boolean;
+  /** A fresh generated version opens separately when the same file has unsaved edits. */
+  preserveDirty?: boolean;
 }
 
 /**
@@ -764,12 +770,17 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // stay pure. This is the "read once when the tab opens" fill point — without
       // it the first save of every tab carries no If-Match, so the backend skips
       // conflict detection and silently overwrites a concurrent external edit.
+      const previousMtime = meta?.fileRef ? fileMtimeRef.current.get(chatFileRefKey(meta.fileRef)) : undefined;
       if (meta?.fileRef && meta.lastModified != null) {
         fileMtimeRef.current.set(chatFileRefKey(meta.fileRef), meta.lastModified);
       }
 
       // 已打开同一内容：聚焦现有 tab，不新建 / Same content already open: focus it
-      const existingTab = findPreviewTabInList(currentTabs, type, new_content, meta);
+      const matchedTab = findPreviewTabInList(currentTabs, type, new_content, meta);
+      const existingTab =
+        options?.preserveDirty && matchedTab?.isDirty
+          ? (currentTabs.find((tab) => !tab.isDirty && findPreviewTabInList([tab], type, new_content, meta)) ?? null)
+          : matchedTab;
 
       // 浏览器 tab 上限：满了就复用最旧的一个，并给 UI 一个可提示的信号
       // Browser tab cap: when full, reuse the oldest and raise a signal the UI can
@@ -814,7 +825,23 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const newTabId = `${type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       const targetTabId = existingTab?.id ?? replaceTarget?.id ?? cappedTarget?.id ?? newTabId;
 
-      setTabs((prevTabs) => {
+      setTabs((previousTabs) => {
+        const prevTabs =
+          options?.preserveDirty && meta?.fileRef
+            ? previousTabs.map((tab) =>
+                tab.isDirty &&
+                tab.metadata?.fileRef &&
+                chatFileRefKey(tab.metadata.fileRef) === chatFileRefKey(meta.fileRef!)
+                  ? {
+                      ...tab,
+                      metadata: {
+                        ...tab.metadata,
+                        saveIfMatch: tab.metadata.saveIfMatch ?? tab.metadata.lastModified ?? previousMtime,
+                      },
+                    }
+                  : tab
+              )
+            : previousTabs;
         if (existingTab) {
           return prevTabs.map((tab) => {
             if (tab.id !== existingTab.id) return tab;
@@ -1085,7 +1112,16 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       void ipcBridge.fs.getContentMetadata
         .invoke({ file: fileRef })
         .then((metadata) => {
-          if (metadata) fileMtimeRef.current.set(chatFileRefKey(fileRef), metadata.lastModified);
+          if (metadata) {
+            fileMtimeRef.current.set(chatFileRefKey(fileRef), metadata.lastModified);
+            setTabs((previous) =>
+              previous.map((currentTab) =>
+                currentTab.id === tabId && currentTab.metadata?.saveIfMatch !== undefined
+                  ? { ...currentTab, metadata: { ...currentTab.metadata, saveIfMatch: metadata.lastModified } }
+                  : currentTab
+              )
+            );
+          }
         })
         .catch(() => {});
 
@@ -1113,7 +1149,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           // PUT /content：带 If-Match(上次已知 mtime) 乐观并发，冲突后端返 409
           // PUT /content: optimistic concurrency via If-Match (last-known mtime); backend returns 409 on conflict
-          const ifMatch = fileMtimeRef.current.get(saveKey);
+          const ifMatch = tab.metadata?.saveIfMatch ?? fileMtimeRef.current.get(saveKey);
           const success = await ipcBridge.fs.writeContent.invoke({ file: fileRef, data: tab.content, ifMatch });
 
           if (success) {
@@ -1130,7 +1166,16 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
             void ipcBridge.fs.getContentMetadata
               .invoke({ file: fileRef })
               .then((metadata) => {
-                if (metadata) fileMtimeRef.current.set(saveKey, metadata.lastModified);
+                if (metadata) {
+                  fileMtimeRef.current.set(saveKey, metadata.lastModified);
+                  setTabs((previous) =>
+                    previous.map((currentTab) =>
+                      currentTab.id === targetTabId && currentTab.metadata?.saveIfMatch !== undefined
+                        ? { ...currentTab, metadata: { ...currentTab.metadata, saveIfMatch: metadata.lastModified } }
+                        : currentTab
+                    )
+                  );
+                }
               })
               .catch(() => {
                 // metadata refresh is best-effort — a stale If-Match just re-triggers 409, never data loss

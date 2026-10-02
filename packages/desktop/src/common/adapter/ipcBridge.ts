@@ -1920,7 +1920,7 @@ export interface IResponseMessage {
   replace?: boolean;
 }
 
-export type IConversationArtifactKind = 'cron_trigger' | 'skill_suggest';
+export type IConversationArtifactKind = 'cron_trigger' | 'skill_suggest' | 'generated_file';
 export type IConversationArtifactStatus = 'active' | 'pending' | 'dismissed' | 'saved';
 
 export interface IConversationArtifactBase<
@@ -1957,7 +1957,12 @@ export type ISkillSuggestArtifact = IConversationArtifactBase<
   }
 >;
 
-export type IConversationArtifact = ICronTriggerArtifact | ISkillSuggestArtifact;
+export type IGeneratedFileArtifact = IConversationArtifactBase<
+  'generated_file',
+  { project_id: string; file: Extract<ChatFileRef, { kind: 'project' }>; file_name: string }
+>;
+
+export type IConversationArtifact = ICronTriggerArtifact | ISkillSuggestArtifact | IGeneratedFileArtifact;
 
 export interface IConversationTurnCompletedEvent {
   session_id: string;

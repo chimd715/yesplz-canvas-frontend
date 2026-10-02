@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import React, { type ReactNode } from 'react';
+import { ipcBridge } from '@/common';
 import { PreviewProvider, usePreviewContext } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
 
 vi.mock('@/common', () => ({
@@ -18,6 +19,8 @@ vi.mock('@/common', () => ({
       open: { on: vi.fn(() => vi.fn()) },
     },
     fs: {
+      writeContent: { invoke: vi.fn().mockResolvedValue(true) },
+      getContentMetadata: { invoke: vi.fn().mockResolvedValue({ lastModified: 300 }) },
       writeFile: { invoke: vi.fn() },
       getFileMetadata: { invoke: vi.fn() },
       readFile: { invoke: vi.fn() },
@@ -57,6 +60,34 @@ describe('PreviewContext', () => {
     expect(result.current.isOpen).toBe(false);
     expect(result.current.tabs).toEqual([]);
     expect(result.current.activeTabId).toBe(null);
+  });
+
+  it('opens a fresh generated version without overwriting dirty content or its save-conflict version', async () => {
+    const { result } = renderHook(() => usePreviewContext(), { wrapper });
+    const fileRef = { kind: 'project' as const, pe_id: 'pe', relative_path: 'report.md' };
+    act(() => result.current.openPreview('version one', 'markdown', { fileRef, lastModified: 100 }));
+    const dirtyId = result.current.activeTabId!;
+    act(() => result.current.updateContent('my unsaved edits'));
+    act(() =>
+      result.current.openPreview(
+        'version two',
+        'markdown',
+        { fileRef, lastModified: 200, saveIfMatch: 200, generatedArtifact: true },
+        { replace: true, preserveDirty: true }
+      )
+    );
+    expect(result.current.tabs).toHaveLength(2);
+    expect(result.current.activeTabId).not.toBe(dirtyId);
+    expect(result.current.tabs.find((tab) => tab.id === dirtyId)?.content).toBe('my unsaved edits');
+    expect(result.current.tabs.find((tab) => tab.id === dirtyId)?.isDirty).toBe(true);
+    await act(async () => {
+      await result.current.saveContent(dirtyId);
+    });
+    expect(ipcBridge.fs.writeContent.invoke).toHaveBeenCalledWith({
+      file: fileRef,
+      data: 'my unsaved edits',
+      ifMatch: 100,
+    });
   });
 
   it('opens preview and creates tab', () => {
