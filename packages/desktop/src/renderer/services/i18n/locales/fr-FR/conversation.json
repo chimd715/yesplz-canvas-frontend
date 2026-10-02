@@ -860,5 +860,7 @@
     "uncertain": "La livraison est incertaine. Vérifiez la conversation puis supprimez cet élément. Il ne sera pas renvoyé automatiquement.",
     "full": "Vous pouvez mettre 3 messages en attente. Supprimez-en un ou attendez une réponse.",
     "storageFailed": "Impossible d’enregistrer les modifications de la file dans ce navigateur."
-  }
+  },
+  "modelSwitchBusy": "Attendez la fin de la réponse en cours avant de changer de modèle.",
+  "modelSwitchFailed": "Impossible de changer de modèle. Veuillez réessayer."
 }

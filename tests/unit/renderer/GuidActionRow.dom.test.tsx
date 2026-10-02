@@ -58,8 +58,11 @@ vi.mock('@/renderer/utils/platform', () => ({
   isElectronDesktop: () => environment.isDesktop,
 }));
 
+function EmptyIcon() {
+  return <span aria-hidden='true' />;
+}
 vi.mock('@icon-park/react', () => {
-  const Icon = () => <span aria-hidden='true' />;
+  const Icon = EmptyIcon;
   return {
     ArrowUp: Icon,
     Brain: Icon,
@@ -187,6 +190,24 @@ describe('GuidActionRow skill/MCP submenu search', () => {
     vi.clearAllMocks();
     environment.isMobile = false;
     environment.isDesktop = true;
+  });
+
+  it.each([false, true])('hides browser permission choices with mobile=%s', (isMobile) => {
+    environment.isMobile = isMobile;
+    environment.isDesktop = false;
+    renderActionRow({
+      dynamicModes: [
+        { value: 'default', label: 'Default' },
+        { value: 'yolo', label: 'YOLO' },
+      ],
+    });
+    expect(screen.queryByTestId('agent-mode-selector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('permission')).not.toBeInTheDocument();
+  });
+
+  it('preserves desktop permission controls', () => {
+    renderActionRow({ dynamicModes: [{ value: 'yolo', label: 'YOLO' }] });
+    expect(screen.getByTestId('agent-mode-selector')).toBeInTheDocument();
   });
 
   it('offers only customer-device attachment in mobile WebUI', () => {

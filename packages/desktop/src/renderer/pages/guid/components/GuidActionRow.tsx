@@ -156,7 +156,8 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       setMcpQuery('');
     }
   }, []);
-  const showModeSwitch = dynamicModes.length > 0;
+  const isWebUI = !isElectronDesktop();
+  const showModeSwitch = !isWebUI && dynamicModes.length > 0;
   const configOptionCount = (modelSelectorNode ? 1 : 0) + (showModeSwitch ? 1 : 0);
 
   // Browser file picker ref (WebUI only)
@@ -197,8 +198,6 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
 
   const getModeDisplayLabel = (mode: AgentModeOption): string =>
     t(`agentMode.${mode.value}`, { defaultValue: mode.label });
-
-  const isWebUI = !isElectronDesktop();
 
   const isSkillChecked = (skill: { name: string; isAuto: boolean }) =>
     skill.isAuto ? !disabledBuiltinSkills.includes(skill.name) : enabledSkills.includes(skill.name);
@@ -300,7 +299,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     }
 
     // Permission / agent mode.
-    if (dynamicModes.length > 0) {
+    if (!isWebUI && dynamicModes.length > 0) {
       const modeOptions: MobileActionSheetOption[] = dynamicModes.map((mode) => ({
         key: mode.value,
         label: t(`agentMode.${mode.value}`, { defaultValue: mode.label }),

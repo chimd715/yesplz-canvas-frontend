@@ -6,6 +6,8 @@
 
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import { AI_BUILDER_PROVIDER_ID } from '@/common/config/constants';
+import { getCustomerModelProviders } from '@/common/utils/modelCapabilities';
+import { isElectronDesktop } from '@/renderer/utils/platform';
 import { useGoogleAuthModels } from '@/renderer/hooks/agent/useGoogleAuthModels';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { hasAvailableModels } from '../utils/modelUtils';
@@ -54,7 +56,8 @@ export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'aionrs'): Gu
 
   const modelList = useMemo(() => {
     const allProviders: IProvider[] = (modelConfig || []).filter((platform) => !!platform.models.length);
-    return allProviders.filter(hasAvailableModels);
+    const compatible = allProviders.filter(hasAvailableModels);
+    return isElectronDesktop() ? compatible : getCustomerModelProviders(compatible);
   }, [modelConfig]);
 
   const formatGeminiModelLabel = useCallback((_provider: { platform?: string } | undefined, modelName?: string) => {

@@ -860,5 +860,7 @@
     "uncertain": "Delivery is uncertain. Check the conversation, then remove this item; it will not be sent again automatically.",
     "full": "You can queue up to 3 prompts. Remove one or wait for a reply.",
     "storageFailed": "Could not save queue changes in this browser."
-  }
+  },
+  "modelSwitchBusy": "Wait for the current response to finish before changing the model.",
+  "modelSwitchFailed": "The model could not be changed. Please try again."
 }

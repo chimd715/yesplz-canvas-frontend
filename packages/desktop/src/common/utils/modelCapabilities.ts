@@ -114,6 +114,27 @@ export const hasSpecificModelCapability = (
   return pattern.test(baseModelName) ? true : undefined;
 };
 
+/** Customer menu policy over configured providers; local fixture IDs remain usable. */
+export const getCustomerModelProviders = (providers: IProvider[]): IProvider[] => {
+  const supported = new Set([
+    'deepseek/deepseek-v4.1-flash',
+    'z-ai/glm-5.3',
+    'z-ai/glm-5.3-flash',
+    'deepseek-v4.1-flash',
+    'glm-5.3',
+    'glm-5.3-flash',
+    'mock-local',
+  ]);
+  return providers
+    .filter((provider) => provider.enabled !== false)
+    .flatMap((provider) => {
+      const models = provider.models.filter(
+        (model) => supported.has(model) && provider.model_enabled?.[model] !== false
+      );
+      return models.length ? [{ ...provider, models }] : [];
+    });
+};
+
 export type PromptBudget = { allowed: boolean; usedBytes: number; maxBytes: number };
 
 /** Conservative service admission policy, not a provider tokenizer estimate. */

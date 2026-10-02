@@ -861,5 +861,7 @@
     "uncertain": "La entrega es incierta. Revisa la conversación y elimina este mensaje. No se reenviará automáticamente.",
     "full": "Puedes dejar hasta 3 mensajes en espera. Elimina uno o espera una respuesta.",
     "storageFailed": "No se pudieron guardar los cambios de la cola en este navegador."
-  }
+  },
+  "modelSwitchBusy": "Espera a que termine la respuesta actual antes de cambiar de modelo.",
+  "modelSwitchFailed": "No se pudo cambiar de modelo. Inténtalo de nuevo."
 }

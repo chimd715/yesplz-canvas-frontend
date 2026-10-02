@@ -148,6 +148,15 @@ describe('AionrsModelSelector runtime options', () => {
     vi.clearAllMocks();
   });
 
+  it('keeps the selected model visible and refuses menu clicks while busy', () => {
+    const selection = makeSelection();
+    render(<AionrsModelSelector selection={selection} busy />);
+    expect(screen.getByTestId('aionrs-model-selector')).toBeDisabled();
+    expect(screen.getByTestId('aionrs-model-selector')).toHaveTextContent('gpt-5.2');
+    fireEvent.click(within(screen.getByRole('group', { name: 'OpenAI' })).getByText('gpt-5.2-mini'));
+    expect(selection.handleSelectModel).not.toHaveBeenCalled();
+  });
+
   it('shows the current model and thought level in the header pill', () => {
     render(
       <AionrsModelSelector

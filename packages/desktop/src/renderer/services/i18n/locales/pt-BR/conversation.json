@@ -866,5 +866,7 @@
     "uncertain": "A entrega é incerta. Confira a conversa e remova este item. Ele não será reenviado automaticamente.",
     "full": "Você pode enfileirar até 3 mensagens. Remova uma ou aguarde uma resposta.",
     "storageFailed": "Não foi possível salvar as alterações da fila neste navegador."
-  }
+  },
+  "modelSwitchBusy": "Aguarde a resposta atual terminar antes de trocar o modelo.",
+  "modelSwitchFailed": "Não foi possível trocar o modelo. Tente novamente."
 }

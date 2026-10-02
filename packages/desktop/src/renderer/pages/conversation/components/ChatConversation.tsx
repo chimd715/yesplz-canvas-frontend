@@ -7,6 +7,8 @@
 import { ipcBridge } from '@/common';
 import type { IConversationMcpStatus, IProvider, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
+import { isElectronDesktop } from '@/renderer/utils/platform';
+import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
 import { CronJobManager } from '@/renderer/pages/cron';
 import { resolveCronJobId } from '@/renderer/pages/cron/cronUtils';
@@ -26,7 +28,7 @@ import ChatLayout from './ChatLayout';
 import ChatSlider from './ChatSlider.tsx';
 import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
 import AcpRuntimeRestartButton from '@/renderer/components/agent/AcpRuntimeRestartButton';
-import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
+import { getConversationOrNull, refreshConversationCache } from '@/renderer/pages/conversation/utils/conversationCache';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import GoogleModelSelector from '../platforms/gemini/GoogleModelSelector';
 import AionrsChat from '../platforms/aionrs/AionrsChat';
@@ -151,25 +153,39 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
   sliderTitle,
 }) => {
   const runtimeView = useConversationRuntimeView(conversation.id);
+  const runtimeRef = useLatestRef(runtimeView);
+  const { t } = useTranslation();
   const onSelectModel = useCallback(
     async (_provider: IProvider, modelName: string) => {
+      if (!isElectronDesktop() && (!runtimeRef.current.canSendMessage || runtimeRef.current.isProcessing)) {
+        Message.warning(t('conversation.modelSwitchBusy'));
+        return false;
+      }
       const selected = { ..._provider, use_model: modelName } as TProviderWithModel;
       // Kill running agent on model switch — will be rebuilt with new model on next message
-      if (runtimeView.activeTurnId) {
+      if (isElectronDesktop() && runtimeRef.current.activeTurnId) {
         const result = await ipcBridge.conversation.stop.invoke({
           conversation_id: conversation.id,
           turn_id: runtimeView.activeTurnId,
         });
         runtimeView.markStopAcknowledged(runtimeView.activeTurnId, result.runtime);
       }
-      const ok = await ipcBridge.conversation.update.invoke({ id: conversation.id, updates: { model: selected } });
-      return Boolean(ok);
+      try {
+        const ok = await ipcBridge.conversation.update.invoke({ id: conversation.id, updates: { model: selected } });
+        return Boolean(ok);
+      } catch {
+        Message.error(t('conversation.modelSwitchFailed'));
+        // A lost acknowledgement can follow a committed PATCH; refresh the canonical selection.
+        await refreshConversationCache(conversation.id).catch(() => {});
+        return false;
+      }
     },
-    [conversation.id, runtimeView]
+    [conversation.id, runtimeView, runtimeRef, t]
   );
 
   const modelSelection = useAionrsModelSelection({
     initialModel: conversation.model,
+    scopeKey: conversation.id,
     onSelectModel,
   });
   // Project conversations get the Layout-level Explorer column (stage3 FULL);
@@ -183,7 +199,6 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
   // Mobile: model selection moved into the sendbox `+` action sheet to free up
   // header space; the dropdown stays available on desktop and tablets ≥768px.
   const isMobile = Boolean(layout?.isMobile);
-  const { t } = useTranslation();
   const runtimeConfig = useAcpConfigOptions({
     conversation_id: conversation.id,
     enabled: !isMobile,
@@ -210,7 +225,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
     headerExtra: (
       <div className='flex items-center gap-8px'>
         <CronJobManager conversation_id={conversation.id} cron_job_id={cronJobId} />
-        {!isMobile && (
+        {isElectronDesktop() && !isMobile && (
           <AionrsModelSelector
             selection={modelSelection}
             thoughtLevel={runtimeConfig.thoughtLevel}

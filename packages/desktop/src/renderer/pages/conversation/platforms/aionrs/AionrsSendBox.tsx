@@ -8,6 +8,7 @@ import { ipcBridge } from '@/common';
 import { getPromptBudget } from '@/common/utils/modelCapabilities';
 import { parseExplicitSkillNames, unknownExplicitSkills } from '@/common/chat/slash/explicitSkills';
 import type { IConversationMcpStatus } from '@/common/config/storage';
+import AionrsModelSelector from './AionrsModelSelector';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import CommandQueuePanel from '@/renderer/components/chat/CommandQueuePanel';
 import MobileActionSheet, {
@@ -242,8 +243,8 @@ const AionrsSendBox: React.FC<{
   const { setSendBoxHandler } = usePreviewContext();
   const commandQueueRuntimeGate = teamRuntime?.runtimeGate ?? {
     hydrated: runtimeView.hydrated && entryRuntime.isReady,
-    canSendMessage: runtimeView.canSendMessage && entryRuntime.isReady,
-    isProcessing: runtimeView.isProcessing,
+    canSendMessage: runtimeView.canSendMessage && entryRuntime.isReady && !modelSelection.isChanging,
+    isProcessing: runtimeView.isProcessing || Boolean(modelSelection.isChanging),
   };
   const isCancelling = runtimeView.state === 'cancelling';
   const isBusy = isCancelling || commandQueueRuntimeGate.isProcessing || !commandQueueRuntimeGate.canSendMessage;
@@ -608,14 +609,19 @@ const AionrsSendBox: React.FC<{
 
   const handleSheetModelSelect = useCallback(
     (value: string) => {
-      if (runtimeConfig.isConfigOptionBlocked?.('model')) return;
+      if (
+        runtimeConfig.isConfigOptionBlocked?.('model') ||
+        modelSelection.isChanging ||
+        (!window.electronAPI && isBusy)
+      )
+        return;
       // value format: `${providerId}::${modelName}`
       const [providerId, modelName] = value.split('::');
       const provider = modelSelection.providers.find((p) => p.id === providerId);
       if (!provider || !modelName) return;
       void modelSelection.handleSelectModel(provider, modelName);
     },
-    [modelSelection, runtimeConfig]
+    [modelSelection, runtimeConfig, isBusy]
   );
 
   const sheetEntries = useMemo<MobileActionSheetEntry[]>(() => {
@@ -681,6 +687,11 @@ const AionrsSendBox: React.FC<{
       },
       ...attachEntries,
     ];
+
+    if (!window.electronAPI) {
+      const permissionIndex = entries.findIndex((entry) => entry.key === 'permission');
+      if (permissionIndex >= 0) entries.splice(permissionIndex, 1);
+    }
 
     if (runtimeThoughtLevel) {
       entries.splice(1, 0, {
@@ -949,21 +960,25 @@ const AionrsSendBox: React.FC<{
         }
         rightTools={
           <div className='flex items-center gap-8px min-w-0'>
-            <AgentModeSelector
-              backend='aionrs'
-              conversation_id={conversation_id}
-              compact
-              initialMode={session_mode}
-              dynamicModes={dynamicModes}
-              compactLeadingIcon={<Shield theme='outline' size='14' fill={iconColors.secondary} />}
-              modeLabelFormatter={(mode) => t(`agentMode.${mode.value}`, { defaultValue: mode.label })}
-              compactLabelPrefix={t('agentMode.permission')}
-              hideCompactLabelPrefixOnMobile
-              onModeChanged={propagateMode}
-              beforeRuntimeSync={prepareRuntimeConfig}
-              beforeRuntimeSet={teamPermission?.warmupSession}
-              configOptionsPort={teamPermission?.configOptionsPort}
-            />
+            {!window.electronAPI ? (
+              <AionrsModelSelector selection={modelSelection} busy={isBusy || modelSelection.isChanging} />
+            ) : (
+              <AgentModeSelector
+                backend='aionrs'
+                conversation_id={conversation_id}
+                compact
+                initialMode={session_mode}
+                dynamicModes={dynamicModes}
+                compactLeadingIcon={<Shield theme='outline' size='14' fill={iconColors.secondary} />}
+                modeLabelFormatter={(mode) => t(`agentMode.${mode.value}`, { defaultValue: mode.label })}
+                compactLabelPrefix={t('agentMode.permission')}
+                hideCompactLabelPrefixOnMobile
+                onModeChanged={propagateMode}
+                beforeRuntimeSync={prepareRuntimeConfig}
+                beforeRuntimeSet={teamPermission?.warmupSession}
+                configOptionsPort={teamPermission?.configOptionsPort}
+              />
+            )}
           </div>
         }
         prefix={

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Message } from '@arco-design/web-react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
@@ -25,6 +25,7 @@ const {
   draftContentRef,
   runtimeViewIsProcessingRef,
   skillCatalogRef,
+  mobileRef,
 } = vi.hoisted(() => ({
   ensureConversationRuntimeMock: vi.fn().mockResolvedValue({ recovered: false, config_options: [], runtime: null }),
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
@@ -45,6 +46,7 @@ const {
       | Array<{ name: string; description: string }>
       | undefined,
   },
+  mobileRef: { current: false },
 }));
 
 vi.mock('swr', () => ({ default: () => ({ data: skillCatalogRef.current }) }));
@@ -134,10 +136,35 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
   },
 }));
 
-vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({ default: () => null }));
+vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
+  default: () => <div data-testid='permission-selector' />,
+}));
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsModelSelector', () => ({
+  default: ({ busy }: { busy?: boolean }) => (
+    <button data-testid='customer-model-selector' disabled={busy}>
+      Model
+    </button>
+  ),
+}));
 vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({ default: () => null }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: () => null,
+  default: ({
+    entries,
+  }: {
+    entries: Array<{ key: string; submenu?: { options?: Array<{ key: string }>; onSelect?: (key: string) => void } }>;
+  }) => (
+    <div>
+      {entries.map((entry) => (
+        <button
+          key={entry.key}
+          data-testid={`mobile-${entry.key}`}
+          onClick={() => entry.submenu?.onSelect?.(entry.submenu.options?.[0]?.key ?? '')}
+        >
+          {entry.key}
+        </button>
+      ))}
+    </div>
+  ),
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
 }));
 vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({ default: () => null }));
@@ -164,7 +191,7 @@ vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
   }),
 }));
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
-  useLayoutContext: () => ({ isMobile: false }),
+  useLayoutContext: () => ({ isMobile: mobileRef.current }),
 }));
 vi.mock('@/renderer/hooks/context/AuthContext', () => ({
   useAuth: () => ({ status: 'authenticated', user: { id: 'customer' } }),
@@ -361,6 +388,7 @@ describe('AionrsSendBox', () => {
     draftContentRef.current = '';
     runtimeViewIsProcessingRef.current = false;
     skillCatalogRef.current = [{ name: 'report', description: 'Create reports' }];
+    mobileRef.current = false;
   });
 
   it('sends an exact available skill reference through the native skill injection contract', async () => {
@@ -397,6 +425,52 @@ describe('AionrsSendBox', () => {
     rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('conversation.customerQueue.failed'));
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the model selector in place of browser permissions and blocks it while busy', async () => {
+    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.getByTestId('customer-model-selector')).not.toBeDisabled());
+    expect(screen.queryByTestId('permission-selector')).not.toBeInTheDocument();
+    runtimeViewIsProcessingRef.current = true;
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    expect(screen.getByTestId('customer-model-selector')).toBeDisabled();
+  });
+
+  it('holds queued prompts during model change and drains after selection settles', async () => {
+    const { rerender } = render(
+      <AionrsSendBox conversation_id='conv-1' modelSelection={{ ...modelSelection, isChanging: true }} />
+    );
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalled());
+    const props = sendBoxPropsSpy.mock.calls.at(-1)?.[0];
+    await act(async () => {
+      await props.onSend('Queued during model change');
+    });
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={{ ...modelSelection, isChanging: false }} />);
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toContain('Queued during model change');
+  });
+
+  it('keeps the mobile model action, hides permissions, and refuses selection during an active turn', async () => {
+    mobileRef.current = true;
+    const select = vi.fn();
+    const provider = { id: 'configured-provider', name: 'Configured', platform: 'custom', models: ['z-ai/glm-5.3'] };
+    const mobileSelection = {
+      ...modelSelection,
+      providers: [provider],
+      getAvailableModels: () => provider.models,
+      handleSelectModel: select,
+    } as AionrsModelSelection;
+    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={mobileSelection} />);
+    await waitFor(() => expect(screen.getByTestId('customer-model-selector')).not.toBeDisabled());
+    expect(screen.queryByTestId('mobile-permission')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mobile-model'));
+    expect(select).toHaveBeenCalledWith(provider, 'z-ai/glm-5.3');
+    select.mockClear();
+    runtimeViewIsProcessingRef.current = true;
+    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={mobileSelection} />);
+    fireEvent.click(screen.getByTestId('mobile-model'));
+    expect(select).not.toHaveBeenCalled();
   });
 
   it('does not warm up team session when draft content changes', async () => {

@@ -811,6 +811,8 @@ export type I18nKey =
   | 'conversation.minimap.noMatch'
   | 'conversation.minimap.searchAria'
   | 'conversation.minimap.searchHint'
+  | 'conversation.modelSwitchBusy'
+  | 'conversation.modelSwitchFailed'
   | 'conversation.noAgentsAvailable'
   | 'conversation.noModelConfigured'
   | 'conversation.notFound'

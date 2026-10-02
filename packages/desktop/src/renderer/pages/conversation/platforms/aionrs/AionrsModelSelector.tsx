@@ -31,11 +31,12 @@ const compositeId = (providerId: string, modelName: string) => `${providerId}::$
 const AionrsModelSelector: React.FC<{
   selection?: AionrsModelSelection;
   disabled?: boolean;
+  busy?: boolean;
   thoughtLevel?: AcpDerivedOption | null;
   /** Kept for call-site compatibility; the two-level submenu no longer gates on set status here. */
   setStatus?: AcpConfigSetStatus;
   onSetThoughtLevel?: (optionId: string, value: string) => Promise<unknown>;
-}> = ({ selection, disabled = false, thoughtLevel = null, onSetThoughtLevel }) => {
+}> = ({ selection, disabled = false, busy = false, thoughtLevel = null, onSetThoughtLevel }) => {
   const { t } = useTranslation();
   const { isOpen: isPreviewOpen } = usePreviewContext();
   const layout = useLayoutContext();
@@ -102,6 +103,7 @@ const AionrsModelSelector: React.FC<{
   }
   const currentCompositeId = current_model ? compositeId(current_model.id, current_model.use_model || '') : null;
   const handleModelSelect = (id: string) => {
+    if (busy || selection.isChanging) return;
     const entry = modelLookup.get(id);
     if (entry) void handleSelectModel(entry.provider, entry.modelName);
   };
@@ -112,6 +114,7 @@ const AionrsModelSelector: React.FC<{
 
   return (
     <Dropdown
+      disabled={busy || selection.isChanging}
       trigger='click'
       // Mobile: portal the popup to <body> so it escapes the titlebar slot.
       // Desktop: leave default container so click events reach Menu.Item normally.
@@ -163,6 +166,7 @@ const AionrsModelSelector: React.FC<{
     >
       <Button
         data-testid='aionrs-model-selector'
+        disabled={busy || selection.isChanging}
         className={classNames(
           'sendbox-model-btn header-model-btn',
           compact && '!max-w-[120px]',

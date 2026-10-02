@@ -1,9 +1,54 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TChatConversation } from '@/common/config/storage';
 import ChatConversation from '@/renderer/pages/conversation/components/ChatConversation';
+
+const native = vi.hoisted(() => ({
+  busy: false,
+  warning: vi.fn(),
+  error: vi.fn(),
+  update: vi.fn(),
+  stop: vi.fn(),
+  refresh: vi.fn(),
+  onSelect: null as null | ((provider: unknown, model: string) => Promise<boolean>),
+}));
+vi.mock('@arco-design/web-react', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@arco-design/web-react')>();
+  return { ...original, Message: { ...original.Message, warning: native.warning, error: native.error } };
+});
+vi.mock('@/common', () => ({
+  ipcBridge: { conversation: { update: { invoke: native.update }, stop: { invoke: native.stop } } },
+}));
+vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
+  getConversationOrNull: vi.fn(),
+  refreshConversationCache: native.refresh,
+}));
+vi.mock('@/renderer/pages/conversation/hooks/useActiveLease', () => ({ useActiveLease: vi.fn() }));
+vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
+  useConversationRuntimeView: () => ({
+    canSendMessage: !native.busy,
+    isProcessing: native.busy,
+    activeTurnId: native.busy ? 'active-turn' : null,
+  }),
+}));
+vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', () => ({
+  classifyConfigSetError: () => 'unknown',
+  useAcpConfigOptions: () => ({ thoughtLevel: null, setStatus: { state: 'idle' } }),
+}));
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection', () => ({
+  useAionrsModelSelection: (options: { onSelectModel: typeof native.onSelect }) => {
+    native.onSelect = options.onSelectModel;
+    return {};
+  },
+}));
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsModelSelector', () => ({
+  default: () => <div data-testid='header-native-model-selector' />,
+}));
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
+  default: () => <div data-testid='native-chat'>native history</div>,
+}));
 
 const usePresetAssistantInfoMock = vi.fn();
 const acpChatMock = vi.fn(() => <div data-testid='mock-acp-chat'>acp chat</div>);
@@ -82,10 +127,60 @@ function legacyConversation(type: 'gemini' | 'codex' | 'openclaw-gateway' | 'nan
 
 describe('ChatConversation legacy runtime rendering', () => {
   beforeEach(() => {
+    vi.stubGlobal('electronAPI', undefined);
+    native.busy = false;
+    native.warning.mockClear();
+    native.error.mockClear();
+    native.update.mockReset().mockResolvedValue(true);
+    native.stop.mockReset();
+    native.refresh.mockReset().mockResolvedValue(undefined);
     usePresetAssistantInfoMock.mockReset();
     acpChatMock.mockClear();
     acpModelSelectorMock.mockClear();
     usePresetAssistantInfoMock.mockReturnValue({ info: undefined, isLoading: false });
+  });
+
+  const nativeConversation = () =>
+    ({ ...legacyConversation('gemini'), id: 'native-conversation', type: 'aionrs' }) as TChatConversation;
+
+  it('opens native history with its composer-owned selector and no duplicate browser header selector', () => {
+    render(<ChatConversation conversation={nativeConversation()} />);
+    expect(screen.getByTestId('native-chat')).toHaveTextContent('native history');
+    expect(screen.queryByTestId('header-native-model-selector')).not.toBeInTheDocument();
+  });
+
+  it('does not stop an active customer turn or issue a model PATCH', async () => {
+    native.busy = true;
+    render(<ChatConversation conversation={nativeConversation()} />);
+    let accepted = true;
+    await act(async () => {
+      accepted = await native.onSelect!({ id: 'configured-provider' }, 'z-ai/glm-5.3');
+    });
+    expect(accepted).toBe(false);
+    expect(native.stop).not.toHaveBeenCalled();
+    expect(native.update).not.toHaveBeenCalled();
+    expect(native.warning).toHaveBeenCalled();
+  });
+
+  it('changes only the model on the same conversation and refreshes canonical state after transport failure', async () => {
+    native.update.mockRejectedValueOnce(new Error('lost acknowledgement'));
+    render(<ChatConversation conversation={nativeConversation()} />);
+    let accepted = true;
+    await act(async () => {
+      accepted = await native.onSelect!({ id: 'configured-provider' }, 'z-ai/glm-5.3');
+    });
+    expect(accepted).toBe(false);
+    expect(native.refresh).toHaveBeenCalledWith('native-conversation');
+    expect(native.error).toHaveBeenCalled();
+    expect(native.stop).not.toHaveBeenCalled();
+    expect(native.update).toHaveBeenCalledWith({
+      id: 'native-conversation',
+      updates: { model: { id: 'configured-provider', use_model: 'z-ai/glm-5.3' } },
+    });
+    await act(async () => {
+      accepted = await native.onSelect!({ id: 'configured-provider' }, 'z-ai/glm-5.3');
+    });
+    expect(accepted).toBe(true);
   });
 
   it.each(['gemini', 'codex', 'openclaw-gateway', 'nanobot', 'remote'] as const)(

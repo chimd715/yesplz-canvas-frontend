@@ -861,5 +861,7 @@
     "uncertain": "Die Zustellung ist unklar. Prüfen Sie den Chat und entfernen Sie diesen Eintrag. Er wird nicht automatisch erneut gesendet.",
     "full": "Bis zu 3 Eingaben können warten. Entfernen Sie eine oder warten Sie auf eine Antwort.",
     "storageFailed": "Änderungen an der Warteschlange konnten in diesem Browser nicht gespeichert werden."
-  }
+  },
+  "modelSwitchBusy": "Warten Sie auf das Ende der aktuellen Antwort, bevor Sie das Modell wechseln.",
+  "modelSwitchFailed": "Das Modell konnte nicht gewechselt werden. Bitte versuchen Sie es erneut."
 }
