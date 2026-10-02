@@ -845,5 +845,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "输入超过此模型的安全限额（{{limit}} 编码字节）。请缩短提示或移除附件。"
 }

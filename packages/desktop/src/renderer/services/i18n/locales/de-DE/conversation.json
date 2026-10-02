@@ -846,5 +846,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "Die Eingabe überschreitet das sichere Modellbudget ({{limit}} kodierte Bytes). Kürzen Sie den Text oder entfernen Sie Anhänge."
 }

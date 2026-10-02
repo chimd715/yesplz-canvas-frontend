@@ -845,5 +845,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "入力がモデルの安全な上限（{{limit}} エンコードバイト）を超えています。入力を短くするか添付を削除してください。"
 }

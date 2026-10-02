@@ -88,6 +88,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     isTeamConversation?: boolean;
   }) => {
     sendBoxPropsSpy({
+      onSend,
       active,
       onFocused,
       disabled,
@@ -408,6 +409,22 @@ describe('AionrsSendBox', () => {
     await waitFor(() => {
       expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1');
     });
+  });
+
+  it('disables an oversized draft and blocks racing Enter before clearing attachments or calling the API', async () => {
+    draftContentRef.current = 'x'.repeat(300_000);
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].sendDisabled).toBe(true);
+    // Invoke the exact parent submission edge with the overlong value, even if
+    // a stale disabled button/Enter handler managed to reach it.
+    const send = sendBoxPropsSpy.mock.calls.at(-1)?.[0].onSend;
+    await act(async () => {
+      await send(draftContentRef.current);
+    });
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(clearFilesMock).not.toHaveBeenCalled();
+    expect(Message.error).toHaveBeenCalledWith('conversation.promptTooLarge');
   });
 
   it('automatically prepares a conversation again after leaving and reopening its route without sending a turn', async () => {

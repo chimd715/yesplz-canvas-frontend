@@ -75,6 +75,18 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it('rejects an oversized managed prompt at every submission edge without creating a conversation or clearing input', async () => {
+    const deps = createDeps();
+    deps.selectedAssistantBackend = 'aionrs';
+    deps.current_model = { id: 'managed', use_model: 'z-ai/glm-5.3' } as NonNullable<GuidSendDeps['current_model']>;
+    deps.input = '한'.repeat(100_000);
+    const { result } = renderHook(() => useGuidSend(deps));
+    expect(result.current.isButtonDisabled).toBe(true);
+    act(() => result.current.sendMessageHandler());
+    await expect(result.current.handleSend()).rejects.toThrow('conversation.promptTooLarge');
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.setInput).not.toHaveBeenCalled();
+  });
   it.each(['aionrs', 'claude'])(
     'adds widget engineering instructions to a plain feature request through %s without changing its title',
     async (backend) => {

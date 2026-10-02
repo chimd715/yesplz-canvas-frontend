@@ -845,5 +845,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "Input exceeds this model’s safe budget ({{limit}} encoded bytes). Shorten the prompt or remove attachments."
 }

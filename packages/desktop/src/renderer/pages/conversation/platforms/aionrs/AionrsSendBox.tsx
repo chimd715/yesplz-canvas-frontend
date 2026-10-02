@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { getPromptBudget } from '@/common/utils/modelCapabilities';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
 import CommandQueuePanel from '@/renderer/components/chat/CommandQueuePanel';
@@ -145,21 +146,34 @@ const AionrsSendBox: React.FC<{
   const teamPermission = useTeamPermission();
   const propagateMode = teamPermission?.propagateMode;
 
-  const { thought, running, turnStartedAtMs, setActiveMsgId, setWaitingResponse, resetState } = useAionrsMessage(
-    conversation_id,
-    {
+  const { thought, running, turnStartedAtMs, tokenUsage, setActiveMsgId, setWaitingResponse, resetState } =
+    useAionrsMessage(conversation_id, {
       onConfigChanged: (capabilities) => {
         const modes = (capabilities as { modes?: string[] })?.modes;
         if (modes && modes.length > 0) {
           setDynamicModes(modeOptionsFromCapabilities(modes));
         }
       },
-    }
-  );
+    });
   const runtimeView = useConversationRuntimeView(conversation_id);
   const { markSendStarted, markSendAccepted, markSendFailed } = runtimeView;
 
   const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
+  const priorContextTokens = tokenUsage?.total_tokens ?? 0;
+  const promptBudget = getPromptBudget(content, current_model, uploadFile.length + atPath.length, priorContextTokens);
+  const promptBudgetOptionsRef = useLatestRef({ model: current_model, priorContextTokens });
+  const validatePrompt = useCallback(
+    (input: string, attachmentCount: number) => {
+      const options = promptBudgetOptionsRef.current;
+      const budget = getPromptBudget(input, options.model, attachmentCount, options.priorContextTokens);
+      if (!budget.allowed) {
+        Message.error(t('conversation.promptTooLarge', { limit: budget.maxBytes }));
+        return false;
+      }
+      return true;
+    },
+    [t]
+  );
 
   const handleContentChange = useCallback(
     (val: string) => {
@@ -244,6 +258,7 @@ const AionrsSendBox: React.FC<{
   const executeCommand = useCallback(
     async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
       if (!entryReadyRef.current) throw new Error('Conversation runtime is not ready');
+      if (!validatePrompt(input, files.length)) throw new Error('Prompt exceeds the selected model budget');
       if (teamPermission) await teamPermission.warmupSession();
       if (!current_model?.use_model) {
         Message.warning(t('conversation.chat.noModelSelected'));
@@ -313,6 +328,7 @@ const AionrsSendBox: React.FC<{
       t,
       teamPermission,
       teamSendMessage,
+      validatePrompt,
     ]
   );
 
@@ -382,6 +398,7 @@ const AionrsSendBox: React.FC<{
   // "add to queue" entry (handleAddToQueue below).
   const directSendInFlight = useRef(false);
   const onSendHandler = async (message: string): Promise<void | false> => {
+    if (!validatePrompt(message, uploadFile.length + atPath.length)) return false;
     if (!entryReadyRef.current) {
       Message.warning(t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`));
       return false;
@@ -413,6 +430,7 @@ const AionrsSendBox: React.FC<{
   const [interrupting, setInterrupting] = useState(false);
   const handleInterruptSend = async () => {
     if (!teamRuntime?.onInterruptSend || !content.trim() || interrupting) return;
+    if (!validatePrompt(content, uploadFile.length + atPath.length)) return;
     const files = collectChatFileRefs(uploadFile, atPath);
     const input = content;
     setContent('');
@@ -434,6 +452,7 @@ const AionrsSendBox: React.FC<{
   // the same way a send would.
   const canQueueCurrentDraft = content.trim().length > 0;
   const handleAddToQueue = useCallback(() => {
+    if (!validatePrompt(content, uploadFile.length + atPath.length)) return;
     const filesToSend = collectChatFileRefs(uploadFile, atPath);
     // `@@` references must ride along, and must be released from the send box
     // the same way the draft text is — otherwise they leak into whatever the
@@ -447,7 +466,7 @@ const AionrsSendBox: React.FC<{
     clearFiles();
     setSelectedSessions([]);
     emitter.emit('aionrs.selected.file.clear');
-  }, [atPath, clearFiles, content, enqueue, selectedSessions, setContent, uploadFile]);
+  }, [atPath, clearFiles, content, enqueue, selectedSessions, setContent, uploadFile, validatePrompt]);
 
   const handleEditQueuedCommand = useCallback(
     (item: ConversationCommandQueueItem) => {
@@ -754,6 +773,11 @@ const AionrsSendBox: React.FC<{
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
+      {!promptBudget.allowed && (
+        <div role='alert' className='mb-8px text-t-secondary'>
+          {t('conversation.promptTooLarge', { limit: promptBudget.maxBytes })}
+        </div>
+      )}
       {entryRuntime.phase !== 'ready' && (
         <div
           role={entryRuntime.phase === 'failed' ? 'alert' : 'status'}
@@ -785,16 +809,18 @@ const AionrsSendBox: React.FC<{
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={!current_model?.use_model}
-        sendDisabled={isBusy}
+        sendDisabled={isBusy || !promptBudget.allowed}
         sendDisabledTooltip={
-          !entryRuntime.isReady
-            ? t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`)
-            : isBusy
-              ? t('conversation.commandQueue.midturnBlockedSendHint', {
-                  defaultValue:
-                    'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
-                })
-              : undefined
+          !promptBudget.allowed
+            ? t('conversation.promptTooLarge', { limit: promptBudget.maxBytes })
+            : !entryRuntime.isReady
+              ? t(`conversation.entryRuntime.${entryRuntime.phase === 'failed' ? 'failed' : 'preparing'}`)
+              : isBusy
+                ? t('conversation.commandQueue.midturnBlockedSendHint', {
+                    defaultValue:
+                      'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
+                  })
+                : undefined
         }
         placeholder={
           current_model?.use_model
@@ -883,7 +909,7 @@ const AionrsSendBox: React.FC<{
         slash_commands={slash_commands}
         onSlashBuiltinCommand={onSlashBuiltinCommand}
         onAddToDraft={handleAddToQueue}
-        addToDraftDisabled={!canQueueCurrentDraft}
+        addToDraftDisabled={!canQueueCurrentDraft || !promptBudget.allowed}
         addToDraftTooltip={
           isBusy
             ? t('conversation.commandQueue.addToQueueBusyHint', {

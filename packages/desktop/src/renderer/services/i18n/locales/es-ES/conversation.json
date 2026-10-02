@@ -846,5 +846,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "La entrada supera el límite seguro del modelo ({{limit}} bytes codificados). Acorta el texto o elimina adjuntos."
 }

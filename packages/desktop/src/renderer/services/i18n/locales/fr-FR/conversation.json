@@ -845,5 +845,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "La saisie dépasse la limite sûre du modèle ({{limit}} octets encodés). Raccourcissez le texte ou retirez des pièces jointes."
 }

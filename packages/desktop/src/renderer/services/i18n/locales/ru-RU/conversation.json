@@ -861,5 +861,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "Ввод превышает безопасный лимит модели ({{limit}} байт). Сократите запрос или удалите вложения."
 }

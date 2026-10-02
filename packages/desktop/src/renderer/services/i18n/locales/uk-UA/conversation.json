@@ -861,5 +861,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "Ввід перевищує безпечний ліміт моделі ({{limit}} байтів). Скоротіть запит або видаліть вкладення."
 }

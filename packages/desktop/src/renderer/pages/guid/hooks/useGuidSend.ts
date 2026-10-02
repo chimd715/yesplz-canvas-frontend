@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { getPromptBudget } from '@/common/utils/modelCapabilities';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { toSessionMcpServer } from '@/renderer/hooks/mcp/catalog';
@@ -63,6 +64,7 @@ export type GuidSendResult = {
   handleSend: () => Promise<void>;
   sendMessageHandler: () => void;
   isButtonDisabled: boolean;
+  promptError?: string;
 };
 
 /**
@@ -108,6 +110,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     }
 
     const initialInput = shopWidgetSelected ? `${shopWidgetSkill.trim()}\n\n## User request\n\n${input}` : input;
+    if (selectedAssistantBackend === 'aionrs' && !getPromptBudget(initialInput, current_model, files.length).allowed) {
+      throw new Error(
+        t('conversation.promptTooLarge', { limit: getPromptBudget(initialInput, current_model, files.length).maxBytes })
+      );
+    }
 
     const isCustomWorkspace = !!dir;
     const finalWorkspace = dir || '';
@@ -313,6 +320,12 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
 
   const sendMessageHandler = useCallback(() => {
     if (loading || sendingRef.current) return;
+    if (selectedAssistantBackend === 'aionrs' && !getPromptBudget(input, current_model, files.length).allowed) {
+      Message.error(
+        t('conversation.promptTooLarge', { limit: getPromptBudget(input, current_model, files.length).maxBytes })
+      );
+      return;
+    }
     sendingRef.current = true;
     setLoading(true);
     handleSend()
@@ -345,14 +358,29 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     setFiles,
     setDir,
     t,
+    input,
+    current_model,
+    files.length,
+    selectedAssistantBackend,
   ]);
 
   // Ordinary chat can start empty; widget mode needs a feature description.
-  const isButtonDisabled = loading || !selectedAssistantId || (shopWidgetSelected && !input.trim());
+  const budget = getPromptBudget(
+    shopWidgetSelected ? `${shopWidgetSkill.trim()}\n\n## User request\n\n${input}` : input,
+    current_model,
+    files.length
+  );
+  const promptError =
+    selectedAssistantBackend === 'aionrs' && !budget.allowed
+      ? t('conversation.promptTooLarge', { limit: budget.maxBytes })
+      : undefined;
+  const isButtonDisabled =
+    loading || !selectedAssistantId || (shopWidgetSelected && !input.trim()) || Boolean(promptError);
 
   return {
     handleSend,
     sendMessageHandler,
     isButtonDisabled,
+    promptError,
   };
 };

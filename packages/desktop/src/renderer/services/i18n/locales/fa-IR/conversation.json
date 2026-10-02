@@ -845,5 +845,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "ورودی از حد امن مدل ({{limit}} بایت کدگذاری‌شده) بیشتر است. متن را کوتاه یا پیوست‌ها را حذف کنید."
 }

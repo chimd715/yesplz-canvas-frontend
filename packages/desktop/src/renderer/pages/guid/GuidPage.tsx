@@ -700,6 +700,7 @@ const GuidPage: React.FC = () => {
           <GuidInputCard
             focusRequestKey={navState?.focusPrefill && navState.prefillPrompt ? location.key : undefined}
             input={guidInput.input}
+            validationMessage={send.promptError}
             onInputChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
             onPaste={guidInput.onPaste}

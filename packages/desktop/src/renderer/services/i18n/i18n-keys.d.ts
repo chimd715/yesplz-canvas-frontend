@@ -809,6 +809,7 @@ export type I18nKey =
   | 'conversation.planBar.expand'
   | 'conversation.planBar.progress'
   | 'conversation.planBar.title'
+  | 'conversation.promptTooLarge'
   | 'conversation.publishing.copyLink'
   | 'conversation.publishing.failed'
   | 'conversation.publishing.inProgress'

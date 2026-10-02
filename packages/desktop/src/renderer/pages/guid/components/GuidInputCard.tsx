@@ -18,6 +18,7 @@ type GuidInputCardProps = {
   focusRequestKey?: string;
   // Input state
   input: string;
+  validationMessage?: React.ReactNode;
   onInputChange: (value: string) => void;
   onKeyDown: (event: React.KeyboardEvent) => void;
   onPaste: React.ClipboardEventHandler;
@@ -50,6 +51,7 @@ type GuidInputCardProps = {
 const GuidInputCard: React.FC<GuidInputCardProps> = ({
   focusRequestKey,
   input,
+  validationMessage,
   onInputChange,
   onKeyDown,
   onPaste,
@@ -147,6 +149,11 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
           </div>
         )}
         <UploadProgressBar source='sendbox' />
+        {validationMessage && (
+          <div role='alert' className='mt-8px text-t-secondary'>
+            {validationMessage}
+          </div>
+        )}
         {actionRow}
         {slashCommandMenu && <div className='absolute start-0 end-0 top-[calc(100%+4px)] z-70'>{slashCommandMenu}</div>}
       </div>

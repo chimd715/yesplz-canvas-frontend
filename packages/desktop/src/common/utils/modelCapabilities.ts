@@ -113,3 +113,36 @@ export const hasSpecificModelCapability = (
 
   return pattern.test(baseModelName) ? true : undefined;
 };
+
+export type PromptBudget = { allowed: boolean; usedBytes: number; maxBytes: number };
+
+/** Conservative service admission policy, not a provider tokenizer estimate. */
+export const getPromptBudget = (
+  input: string,
+  model?: Pick<IProvider, 'context_limit'> & { use_model?: string; model?: string },
+  attachmentCount = 0,
+  priorContextTokens = 0
+): PromptBudget => {
+  const contexts: Record<string, number> = {
+    'deepseek-v4.1-flash': 1_000_000,
+    'glm-5.3': 262_144,
+    'glm-5.3-flash': 262_124,
+  };
+  const name = (model?.use_model || model?.model || '').split('/').at(-1) ?? '';
+  const configured = model?.context_limit;
+  const configuredContext = Number.isSafeInteger(configured) && configured! > 0 ? configured : undefined;
+  const context = contexts[name] ?? configuredContext ?? 262_124;
+  const effectiveContext = configuredContext ? Math.min(context, configuredContext) : context;
+  // One encoded byte consumes one admission unit. Reserve reply capacity and
+  // unknown system/tool framing; actual assembled requests are checked by Core.
+  const maxBytes = Math.max(
+    0,
+    Math.min(effectiveContext, 1024 * 1024) -
+      Math.min(16_384, Math.floor(effectiveContext / 4)) -
+      Math.min(65_536, Math.floor(effectiveContext / 4)) -
+      Math.max(0, attachmentCount) * 4096 -
+      Math.max(0, priorContextTokens)
+  );
+  const usedBytes = new TextEncoder().encode(JSON.stringify(input)).byteLength;
+  return { allowed: usedBytes <= maxBytes, usedBytes, maxBytes };
+};

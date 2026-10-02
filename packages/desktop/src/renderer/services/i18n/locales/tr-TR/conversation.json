@@ -847,5 +847,6 @@
     "service": "Secret use",
     "generic": "Encrypted storage",
     "github": "GitHub account verification"
-  }
+  },
+  "promptTooLarge": "Girdi, modelin güvenli sınırını ({{limit}} kodlanmış bayt) aşıyor. İstemi kısaltın veya ekleri kaldırın."
 }
