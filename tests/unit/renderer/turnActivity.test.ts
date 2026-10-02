@@ -162,6 +162,28 @@ describe('retained turn activity', () => {
     expect(message.content as unknown[]).toHaveLength(2);
   });
 
+  it('excludes the pinned Core MCP collision-name format while preserving ordinary similarly named tools', () => {
+    const sensitive = ['AskUserQuestion', 'request_secret', 'get_secret_status', 'github_identity'].map((name, index) =>
+      frame('tool_call', {
+        call_id: `collision-${index}`,
+        name: `mcp__build-your-own-secrets_${name}`,
+        args: { private: 'do-not-render' },
+        status: 'completed',
+        output: 'do-not-render',
+      })
+    );
+    const ordinary = frame('tool_call', {
+      call_id: 'ordinary',
+      name: 'save_request_secret_file',
+      args: {},
+      status: 'completed',
+      output: 'Ordinary file saved',
+    });
+    const rows = summaries([...sensitive, ordinary]);
+    expect(rows[0].messages).toEqual([ordinary]);
+    expect(JSON.stringify(rows)).not.toContain('do-not-render');
+  });
+
   it('drops malformed activity instead of throwing or creating empty rows', () => {
     const malformed = [null, undefined, [], 'bad', { content: 42 }].map(
       (content) => ({ id: 'bad', type: 'thinking', conversation_id: 'conversation-1', content }) as TMessage

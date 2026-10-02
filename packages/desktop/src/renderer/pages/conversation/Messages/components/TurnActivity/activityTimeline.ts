@@ -13,7 +13,13 @@ const isSeparateInteraction = (name: unknown): boolean => {
     .split(/__|[.:/]/)
     .at(-1)
     ?.toLowerCase();
-  return ['askuserquestion', 'request_secret', 'get_secret_status', 'github_identity'].includes(leaf ?? '');
+  const operations = ['askuserquestion', 'request_secret', 'get_secret_status', 'github_identity'];
+  // Pinned aionrs namespaces colliding MCP names as mcp__{server}_{tool}.
+  return (
+    operations.includes(leaf ?? '') ||
+    (name.toLowerCase().startsWith('mcp__') &&
+      operations.some((operation) => name.toLowerCase().endsWith(`_${operation}`)))
+  );
 };
 
 export const sanitizeActivityMessage = (message: TMessage): ActivityMessage | undefined => {
