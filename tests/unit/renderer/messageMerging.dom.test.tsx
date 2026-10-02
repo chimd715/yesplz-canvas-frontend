@@ -1207,4 +1207,25 @@ describe('conversation history request scopes', () => {
     expect(result.current.pagination.hasMoreBefore).toBe(true);
     expect(result.current.loading).toBe(false);
   });
+
+  it('does not let a reader with a retired context rebind the authoritative cache conversation', async () => {
+    get.mockResolvedValueOnce(historyPage([]));
+    const { result, rerender } = renderHook(
+      ({ id, readerId }) => {
+        const history = useScopedHistoryHarness(id);
+        const readerScope = useHistoryRequestScope(readerId);
+        return { history, readerScope };
+      },
+      { initialProps: { id: CONVERSATION_ID, readerId: CONVERSATION_ID }, wrapper: CacheWrapper }
+    );
+    await flushHistory();
+    get.mockResolvedValueOnce(
+      historyPage([{ ...createTextMessage('new', 'New cache conversation'), conversation_id: 'conversation-2' }], 'new')
+    );
+    rerender({ id: 'conversation-2', readerId: CONVERSATION_ID });
+    await flushHistory();
+    expect(result.current.readerScope).toBe(result.current.history.scope);
+    expect(result.current.history.scope.current.conversationId).toBe('conversation-2');
+    expect(result.current.history.messages.map((message) => message.msg_id)).toEqual(['new']);
+  });
 });

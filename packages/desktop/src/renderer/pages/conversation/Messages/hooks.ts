@@ -1036,7 +1036,9 @@ export const useMessageLstCache = (key: string) => {
   const { user, status } = useAuth();
   const ownerId = status === 'authenticated' ? (user?.id ?? (window.electronAPI ? 'desktop' : null)) : null;
   const ownerRef = useRef(ownerId);
-  if (ownerRef.current !== ownerId) {
+  // The cache owns the scope binding. Other history consumers only read it;
+  // a retired context must not rebind the active cache to its previous id.
+  if (ownerRef.current !== ownerId || scopeRef.current.conversationId !== key) {
     ownerRef.current = ownerId;
     scopeRef.current.active = false;
     scopeRef.current = { conversationId: key, epoch: scopeRef.current.epoch + 1, active: false, window: 'latest' };

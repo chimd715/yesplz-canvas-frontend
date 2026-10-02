@@ -21,16 +21,13 @@ export type HistoryRequestScopeRef = MutableRefObject<HistoryRequestScope>;
 // unmount. All readers and live writers in that provider share this identity.
 const historyScopes = new WeakMap<ReturnType<typeof useUpdateMessagePaginationState>, HistoryRequestScopeRef>();
 
-/** Share request generations within one mounted conversation history provider. */
+/** Read shared generations; the cache alone binds the current conversation. */
 export const useHistoryRequestScope = (conversationId?: string): HistoryRequestScopeRef => {
   const setPagination = useUpdateMessagePaginationState();
   let ref = historyScopes.get(setPagination);
   if (!ref) {
     ref = { current: { conversationId: conversationId ?? '', epoch: 0, active: false, window: 'latest' } };
     historyScopes.set(setPagination, ref);
-  } else if (conversationId !== undefined && ref.current.conversationId !== conversationId) {
-    ref.current.active = false;
-    ref.current = { conversationId, epoch: ref.current.epoch + 1, active: false, window: 'latest' };
   }
   return ref;
 };
