@@ -1355,6 +1355,7 @@ export type MessageCursorPage<T> = {
 export type GetConversationMessagesParams = {
   conversation_id: string;
   limit?: number;
+  first?: boolean;
   before?: string;
   after?: string;
   anchor_message_id?: string;
@@ -1368,6 +1369,7 @@ export const database = {
   >((p) => {
     const params = new URLSearchParams();
     if (p.limit !== undefined) params.set('limit', String(p.limit));
+    if (p.first) params.set('first', 'true');
     if (p.before) params.set('before', p.before);
     if (p.after) params.set('after', p.after);
     if (p.anchor_message_id) params.set('anchor_message_id', p.anchor_message_id);

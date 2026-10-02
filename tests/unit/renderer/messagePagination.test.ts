@@ -9,6 +9,7 @@ import { ipcBridge } from '@/common';
 import {
   loadAllConversationMessagesPaged,
   loadConversationAnchorWindow,
+  loadFirstConversationMessages,
   loadLatestConversationMessages,
 } from '@/renderer/utils/chat/messagePagination';
 
@@ -27,6 +28,24 @@ const invoke = vi.mocked(ipcBridge.database.getConversationMessages.invoke);
 describe('message pagination helpers', () => {
   beforeEach(() => {
     invoke.mockReset();
+  });
+
+  it('loads the first bounded compact page in one request', async () => {
+    invoke.mockResolvedValue({
+      items: [],
+      oldest_cursor: null,
+      newest_cursor: null,
+      has_more_before: false,
+      has_more_after: true,
+    });
+    await loadFirstConversationMessages('conversation-1');
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith({
+      conversation_id: 'conversation-1',
+      first: true,
+      limit: 50,
+      content_mode: 'compact',
+    });
   });
 
   it('loads the latest compact page with cursor params', async () => {

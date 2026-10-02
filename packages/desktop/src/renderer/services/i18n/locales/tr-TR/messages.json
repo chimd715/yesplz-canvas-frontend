@@ -117,5 +117,7 @@
     "input": "Girdi",
     "output": "Çıktı",
     "loadFailed": "İşlemlerin tamamı yüklenemedi. Tekrar deneyin."
-  }
+  },
+  "scrollToTop": "Başa git",
+  "historyNavigationFailed": "Konuşma geçmişi yüklenemedi. Lütfen tekrar deneyin."
 }

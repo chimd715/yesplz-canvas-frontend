@@ -117,5 +117,7 @@
     "input": "输入",
     "output": "输出",
     "loadFailed": "无法加载完整活动，请重试。"
-  }
+  },
+  "scrollToTop": "跳转到对话开头",
+  "historyNavigationFailed": "无法加载对话记录，请重试。"
 }

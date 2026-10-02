@@ -5,7 +5,7 @@
  */
 
 import React, { type PropsWithChildren } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpToolCall, IMessageText, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import type { MessageFileChangesProps } from '@/renderer/pages/conversation/Messages/MessageFileChanges';
@@ -16,10 +16,51 @@ import {
   useUpdateMessageList,
 } from '@/renderer/pages/conversation/Messages/hooks';
 import MessageList from '@/renderer/pages/conversation/Messages/MessageList';
+import { dispatchChatMessageJump } from '@/renderer/utils/chat/chatMinimapEvents';
 
-const { parseDiffMock, useTeamPermissionMock } = vi.hoisted(() => ({
+const { parseDiffMock, useTeamPermissionMock, emptyArtifacts } = vi.hoisted(() => ({
   parseDiffMock: vi.fn(),
   useTeamPermissionMock: vi.fn(),
+  emptyArtifacts: [],
+}));
+
+const navigation = vi.hoisted(() => ({
+  direction: null as 'up' | 'down' | null,
+  atTop: false,
+  atBottom: false,
+  jumping: false,
+  jump: vi.fn(),
+  next: vi.fn(),
+  previous: vi.fn(),
+  anchor: vi.fn(),
+  top: vi.fn(),
+  bottom: vi.fn(),
+  scrollElementIntoView: vi.fn(),
+  hideScrollButton: vi.fn(),
+  location: { key: 'location-key', state: {} as { targetMessageId?: string } },
+  scope: {
+    current: {
+      conversationId: 'conversation-1',
+      epoch: 0,
+      active: true,
+      window: 'latest' as 'latest' | 'first' | 'anchor',
+    },
+  },
+}));
+vi.mock('@/renderer/pages/conversation/Messages/historyNavigation', () => ({
+  useHistoryNavigation: () => ({
+    jump: navigation.jump,
+    loadNextPage: navigation.next,
+    isJumping: navigation.jumping,
+    isLoadingAfter: false,
+    isBusy: () => navigation.jumping,
+    requestScope: navigation.scope,
+  }),
+}));
+vi.mock('@/renderer/pages/conversation/Messages/hooks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/renderer/pages/conversation/Messages/hooks')>()),
+  useLoadPreviousMessagePage: () => navigation.previous,
+  useLoadAnchorMessageWindow: () => navigation.anchor,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -29,10 +70,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('react-router-dom', () => ({
-  useLocation: () => ({
-    key: 'location-key',
-    state: {},
-  }),
+  useLocation: () => navigation.location,
 }));
 
 vi.mock('@arco-design/web-react', () => ({
@@ -41,6 +79,7 @@ vi.mock('@arco-design/web-react', () => ({
     long: _long,
     type: _type,
     size: _size,
+    loading: _loading,
     ...props
   }: React.PropsWithChildren<Record<string, unknown>>) => (
     <button type='button' {...props}>
@@ -48,6 +87,7 @@ vi.mock('@arco-design/web-react', () => ({
     </button>
   ),
   Spin: () => <span role='progressbar' />,
+  Message: { error: vi.fn() },
   Image: {
     PreviewGroup: ({ children }: PropsWithChildren) => <>{children}</>,
   },
@@ -67,7 +107,7 @@ vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () =
 }));
 
 vi.mock('@/renderer/pages/conversation/Messages/artifacts', () => ({
-  useConversationArtifacts: () => [],
+  useConversationArtifacts: () => emptyArtifacts,
 }));
 
 vi.mock('@/renderer/pages/conversation/Messages/useAutoScroll', () => ({
@@ -78,9 +118,13 @@ vi.mock('@/renderer/pages/conversation/Messages/useAutoScroll', () => ({
     handleWheel: () => {},
     handlePointerDown: () => {},
     showScrollButton: false,
-    scrollToBottom: () => {},
-    scrollElementIntoView: () => {},
-    hideScrollButton: () => {},
+    scrollDirection: navigation.direction,
+    atTop: navigation.atTop,
+    atBottom: navigation.atBottom,
+    scrollToTop: navigation.top,
+    scrollToBottom: navigation.bottom,
+    scrollElementIntoView: navigation.scrollElementIntoView,
+    hideScrollButton: navigation.hideScrollButton,
   }),
 }));
 
@@ -173,6 +217,7 @@ vi.mock('@icon-park/react', () => ({
   Right: () => <span>right</span>,
   CheckOne: () => <span>done</span>,
   CloseOne: () => <span>failed</span>,
+  Up: () => <span>up</span>,
 }));
 
 function createTextMessage(): IMessageText {
@@ -248,12 +293,18 @@ function Wrapper({
   children,
   messages = [createTextMessage()],
   loading = false,
+  hasMoreBefore = false,
   hasMoreAfter = false,
-}: PropsWithChildren<{ messages?: TMessage[]; loading?: boolean; hasMoreAfter?: boolean }>): JSX.Element {
+}: PropsWithChildren<{
+  messages?: TMessage[];
+  loading?: boolean;
+  hasMoreBefore?: boolean;
+  hasMoreAfter?: boolean;
+}>): JSX.Element {
   return (
     <MessageListLoadingProvider value={loading}>
       <MessagePaginationProvider
-        value={{ hasMoreBefore: false, hasMoreAfter, isLoadingBefore: false, isLoadingAnchor: false }}
+        value={{ hasMoreBefore, hasMoreAfter, isLoadingBefore: false, isLoadingAnchor: false }}
       >
         <MessageListProvider value={messages}>{children}</MessageListProvider>
       </MessagePaginationProvider>
@@ -264,6 +315,21 @@ function Wrapper({
 function ReplaceMessagesButton({ messages }: { messages: TMessage[] }): JSX.Element {
   const updateMessages = useUpdateMessageList();
   return <button onClick={() => updateMessages(messages)}>replace messages</button>;
+}
+
+function AnchorMessagesLoader({ messages, request }: { messages: TMessage[]; request: Promise<boolean> }): null {
+  const updateMessages = useUpdateMessageList();
+  React.useEffect(() => {
+    navigation.anchor.mockImplementation(() => {
+      ++navigation.scope.current.epoch;
+      navigation.scope.current.window = 'anchor';
+      return request.then((loaded) => {
+        if (loaded) updateMessages(messages);
+        return loaded;
+      });
+    });
+  }, [messages, request, updateMessages]);
+  return null;
 }
 
 describe('MessageList', () => {
@@ -861,4 +927,261 @@ describe('MessageList', () => {
     expect(screen.queryByTestId('file-changes')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tool-group')).not.toBeInTheDocument();
   });
+});
+
+describe('directional history controls', () => {
+  const frames: FrameRequestCallback[] = [];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigation.direction = null;
+    navigation.atTop = false;
+    navigation.atBottom = false;
+    navigation.jumping = false;
+    navigation.scope.current.epoch = 0;
+    navigation.scope.current.active = true;
+    navigation.scope.current.window = 'latest';
+    navigation.location = { key: 'location-key', state: {} };
+    navigation.anchor.mockReset().mockResolvedValue(false);
+    navigation.jump.mockImplementation(async (endpoint: 'first' | 'latest') => {
+      ++navigation.scope.current.epoch;
+      navigation.scope.current.window = endpoint;
+      return true;
+    });
+    navigation.previous.mockImplementation(async () => {
+      ++navigation.scope.current.epoch;
+      return true;
+    });
+    navigation.next.mockResolvedValue(true);
+    frames.length = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    navigation.direction = null;
+    navigation.location = { key: 'location-key', state: {} };
+  });
+  const flushFrames = () =>
+    act(() => {
+      while (frames.length) frames.shift()!(0);
+    });
+  const mountNavigation = (before = false, after = false) =>
+    render(
+      <Wrapper hasMoreBefore={before} hasMoreAfter={after}>
+        <MessageList />
+      </Wrapper>
+    );
+  const metrics = (top: number, height = 1000, client = 400) => {
+    const scroller = screen.getByTestId('message-list-scroller');
+    Object.defineProperties(scroller, {
+      scrollTop: { value: top, writable: true, configurable: true },
+      scrollHeight: { value: height, configurable: true },
+      clientHeight: { value: client, configurable: true },
+    });
+    return scroller;
+  };
+
+  it('offers the up or down endpoint for current direction and hides each at its true boundary', () => {
+    navigation.direction = 'up';
+    navigation.atTop = true;
+    const view = mountNavigation();
+    expect(screen.queryByTestId('history-jump-first')).toBeNull();
+    navigation.atTop = false;
+    view.rerender(
+      <Wrapper>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getByRole('button', { name: 'messages.scrollToTop' })).toBeInTheDocument();
+    navigation.direction = 'down';
+    view.rerender(
+      <Wrapper>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.getByRole('button', { name: 'messages.scrollToBottom' })).toBeInTheDocument();
+    navigation.atBottom = true;
+    view.rerender(
+      <Wrapper>
+        <MessageList />
+      </Wrapper>
+    );
+    expect(screen.queryByTestId('history-jump-latest')).toBeNull();
+  });
+
+  it('jumps after its single endpoint request and discards a deferred scroll if a newer request owns the window', async () => {
+    navigation.direction = 'up';
+    mountNavigation(true);
+    await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+    expect(navigation.jump).toHaveBeenCalledWith('first');
+    ++navigation.scope.current.epoch;
+    flushFrames();
+    expect(navigation.top).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+    flushFrames();
+    expect(navigation.top).toHaveBeenCalledOnce();
+  });
+
+  it('uses this scrollbar movement instead of the previous rendered direction', () => {
+    navigation.direction = 'up';
+    mountNavigation(false, true);
+    const scroller = metrics(590);
+    fireEvent.scroll(scroller);
+    expect(navigation.next).toHaveBeenCalledOnce();
+    expect(navigation.previous).not.toHaveBeenCalled();
+  });
+
+  it('advances a short first page from wheel intent even if no scroll event can fire', () => {
+    navigation.direction = 'up';
+    mountNavigation(false, true);
+    const scroller = metrics(0, 300, 400);
+    fireEvent.wheel(scroller, { deltaY: 20 });
+    expect(navigation.next).toHaveBeenCalledOnce();
+  });
+
+  it('does not apply an obsolete predecessor-page height correction after an endpoint jump', async () => {
+    navigation.direction = 'up';
+    mountNavigation(true);
+    const scroller = metrics(300);
+    fireEvent.scroll(scroller);
+    const content = screen.getByTestId('message-list-content');
+    Object.defineProperty(content, 'scrollHeight', { value: 1000, writable: true, configurable: true });
+    scroller.scrollTop = 30;
+    await act(async () => fireEvent.scroll(scroller));
+    Object.defineProperty(content, 'scrollHeight', { value: 2000, writable: true, configurable: true });
+    expect(navigation.previous).toHaveBeenCalledOnce();
+    await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+    flushFrames();
+    expect(scroller.scrollTop).toBe(30);
+    expect(navigation.top).toHaveBeenCalledOnce();
+  });
+
+  it('does not scroll to a loaded message when an endpoint supersedes its queued jump event', async () => {
+    navigation.direction = 'up';
+    mountNavigation(true);
+    act(() => dispatchChatMessageJump({ conversation_id: 'conversation-1', messageId: 'message-1' }));
+    expect(frames).toHaveLength(1);
+    await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+    flushFrames();
+    expect(navigation.scrollElementIntoView).not.toHaveBeenCalled();
+    expect(navigation.top).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a loaded message jump after the router location changes within the same conversation', () => {
+    const view = mountNavigation();
+    navigation.location = { key: 'reopened-conversation', state: {} };
+    view.rerender(
+      <Wrapper>
+        <MessageList />
+      </Wrapper>
+    );
+    act(() => dispatchChatMessageJump({ conversation_id: 'conversation-1', messageId: 'message-1' }));
+    flushFrames();
+    expect(navigation.scrollElementIntoView).toHaveBeenCalledExactlyOnceWith(
+      document.getElementById('message-message-1'),
+      { block: 'start', behavior: 'smooth' }
+    );
+  });
+
+  it('scrolls to a fetched anchor after replacing the visible message window', async () => {
+    const anchor = { ...createTextMessage(), id: 'missing-anchor', content: { content: 'Fetched anchor' } };
+    let resolveAnchor!: (loaded: boolean) => void;
+    const request = new Promise<boolean>((resolve) => (resolveAnchor = resolve));
+    render(
+      <Wrapper>
+        <MessageList />
+        <AnchorMessagesLoader messages={[anchor]} request={request} />
+      </Wrapper>
+    );
+    act(() =>
+      dispatchChatMessageJump({
+        conversation_id: 'conversation-1',
+        messageId: anchor.id,
+        align: 'end',
+        behavior: 'auto',
+      })
+    );
+    await act(async () => resolveAnchor(true));
+    expect(screen.getByText('Fetched anchor')).toBeInTheDocument();
+    expect(navigation.anchor).toHaveBeenCalledExactlyOnceWith(anchor.id);
+    flushFrames();
+    expect(navigation.scrollElementIntoView).toHaveBeenCalledExactlyOnceWith(
+      document.getElementById(`message-${anchor.id}`),
+      { block: 'end', behavior: 'auto' }
+    );
+  });
+
+  it('does not scroll to a fetched anchor when an endpoint supersedes its deferred frames', async () => {
+    navigation.direction = 'up';
+    const anchor = { ...createTextMessage(), id: 'missing-anchor' };
+    let resolveAnchor!: (loaded: boolean) => void;
+    const request = new Promise<boolean>((resolve) => (resolveAnchor = resolve));
+    render(
+      <Wrapper hasMoreBefore>
+        <MessageList />
+        <AnchorMessagesLoader messages={[anchor]} request={request} />
+      </Wrapper>
+    );
+    act(() => dispatchChatMessageJump({ conversation_id: 'conversation-1', messageId: anchor.id }));
+    await act(async () => resolveAnchor(true));
+    expect(frames).toHaveLength(1);
+    await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+    flushFrames();
+    expect(navigation.scrollElementIntoView).not.toHaveBeenCalled();
+    expect(navigation.top).toHaveBeenCalledOnce();
+  });
+
+  it('does not scroll to a fetched anchor after its router location has changed', async () => {
+    const anchor = { ...createTextMessage(), id: 'missing-anchor' };
+    let resolveAnchor!: (loaded: boolean) => void;
+    const request = new Promise<boolean>((resolve) => (resolveAnchor = resolve));
+    const view = render(
+      <Wrapper>
+        <MessageList />
+        <AnchorMessagesLoader messages={[anchor]} request={request} />
+      </Wrapper>
+    );
+    act(() => dispatchChatMessageJump({ conversation_id: 'conversation-1', messageId: anchor.id }));
+    await act(async () => resolveAnchor(true));
+    navigation.location = { key: 'reopened-conversation', state: {} };
+    view.rerender(
+      <Wrapper>
+        <MessageList />
+      </Wrapper>
+    );
+    flushFrames();
+    expect(navigation.scrollElementIntoView).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'keeps a location target scroll through a live update unless an endpoint supersedes it (%s)',
+    async (superseded) => {
+      navigation.direction = 'up';
+      navigation.location = { key: 'search-result', state: { targetMessageId: 'message-1' } };
+      const liveUpdate = { ...createTextMessage(), content: { content: 'Updated live reply' } };
+      render(
+        <Wrapper hasMoreBefore>
+          <MessageList />
+          <ReplaceMessagesButton messages={[liveUpdate]} />
+        </Wrapper>
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'replace messages' }));
+      expect(screen.getByText('Updated live reply')).toBeInTheDocument();
+      if (superseded) {
+        await act(async () => fireEvent.click(screen.getByTestId('history-jump-first')));
+      }
+      flushFrames();
+      if (superseded) {
+        expect(navigation.scrollElementIntoView).not.toHaveBeenCalled();
+        expect(navigation.top).toHaveBeenCalledOnce();
+      } else {
+        expect(navigation.scrollElementIntoView).toHaveBeenCalledExactlyOnceWith(
+          document.getElementById('message-message-1'),
+          { behavior: 'smooth', block: 'center' }
+        );
+      }
+    }
+  );
 });

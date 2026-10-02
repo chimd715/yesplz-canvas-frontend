@@ -412,11 +412,65 @@ export function composeMessageWithIndex(
   return newList;
 }
 
+/** Capture navigation-era frames without admitting a disconnected live tail. */
+function captureNavigationMessage(scope: HistoryRequestScope, message: TMessage) {
+  const buffer = scope.navigationLiveBuffer;
+  if (
+    !buffer ||
+    !scope.active ||
+    buffer.epoch !== scope.epoch ||
+    message.conversation_id !== scope.conversationId ||
+    logDroppedToolCallWithoutCallId(message)
+  )
+    return undefined;
+  buffer.messages = composeMessageWithIndex(message, buffer.messages, buildMessageIndex(buffer.messages));
+  return buffer;
+}
+
+type PendingLiveMessage = {
+  message: TMessage;
+  add: boolean;
+  scope: HistoryRequestScope;
+  navigationBuffer?: HistoryRequestScope['navigationLiveBuffer'];
+};
+const navigationQueues = new WeakMap<HistoryRequestScope, Set<{ current: PendingLiveMessage[] }>>();
+
+/** Include deltas received before the request whose renderer flush is delayed. */
+export function prepareNavigationLiveBuffer(scope: HistoryRequestScope, messages: TMessage[], epoch: number) {
+  const buffer = { epoch, messages: messages.slice() };
+  for (const queue of navigationQueues.get(scope) ?? []) {
+    for (const item of queue.current) {
+      if (
+        item.scope !== scope ||
+        item.navigationBuffer?.applied ||
+        !scope.active ||
+        item.message.conversation_id !== scope.conversationId ||
+        logDroppedToolCallWithoutCallId(item.message)
+      )
+        continue;
+      buffer.messages = composeMessageWithIndex(item.message, buffer.messages, buildMessageIndex(buffer.messages));
+      item.navigationBuffer = buffer;
+    }
+  }
+  return buffer;
+}
+
 export const useMergeLiveMessage = () => {
   const update = useUpdateMessageList();
   const scopeRef = useHistoryRequestScope();
   const ownerScope = scopeRef.current;
-  const pendingRef = useRef<Array<{ message: TMessage; add: boolean; scope: HistoryRequestScope }>>([]);
+  const pendingRef = useRef<PendingLiveMessage[]>([]);
+  useEffect(() => {
+    let queues = navigationQueues.get(ownerScope);
+    if (!queues) {
+      queues = new Set();
+      navigationQueues.set(ownerScope, queues);
+    }
+    queues.add(pendingRef);
+    return () => {
+      queues.delete(pendingRef);
+    };
+  }, [ownerScope]);
   const rafRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(() => {
@@ -432,6 +486,7 @@ export const useMergeLiveMessage = () => {
       let newList = list;
 
       for (const item of pending) {
+        if (item.navigationBuffer?.applied) continue;
         if (!item.message) {
           continue;
         }
@@ -506,7 +561,13 @@ export const useMergeLiveMessage = () => {
       if (!message || ownerScope !== scopeRef.current) {
         return;
       }
-      pendingRef.current.push({ message, add, scope: ownerScope });
+      const buffer = captureNavigationMessage(ownerScope, message);
+      pendingRef.current.push({
+        message,
+        add,
+        scope: ownerScope,
+        navigationBuffer: buffer?.epoch === ownerScope.epoch ? buffer : undefined,
+      });
       if (rafRef.current === null) {
         rafRef.current = setTimeout(flush);
       }
@@ -1146,27 +1207,23 @@ export const useMessageLstCache = (key: string) => {
         return;
       }
 
+      const userMessage: TMessage = {
+        id: payload.msg_id,
+        msg_id: payload.msg_id,
+        conversation_id: payload.conversation_id,
+        type: 'text',
+        position: payload.position,
+        status: payload.status,
+        hidden: payload.hidden,
+        created_at: payload.created_at,
+        content: { content: payload.content },
+      };
+      captureNavigationMessage(scope, userMessage);
       update((list) => {
         if (!isHistoryRequestCurrent(scopeRef, scope)) return list;
         if (scope.window !== 'latest' && !list.some((message) => message.msg_id === payload.msg_id)) return list;
         const index = getOrBuildIndex(list);
-        return composeMessageWithIndex(
-          {
-            id: payload.msg_id,
-            msg_id: payload.msg_id,
-            conversation_id: payload.conversation_id,
-            type: 'text',
-            position: payload.position,
-            status: payload.status,
-            hidden: payload.hidden,
-            created_at: payload.created_at,
-            content: {
-              content: payload.content,
-            },
-          },
-          list,
-          index
-        );
+        return composeMessageWithIndex(userMessage, list, index);
       });
     });
   }, [key, scope, scopeRef, update]);
@@ -1185,7 +1242,12 @@ export const useMessageLstCache = (key: string) => {
       if (payload.conversation_id !== key || !isHistoryRequestCurrent(scopeRef, scope)) {
         return;
       }
-
+      const buffer = scope.navigationLiveBuffer;
+      if (buffer?.epoch === scope.epoch) {
+        buffer.messages = buffer.messages.map((message) =>
+          message.msg_id === payload.msg_id ? Object.assign({}, message, { status: payload.status }) : message
+        );
+      }
       update((list) =>
         isHistoryRequestCurrent(scopeRef, scope)
           ? list.map((message) =>
@@ -1244,6 +1306,7 @@ export {
   useMessagePaginationState,
   useMessageList,
   useMessageListLoading,
+  useUpdateMessageListLoading,
   useUpdateMessagePaginationState,
   useUpdateMessageList,
 };

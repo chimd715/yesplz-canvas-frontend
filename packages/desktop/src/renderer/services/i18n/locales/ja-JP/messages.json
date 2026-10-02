@@ -117,5 +117,7 @@
     "input": "入力",
     "output": "出力",
     "loadFailed": "処理の詳細を読み込めませんでした。再試行してください。"
-  }
+  },
+  "scrollToTop": "会話の最初へ移動",
+  "historyNavigationFailed": "会話履歴を読み込めませんでした。もう一度お試しください。"
 }

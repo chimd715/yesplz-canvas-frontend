@@ -117,5 +117,7 @@
     "input": "Entrée",
     "output": "Sortie",
     "loadFailed": "Impossible de charger toutes les actions. Réessayez."
-  }
+  },
+  "scrollToTop": "Aller au début",
+  "historyNavigationFailed": "Impossible de charger l’historique de la conversation. Veuillez réessayer."
 }

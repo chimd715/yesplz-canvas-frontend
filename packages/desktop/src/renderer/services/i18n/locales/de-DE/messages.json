@@ -117,5 +117,7 @@
     "input": "Eingabe",
     "output": "Ausgabe",
     "loadFailed": "Die vollständige Aktivität konnte nicht geladen werden. Erneut versuchen."
-  }
+  },
+  "scrollToTop": "Zum Anfang springen",
+  "historyNavigationFailed": "Der Gesprächsverlauf konnte nicht geladen werden. Bitte erneut versuchen."
 }

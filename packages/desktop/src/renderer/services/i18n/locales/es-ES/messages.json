@@ -117,5 +117,7 @@
     "input": "Entrada",
     "output": "Salida",
     "loadFailed": "No se pudo cargar toda la actividad. Inténtalo de nuevo."
-  }
+  },
+  "scrollToTop": "Ir al principio",
+  "historyNavigationFailed": "No se pudo cargar el historial de la conversación. Inténtalo de nuevo."
 }

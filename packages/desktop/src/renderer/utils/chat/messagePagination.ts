@@ -12,6 +12,7 @@ export type MessageContentMode = 'compact' | 'full';
 
 export type LoadConversationMessagePageOptions = {
   limit?: number;
+  first?: boolean;
   before?: string;
   after?: string;
   anchorMessageId?: string;
@@ -28,6 +29,7 @@ export async function loadConversationMessagePage(
   return ipcBridge.database.getConversationMessages.invoke({
     conversation_id: conversationId,
     limit: options.limit ?? DEFAULT_MESSAGE_PAGE_LIMIT,
+    ...(options.first ? { first: true } : {}),
     ...(options.before ? { before: options.before } : {}),
     ...(options.after ? { after: options.after } : {}),
     ...(options.anchorMessageId ? { anchor_message_id: options.anchorMessageId } : {}),
@@ -40,6 +42,13 @@ export function loadLatestConversationMessages(
   options: Pick<LoadConversationMessagePageOptions, 'limit' | 'contentMode'> = {}
 ): Promise<MessageCursorPage<TMessage>> {
   return loadConversationMessagePage(conversationId, options);
+}
+
+export function loadFirstConversationMessages(
+  conversationId: string,
+  options: Pick<LoadConversationMessagePageOptions, 'limit' | 'contentMode'> = {}
+): Promise<MessageCursorPage<TMessage>> {
+  return loadConversationMessagePage(conversationId, { ...options, first: true });
 }
 
 export function loadConversationAnchorWindow(

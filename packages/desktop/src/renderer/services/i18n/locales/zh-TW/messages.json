@@ -117,5 +117,7 @@
     "input": "輸入",
     "output": "輸出",
     "loadFailed": "無法載入完整活動，請重試。"
-  }
+  },
+  "scrollToTop": "跳轉至對話開頭",
+  "historyNavigationFailed": "無法載入對話記錄，請重試。"
 }

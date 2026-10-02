@@ -386,4 +386,40 @@ describe('useAutoScroll', () => {
       inline: 'nearest',
     });
   });
+
+  it('tracks intentional upward and downward gestures without programmatic direction changes', () => {
+    const scroller = createScroller({ scrollTop: 600 });
+    const { result } = renderHook(() => useAutoScroll({ messages: [createLeftMessage('history')], itemCount: 1 }));
+    attachElements(result, scroller, createContent());
+    act(() => vi.runAllTimers());
+    act(() => result.current.handleWheel({ deltaY: -30, deltaX: 0 } as React.WheelEvent<HTMLDivElement>));
+    fireScroll(result.current.handleScroll, scroller, 500);
+    expect(result.current.scrollDirection).toBe('up');
+    expect(result.current.atBottom).toBe(false);
+    act(() => result.current.handleWheel({ deltaY: 30, deltaX: 0 } as React.WheelEvent<HTMLDivElement>));
+    fireScroll(result.current.handleScroll, scroller, 540);
+    expect(result.current.scrollDirection).toBe('down');
+    act(() => result.current.scrollToTop());
+    expect(scroller.scrollTop).toBe(0);
+    expect(result.current.atTop).toBe(true);
+    expect(result.current.scrollDirection).toBeNull();
+  });
+
+  it('keeps an earlier history window in place during incoming messages and resize', () => {
+    const scroller = createScroller({ scrollTop: 0 });
+    const { result, rerender } = renderHook(
+      ({ messages }) => useAutoScroll({ messages, itemCount: messages.length, followLatest: false }),
+      { initialProps: { messages: [createLeftMessage('first')] } }
+    );
+    attachElements(result, scroller, createContent());
+    act(() => result.current.scrollToTop());
+    vi.mocked(scroller.scrollTo).mockClear();
+    rerender({ messages: [createLeftMessage('first'), createRightMessage('later user')] });
+    act(() => {
+      resizeObserverCallback?.([], {} as ResizeObserver);
+      vi.runAllTimers();
+    });
+    expect(scroller.scrollTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(0);
+  });
 });

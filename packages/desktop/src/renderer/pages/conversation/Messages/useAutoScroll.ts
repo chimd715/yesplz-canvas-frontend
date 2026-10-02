@@ -23,6 +23,7 @@ const FOLLOW_BOTTOM_THRESHOLD_PX = 4;
 interface UseAutoScrollOptions {
   messages: TMessage[];
   itemCount: number;
+  followLatest?: boolean;
 }
 
 interface ScrollElementIntoViewOptions {
@@ -37,6 +38,10 @@ interface UseAutoScrollReturn {
   handleWheel: (e: React.WheelEvent<HTMLDivElement>) => void;
   handlePointerDown: () => void;
   showScrollButton: boolean;
+  scrollDirection: 'up' | 'down' | null;
+  atTop: boolean;
+  atBottom: boolean;
+  scrollToTop: (behavior?: ScrollBehavior) => void;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   scrollElementIntoView: (element: HTMLElement | null, options?: ScrollElementIntoViewOptions) => void;
   hideScrollButton: () => void;
@@ -46,10 +51,15 @@ const getBottomGap = (element: HTMLElement): number => {
   return element.scrollHeight - element.clientHeight - element.scrollTop;
 };
 
-export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): UseAutoScrollReturn {
+export function useAutoScroll({ messages, itemCount, followLatest = true }: UseAutoScrollOptions): UseAutoScrollReturn {
   const [scrollerEl, setScrollerEl] = useState<HTMLDivElement | null>(null);
   const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [scrollDirection, setScrollDirection] = useState<'up' | 'down' | null>(null);
+  const [atTop, setAtTop] = useState(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const followLatestRef = useRef(followLatest);
+  followLatestRef.current = followLatest;
 
   const userScrolledRef = useRef(false);
   const lastScrollTopRef = useRef(0);
@@ -68,6 +78,8 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
     const bottomGap = getBottomGap(element);
     const withinButtonThreshold = bottomGap <= AT_BOTTOM_THRESHOLD_PX;
     const pinnedToBottom = bottomGap <= FOLLOW_BOTTOM_THRESHOLD_PX;
+    setAtTop(element.scrollTop <= FOLLOW_BOTTOM_THRESHOLD_PX);
+    setAtBottom(pinnedToBottom);
     setShowScrollButton(!withinButtonThreshold);
 
     if (pinnedToBottom) {
@@ -90,12 +102,28 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
       });
       userScrolledRef.current = false;
       setShowScrollButton(false);
+      setScrollDirection(null);
+      lastScrollTopRef.current = scrollerEl.scrollTop;
     },
     [itemCount, markProgrammaticScroll, scrollerEl]
   );
 
+  const scrollToTop = useCallback(
+    (behavior: ScrollBehavior = 'auto') => {
+      if (!scrollerEl) return;
+      markProgrammaticScroll();
+      userScrolledRef.current = true;
+      scrollerEl.scrollTo({ top: 0, behavior });
+      lastScrollTopRef.current = scrollerEl.scrollTop;
+      setScrollDirection(null);
+      setAtTop(true);
+      setShowScrollButton(false);
+    },
+    [markProgrammaticScroll, scrollerEl]
+  );
+
   const scheduleAutoFollow = useCallback(() => {
-    if (!scrollerEl || userScrolledRef.current) return;
+    if (!scrollerEl || userScrolledRef.current || !followLatestRef.current) return;
 
     if (pendingAutoFollowFrameRef.current !== null) {
       cancelAnimationFrame(pendingAutoFollowFrameRef.current);
@@ -103,7 +131,7 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
 
     pendingAutoFollowFrameRef.current = requestAnimationFrame(() => {
       pendingAutoFollowFrameRef.current = null;
-      if (!scrollerEl || userScrolledRef.current) return;
+      if (!scrollerEl || userScrolledRef.current || !followLatestRef.current) return;
 
       const gap = getBottomGap(scrollerEl);
       if (gap > 2) {
@@ -145,6 +173,10 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
       const bottomGap = getBottomGap(target);
       const pinnedToBottom = bottomGap <= FOLLOW_BOTTOM_THRESHOLD_PX;
 
+      if (Math.abs(delta) > 2 && (userInputActiveRef.current || timeSinceGuard >= PROGRAMMATIC_SCROLL_GUARD_MS)) {
+        setScrollDirection(delta < 0 ? 'up' : 'down');
+      }
+
       if (
         !pinnedToBottom &&
         Math.abs(delta) > 2 &&
@@ -168,6 +200,7 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     if (Math.abs(e.deltaY) > 0 || Math.abs(e.deltaX) > 0) {
       userInputActiveRef.current = true;
+      if (Math.abs(e.deltaY) > 2) setScrollDirection(e.deltaY < 0 ? 'up' : 'down');
     }
   }, []);
 
@@ -190,7 +223,7 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
   }, [contentEl, scheduleAutoFollow, scrollerEl, updateBottomState]);
 
   useEffect(() => {
-    if (!scrollerEl || initialScrollDoneRef.current || itemCount === 0) return;
+    if (!scrollerEl || initialScrollDoneRef.current || itemCount === 0 || !followLatestRef.current) return;
 
     initialScrollDoneRef.current = true;
     requestAnimationFrame(() => {
@@ -210,6 +243,8 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
     previousListLengthRef.current = currentListLength;
     previousLastMessageRef.current = lastMessage;
 
+    if (!followLatestRef.current) return;
+
     if (!isNewMessage) {
       if (isLastMessageUpdated) {
         scheduleAutoFollow();
@@ -225,6 +260,7 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
     userScrolledRef.current = false;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        if (!followLatestRef.current) return;
         scrollToBottom('auto');
       });
     });
@@ -241,6 +277,7 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
   const hideScrollButton = useCallback(() => {
     userScrolledRef.current = false;
     setShowScrollButton(false);
+    setScrollDirection(null);
   }, []);
 
   return {
@@ -250,6 +287,10 @@ export function useAutoScroll({ messages, itemCount }: UseAutoScrollOptions): Us
     handleWheel,
     handlePointerDown,
     showScrollButton,
+    scrollDirection,
+    atTop,
+    atBottom,
+    scrollToTop,
     scrollToBottom,
     scrollElementIntoView,
     hideScrollButton,

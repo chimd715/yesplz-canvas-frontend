@@ -117,5 +117,7 @@
     "input": "Input",
     "output": "Output",
     "loadFailed": "Unable to load full activity. Try again."
-  }
+  },
+  "scrollToTop": "Scroll to beginning",
+  "historyNavigationFailed": "Unable to load conversation history. Please try again."
 }

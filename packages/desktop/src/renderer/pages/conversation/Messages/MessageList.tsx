@@ -13,8 +13,8 @@ import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/ch
 import { iconColors } from '@/renderer/styles/colors';
 import { CHAT_MESSAGE_JUMP_EVENT, type ChatMessageJumpDetail } from '@/renderer/utils/chat/chatMinimapEvents';
 import { collectAiCopyRows, type TurnCopyItem } from '@/renderer/utils/chat/turnCopy';
-import { Image } from '@arco-design/web-react';
-import { Down } from '@icon-park/react';
+import { Button, Image } from '@arco-design/web-react';
+import { Down, Up } from '@icon-park/react';
 import MessageAcpPermission from '@renderer/pages/conversation/Messages/acp/MessageAcpPermission';
 import MessagePermission from './components/MessagePermission';
 import MessageAcpTerminalOutput from '@renderer/pages/conversation/Messages/acp/MessageAcpTerminalOutput';
@@ -54,6 +54,7 @@ import {
 } from './components/TurnActivity';
 import type { WriteFileResult } from './types';
 import { useAutoScroll } from './useAutoScroll';
+import { useHistoryNavigation } from './historyNavigation';
 import SelectionReplyButton from './components/SelectionReplyButton';
 
 type IMessageVO =
@@ -346,6 +347,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   const conversationContext = useConversationContextSafe();
   const teamPermission = useTeamPermission();
   const compactActivity = conversationContext?.type === 'aionrs' && !window.electronAPI && !teamPermission?.isTeamMode;
+  const historyNavigation = useHistoryNavigation(conversationContext?.conversation_id);
   const rowWidthClass = getChatSurfaceWidthClass();
   const loadPreviousMessagePage = useLoadPreviousMessagePage(conversationContext?.conversation_id);
   const loadAnchorMessageWindow = useLoadAnchorMessageWindow(conversationContext?.conversation_id);
@@ -369,11 +371,21 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   const location = useLocation();
   const locationState = (location.state || {}) as ConversationLocationState;
   const targetMessageId = locationState.targetMessageId;
+  const locationKeyRef = useRef(location.key);
+  locationKeyRef.current = location.key;
+  const historyMountedRef = useRef(true);
+  useEffect(() => {
+    historyMountedRef.current = true;
+    return () => {
+      historyMountedRef.current = false;
+    };
+  }, []);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | undefined>();
   const handledTargetKeyRef = useRef<string>('');
   const loadingTargetKeyRef = useRef<string>('');
   const scrollerElementRef = useRef<HTMLDivElement | null>(null);
   const contentElementRef = useRef<HTMLDivElement | null>(null);
+  const scrollPositionRef = useRef(0);
 
   // Pre-process message list to group tool outputs into summary cards
   const processedList = useMemo(() => {
@@ -550,18 +562,23 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     handleScroll,
     handleWheel,
     handlePointerDown,
-    showScrollButton,
+    scrollDirection,
+    atTop,
+    atBottom,
+    scrollToTop,
     scrollToBottom,
     scrollElementIntoView,
     hideScrollButton,
   } = useAutoScroll({
     messages: list,
     itemCount: processedList.length,
+    followLatest: !pagination.hasMoreAfter && !historyNavigation.isJumping,
   });
 
   const setScrollerRef = useCallback(
     (element: HTMLDivElement | null) => {
       scrollerElementRef.current = element;
+      scrollPositionRef.current = element?.scrollTop ?? 0;
       handleScrollerRef(element);
     },
     [handleScrollerRef]
@@ -575,24 +592,55 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     [handleContentRef]
   );
 
-  const handleMessageListScroll = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      handleScroll(event);
-      const scroller = event.currentTarget;
-      if (!pagination.hasMoreBefore || pagination.isLoadingBefore || scroller.scrollTop > 160) {
+  const loadAdjacentPage = useCallback(
+    (scroller: HTMLDivElement, direction: 'up' | 'down') => {
+      if (historyNavigation.isBusy() || pagination.isLoadingAnchor) return;
+      if (
+        direction === 'down' &&
+        pagination.hasMoreAfter &&
+        scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 160
+      ) {
+        void historyNavigation.loadNextPage();
         return;
       }
-
+      if (direction !== 'up' || !pagination.hasMoreBefore || pagination.isLoadingBefore || scroller.scrollTop > 160)
+        return;
+      const scope = historyNavigation.requestScope.current;
       const previousHeight = contentElementRef.current?.scrollHeight ?? 0;
-      void loadPreviousMessagePage().then((loaded) => {
+      const request = loadPreviousMessagePage();
+      const epoch = scope.epoch;
+      void request.then((loaded) => {
         if (!loaded) return;
         requestAnimationFrame(() => {
+          if (historyNavigation.requestScope.current !== scope || !scope.active || scope.epoch !== epoch) return;
           const nextHeight = contentElementRef.current?.scrollHeight ?? previousHeight;
           scroller.scrollTop += nextHeight - previousHeight;
+          scrollPositionRef.current = scroller.scrollTop;
         });
       });
     },
-    [handleScroll, loadPreviousMessagePage, pagination.hasMoreBefore, pagination.isLoadingBefore]
+    [historyNavigation, loadPreviousMessagePage, pagination]
+  );
+
+  const handleMessageListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const scroller = event.currentTarget;
+      const delta = scroller.scrollTop - scrollPositionRef.current;
+      scrollPositionRef.current = scroller.scrollTop;
+      handleScroll(event);
+      if (Math.abs(delta) > 2) loadAdjacentPage(scroller, delta < 0 ? 'up' : 'down');
+    },
+    [handleScroll, loadAdjacentPage]
+  );
+
+  const handleMessageListWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      handleWheel(event);
+      // A short endpoint window may not overflow yet, so wheel intent must
+      // advance its cursor even when the browser emits no scroll event.
+      if (Math.abs(event.deltaY) > 2) loadAdjacentPage(event.currentTarget, event.deltaY < 0 ? 'up' : 'down');
+    },
+    [handleWheel, loadAdjacentPage]
   );
 
   useEffect(() => {
@@ -601,6 +649,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     }
 
     const targetKey = `${location.key}:${targetMessageId}`;
+    const scope = historyNavigation.requestScope.current;
     if (handledTargetKeyRef.current === targetKey) {
       return;
     }
@@ -609,8 +658,16 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     if (targetIndex === -1) {
       if (loadingTargetKeyRef.current !== targetKey) {
         loadingTargetKeyRef.current = targetKey;
-        void loadAnchorMessageWindow(targetMessageId).then((loaded) => {
-          if (!loaded) {
+        const request = loadAnchorMessageWindow(targetMessageId);
+        const epoch = scope.epoch;
+        void request.then((loaded) => {
+          if (
+            historyMountedRef.current &&
+            locationKeyRef.current === location.key &&
+            historyNavigation.requestScope.current === scope &&
+            scope.epoch === epoch &&
+            !loaded
+          ) {
             loadingTargetKeyRef.current = '';
           }
         });
@@ -622,8 +679,17 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     loadingTargetKeyRef.current = '';
     setHighlightedMessageId(targetMessageId);
     hideScrollButton();
+    const epoch = scope.epoch;
 
     requestAnimationFrame(() => {
+      if (
+        !historyMountedRef.current ||
+        locationKeyRef.current !== location.key ||
+        historyNavigation.requestScope.current !== scope ||
+        scope.epoch !== epoch ||
+        (scope.conversationId && !scope.active)
+      )
+        return;
       const targetElement = document.getElementById(`message-${getProcessedItemAnchorId(processedList[targetIndex])}`);
       scrollElementIntoView(targetElement, {
         behavior: 'smooth',
@@ -636,7 +702,15 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     }, 2400);
 
     return () => window.clearTimeout(timer);
-  }, [hideScrollButton, loadAnchorMessageWindow, location.key, processedList, scrollElementIntoView, targetMessageId]);
+  }, [
+    hideScrollButton,
+    historyNavigation.requestScope,
+    loadAnchorMessageWindow,
+    location.key,
+    processedList,
+    scrollElementIntoView,
+    targetMessageId,
+  ]);
 
   useEffect(() => {
     const handleMessageJump = (event: Event) => {
@@ -662,11 +736,21 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       if (targetIndex < 0) {
         const anchorMessageId = detail.messageId;
         if (!anchorMessageId) return;
-        void loadAnchorMessageWindow(anchorMessageId).then((loaded) => {
-          if (!loaded) return;
+        const scope = historyNavigation.requestScope.current;
+        const request = loadAnchorMessageWindow(anchorMessageId);
+        const epoch = scope.epoch;
+        const current = () =>
+          historyMountedRef.current &&
+          locationKeyRef.current === location.key &&
+          historyNavigation.requestScope.current === scope &&
+          scope.epoch === epoch &&
+          (!scope.conversationId || scope.active);
+        void request.then((loaded) => {
+          if (!loaded || !current()) return;
           setHighlightedMessageId(anchorMessageId);
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
+              if (!current()) return;
               const targetElement = document.getElementById(`message-${anchorMessageId}`);
               scrollElementIntoView(targetElement, {
                 block: detail.align || 'start',
@@ -679,7 +763,17 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       }
 
       hideScrollButton();
+      const scope = historyNavigation.requestScope.current;
+      const epoch = scope.epoch;
       requestAnimationFrame(() => {
+        if (
+          !historyMountedRef.current ||
+          locationKeyRef.current !== location.key ||
+          historyNavigation.requestScope.current !== scope ||
+          scope.epoch !== epoch ||
+          (scope.conversationId && !scope.active)
+        )
+          return;
         const targetElement = document.getElementById(
           `message-${getProcessedItemAnchorId(processedList[targetIndex])}`
         );
@@ -696,16 +790,39 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     };
   }, [
     conversationContext?.conversation_id,
+    historyNavigation.requestScope,
     hideScrollButton,
     loadAnchorMessageWindow,
+    location.key,
     processedList,
     scrollElementIntoView,
   ]);
 
-  // Click scroll button
-  const handleScrollButtonClick = () => {
-    hideScrollButton();
-    scrollToBottom('smooth');
+  const jumpDirection =
+    scrollDirection === 'up' && (!atTop || pagination.hasMoreBefore)
+      ? 'first'
+      : scrollDirection === 'down' && (!atBottom || pagination.hasMoreAfter)
+        ? 'latest'
+        : undefined;
+  const handleScrollButtonClick = async () => {
+    if (!jumpDirection) return;
+    const scope = historyNavigation.requestScope.current;
+    const request = conversationContext?.conversation_id
+      ? historyNavigation.jump(jumpDirection)
+      : Promise.resolve(true);
+    const epoch = scope.epoch;
+    if (!(await request)) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (
+          conversationContext?.conversation_id &&
+          (historyNavigation.requestScope.current !== scope || !scope.active || scope.epoch !== epoch)
+        )
+          return;
+        if (jumpDirection === 'first') scrollToTop('auto');
+        else scrollToBottom('auto');
+      });
+    });
   };
 
   const renderItem = (_index: number, item: (typeof processedList)[0]) => {
@@ -781,7 +898,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
             style={{ overflowAnchor: 'none' }}
             onPointerDown={handlePointerDown}
             onScroll={handleMessageListScroll}
-            onWheel={handleWheel}
+            onWheel={handleMessageListWheel}
           >
             <div
               ref={setContentRef}
@@ -806,20 +923,28 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
         </ImagePreviewContext.Provider>
       </Image.PreviewGroup>
 
-      {showScrollButton && (
+      {jumpDirection && (
         <>
           {/* Gradient mask */}
           <div className='absolute bottom-0 start-0 end-0 h-100px pointer-events-none' />
           {/* Scroll button */}
           <div className='absolute bottom-20px left-50% transform -translate-x-50% z-100'>
-            <div
+            <Button
               className='flex items-center justify-center w-40px h-40px rd-full bg-base shadow-lg cursor-pointer hover:bg-1 transition-all hover:scale-110 border-1 border-solid border-3'
-              onClick={handleScrollButtonClick}
-              title={t('messages.scrollToBottom')}
+              onClick={() => void handleScrollButtonClick()}
+              disabled={historyNavigation.isJumping}
+              loading={historyNavigation.isJumping}
+              aria-label={t(jumpDirection === 'first' ? 'messages.scrollToTop' : 'messages.scrollToBottom')}
+              title={t(jumpDirection === 'first' ? 'messages.scrollToTop' : 'messages.scrollToBottom')}
+              data-testid={`history-jump-${jumpDirection}`}
               style={{ lineHeight: 0 }}
             >
-              <Down theme='filled' size='20' fill={iconColors.secondary} style={{ display: 'block' }} />
-            </div>
+              {jumpDirection === 'first' ? (
+                <Up theme='filled' size='20' fill={iconColors.secondary} style={{ display: 'block' }} />
+              ) : (
+                <Down theme='filled' size='20' fill={iconColors.secondary} style={{ display: 'block' }} />
+              )}
+            </Button>
           </div>
         </>
       )}

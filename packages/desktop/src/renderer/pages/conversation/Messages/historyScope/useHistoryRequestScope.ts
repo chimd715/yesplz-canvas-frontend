@@ -5,6 +5,7 @@
  */
 
 import type { MutableRefObject } from 'react';
+import type { TMessage } from '@/common/chat/chatLib';
 import { useUpdateMessagePaginationState } from './contexts';
 
 export type HistoryRequestScope = {
@@ -13,6 +14,7 @@ export type HistoryRequestScope = {
   active: boolean;
   window: 'latest' | 'first' | 'anchor';
   navigationEpoch?: number;
+  navigationLiveBuffer?: { epoch: number; messages: TMessage[]; applied?: boolean };
 };
 
 export type HistoryRequestScopeRef = MutableRefObject<HistoryRequestScope>;
