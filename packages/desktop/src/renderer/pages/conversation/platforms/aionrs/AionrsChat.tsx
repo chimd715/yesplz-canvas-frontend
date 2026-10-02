@@ -8,6 +8,7 @@ import type { IConversationMcpStatus } from '@/common/config/storage';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { ConversationContextValue } from '@/renderer/hooks/context/ConversationContext';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import ConversationPlanBar from '@renderer/pages/conversation/PlanBar/ConversationPlanBar';
 import { usePlanRecovery } from '@renderer/pages/conversation/PlanBar/usePlanRecovery';
 import { CHAT_SURFACE_CONTAINER_CLASS } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
@@ -21,7 +22,7 @@ import {
   MessagePaginationProvider,
   useMessageLstCache,
 } from '@renderer/pages/conversation/Messages/hooks';
-import { usePendingConfirmationsRecovery } from '@renderer/pages/conversation/Messages/usePendingConfirmationsRecovery';
+import { usePendingConfirmationsRecovery } from '@renderer/pages/conversation/Messages/historyScope';
 import HOC from '@renderer/utils/ui/HOC';
 import React, { useMemo } from 'react';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
@@ -110,4 +111,17 @@ const AionrsChat: React.FC<{
   );
 };
 
-export default HOC.Wrapper(MessageListProvider, MessageListLoadingProvider, MessagePaginationProvider)(AionrsChat);
+const AionrsChatWithHistory = HOC.Wrapper(
+  MessageListProvider,
+  MessageListLoadingProvider,
+  MessagePaginationProvider
+)(AionrsChat);
+
+const ScopedAionrsChat: React.FC<React.ComponentProps<typeof AionrsChat>> = (props) => {
+  const { user, status } = useAuth();
+  const ownerId = status === 'authenticated' ? (user?.id ?? (window.electronAPI ? 'desktop' : null)) : null;
+  const scopeKey = JSON.stringify([ownerId, props.conversation_id]);
+  return <AionrsChatWithHistory key={scopeKey} {...props} />;
+};
+
+export default ScopedAionrsChat;

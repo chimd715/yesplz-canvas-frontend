@@ -4,7 +4,7 @@ import {
   buildPendingConfirmationMessage,
   hasPermissionMessageForCallId,
   removePermissionMessage,
-} from '@/renderer/pages/conversation/Messages/usePendingConfirmationsRecovery';
+} from '@/renderer/pages/conversation/Messages/historyScope';
 
 const confirmation: IConfirmation<string> = {
   id: 'tool-1',

@@ -7,7 +7,8 @@
 import { ipcBridge } from '@/common';
 import type { IConfirmation, IMessageAsk, IMessagePermission, TMessage } from '@/common/chat/chatLib';
 import { useEffect } from 'react';
-import { useUpdateMessageList } from './hooks';
+import { useUpdateMessageList } from '../hooks';
+import { isHistoryRequestCurrent, useHistoryRequestScope } from './useHistoryRequestScope';
 
 export const pendingConfirmationMsgId = (confirmationId: string) => `confirmation:${confirmationId}`;
 
@@ -75,6 +76,8 @@ function errorMessage(error: unknown): string {
 
 export function usePendingConfirmationsRecovery(conversation_id: string) {
   const updateMessageList = useUpdateMessageList();
+  const scopeRef = useHistoryRequestScope(conversation_id);
+  const scope = scopeRef.current;
 
   useEffect(() => {
     if (!conversation_id) return;
@@ -83,8 +86,10 @@ export function usePendingConfirmationsRecovery(conversation_id: string) {
     void ipcBridge.conversation.confirmation.list
       .invoke({ conversation_id })
       .then((confirmations) => {
-        if (cancelled) return;
+        if (cancelled || !isHistoryRequestCurrent(scopeRef, scope)) return;
         updateMessageList((list) => {
+          if (cancelled || !isHistoryRequestCurrent(scopeRef, scope)) return list;
+          if (scope.window !== 'latest') return list;
           let next = list;
           for (const confirmation of confirmations ?? []) {
             // Formal questions recover in the dock, outside paginated history.
@@ -96,6 +101,7 @@ export function usePendingConfirmationsRecovery(conversation_id: string) {
         });
       })
       .catch((error) => {
+        if (cancelled || !isHistoryRequestCurrent(scopeRef, scope)) return;
         console.warn('[pending-confirmations] failed to recover pending confirmations', {
           conversation_id,
           error: errorMessage(error),
@@ -103,13 +109,17 @@ export function usePendingConfirmationsRecovery(conversation_id: string) {
       });
 
     const off = ipcBridge.conversation.confirmation.remove.on((event) => {
-      if (event.conversation_id !== conversation_id) return;
-      updateMessageList((list) => removePermissionMessage(list, { id: event.id, call_id: event.id }));
+      if (event.conversation_id !== conversation_id || cancelled || !isHistoryRequestCurrent(scopeRef, scope)) return;
+      updateMessageList((list) =>
+        cancelled || !isHistoryRequestCurrent(scopeRef, scope)
+          ? list
+          : removePermissionMessage(list, { id: event.id, call_id: event.id })
+      );
     });
 
     return () => {
       cancelled = true;
       off();
     };
-  }, [conversation_id, updateMessageList]);
+  }, [conversation_id, scope, scopeRef, updateMessageList]);
 }

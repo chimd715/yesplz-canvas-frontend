@@ -3,7 +3,7 @@ import { ipcBridge } from '@/common';
 import { realtime } from '@/common/adapter/ipcBridge';
 import type { IConfirmation, IMessageAsk } from '@/common/chat/chatLib';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { buildPendingConfirmationMessage } from '../usePendingConfirmationsRecovery';
+import { buildPendingConfirmationMessage } from '../historyScope';
 
 type Pending = { confirmationId: string; message: IMessageAsk };
 /** Questions have their own live state; pagination/history cannot remove or resurrect the dock. */

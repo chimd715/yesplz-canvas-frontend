@@ -17,6 +17,17 @@ import {
 } from '@/common/chat/chatLib';
 import { useCallback, useEffect, useRef } from 'react';
 import { createContext } from '@renderer/utils/ui/createContext';
+import { useAuth } from '@/renderer/hooks/context/AuthContext';
+import {
+  EMPTY_MESSAGE_PAGINATION_STATE,
+  MessagePaginationProvider,
+  useMessagePaginationState,
+  useUpdateMessagePaginationState,
+  isHistoryRequestCurrent,
+  useHistoryRequestScope,
+} from './historyScope';
+import type { HistoryRequestScope } from './historyScope';
+export type { MessagePaginationState } from './historyScope';
 import {
   DEFAULT_MESSAGE_PAGE_LIMIT,
   loadConversationAnchorWindow,
@@ -28,25 +39,6 @@ const [useMessageList, MessageListProvider, useUpdateMessageList] = createContex
 const [useMessageListLoading, MessageListLoadingProvider, useUpdateMessageListLoading] = createContext(false);
 
 const [useChatKey, ChatKeyProvider] = createContext('');
-
-export type MessagePaginationState = {
-  oldestCursor?: string;
-  newestCursor?: string;
-  hasMoreBefore: boolean;
-  hasMoreAfter: boolean;
-  isLoadingBefore: boolean;
-  isLoadingAnchor: boolean;
-};
-
-const EMPTY_MESSAGE_PAGINATION_STATE: MessagePaginationState = {
-  hasMoreBefore: false,
-  hasMoreAfter: false,
-  isLoadingBefore: false,
-  isLoadingAnchor: false,
-};
-
-const [useMessagePaginationState, MessagePaginationProvider, useUpdateMessagePaginationState] =
-  createContext<MessagePaginationState>(EMPTY_MESSAGE_PAGINATION_STATE);
 
 const beforeUpdateMessageListStack: Array<(list: TMessage[]) => TMessage[]> = [];
 
@@ -419,7 +411,9 @@ export function composeMessageWithIndex(
 
 export const useMergeLiveMessage = () => {
   const update = useUpdateMessageList();
-  const pendingRef = useRef<Array<{ message: TMessage; add: boolean }>>([]);
+  const scopeRef = useHistoryRequestScope();
+  const ownerScope = scopeRef.current;
+  const pendingRef = useRef<Array<{ message: TMessage; add: boolean; scope: HistoryRequestScope }>>([]);
   const rafRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(() => {
@@ -438,12 +432,27 @@ export const useMergeLiveMessage = () => {
         if (!item.message) {
           continue;
         }
+        if (item.scope !== scopeRef.current) continue;
+        const scope = scopeRef.current;
+        if (scope.conversationId) {
+          if (!scope.active || item.message.conversation_id !== scope.conversationId) continue;
+          // Earlier windows may update an overlapping row, but live tail frames
+          // must not create a disconnected latest page at their bottom.
+          if (
+            scope.window !== 'latest' &&
+            !newList.some(
+              (message) =>
+                message.id === item.message.id || getMessageMergeKey(message) === getMessageMergeKey(item.message)
+            )
+          )
+            continue;
+        }
 
         if (logDroppedToolCallWithoutCallId(item.message)) {
           continue;
         }
 
-        if (item.add) {
+        if (item.add && scope.window === 'latest') {
           // 新增消息，更新索引
           // New message, update index
           const msg = sanitizeMessageForList(item.message);
@@ -477,27 +486,29 @@ export const useMergeLiveMessage = () => {
     });
 
     rafRef.current = setTimeout(flush);
-  }, []);
+  }, [scopeRef, update]);
 
   useEffect(() => {
     return () => {
+      pendingRef.current = [];
       if (rafRef.current !== null) {
         clearTimeout(rafRef.current);
+        rafRef.current = null;
       }
     };
   }, []);
 
   return useCallback(
     (message: TMessage | undefined, add = false) => {
-      if (!message) {
+      if (!message || ownerScope !== scopeRef.current) {
         return;
       }
-      pendingRef.current.push({ message, add });
+      pendingRef.current.push({ message, add, scope: ownerScope });
       if (rafRef.current === null) {
         rafRef.current = setTimeout(flush);
       }
     },
-    [flush]
+    [flush, ownerScope, scopeRef]
   );
 };
 
@@ -783,9 +794,41 @@ export function normalizeDbMessage(msg: TMessage): TMessage {
 }
 
 const getMessageMergeKey = (message: TMessage): string => {
+  if (message.type === 'tool_call' && message.content.call_id) return `tool_call:${message.content.call_id}`;
+  if (message.type === 'acp_tool_call' && message.content.update.tool_call_id)
+    return `acp_tool_call:${message.content.update.tool_call_id}`;
+  if (message.type === 'acp_terminal_output' && message.content.terminal_id)
+    return `acp_terminal_output:${message.content.terminal_id}`;
+  if (message.type === 'permission' && message.content.call_id) return `permission:${message.content.call_id}`;
   if (message.msg_id) return `${message.type}:${message.msg_id}`;
   return `id:${message.id}`;
 };
+
+function mergeLatestReconciliation(
+  conversationId: string,
+  messages: TMessage[],
+  currentList: TMessage[],
+  startedIds: Set<string>
+): TMessage[] {
+  const loadedIds = new Set(messages.map((message) => message.id));
+  const loadedKeys = new Set(messages.map(getMessageMergeKey));
+  const firstShared = currentList.findIndex(
+    (message) => loadedIds.has(message.id) || loadedKeys.has(getMessageMergeKey(message))
+  );
+  if (firstShared < 0) {
+    // No overlapping boundary means the latest page is a separate bounded
+    // window. Keep only live rows that arrived after this read started.
+    return mergeLoadedPageWithCurrent(
+      conversationId,
+      messages,
+      currentList.filter((message) => !startedIds.has(message.id))
+    );
+  }
+  return foldSupersededTips([
+    ...currentList.slice(0, firstShared),
+    ...mergeLoadedPageWithCurrent(conversationId, messages, currentList.slice(firstShared)),
+  ]);
+}
 
 const preferPersistedOrLiveMessage = (persisted: TMessage, live: TMessage): TMessage => {
   if (persisted.type === 'text' && live.type === 'text') {
@@ -836,8 +879,8 @@ export function prependHistoryMessages(currentList: TMessage[], messages: TMessa
 export const usePrependHistoryPage = () => {
   const update = useUpdateMessageList();
   return useCallback(
-    (messages: TMessage[]) => {
-      update((list) => prependHistoryMessages(list, messages));
+    (messages: TMessage[], isCurrent?: () => boolean) => {
+      update((list) => (isCurrent && !isCurrent() ? list : prependHistoryMessages(list, messages)));
     },
     [update]
   );
@@ -846,8 +889,16 @@ export const usePrependHistoryPage = () => {
 export const useReplaceWithAnchorWindow = () => {
   const update = useUpdateMessageList();
   return useCallback(
-    (conversationId: string, messages: TMessage[]) => {
-      update((list) => mergeLoadedPageWithCurrent(conversationId, messages, list));
+    (conversationId: string, messages: TMessage[], isCurrent?: () => boolean) => {
+      update((list) => {
+        if (isCurrent && !isCurrent()) return list;
+        const loadedIds = new Set(messages.map((message) => message.id));
+        const loadedKeys = new Set(messages.map(getMessageMergeKey));
+        const overlapping = list.filter(
+          (message) => loadedIds.has(message.id) || loadedKeys.has(getMessageMergeKey(message))
+        );
+        return mergeLoadedPageWithCurrent(conversationId, messages, overlapping);
+      });
     },
     [update]
   );
@@ -857,34 +908,53 @@ export const useLoadPreviousMessagePage = (conversationId?: string) => {
   const pagination = useMessagePaginationState();
   const setPagination = useUpdateMessagePaginationState();
   const prependHistoryPage = usePrependHistoryPage();
+  const scopeRef = useHistoryRequestScope(conversationId);
+  const requestScope = scopeRef.current;
 
   return useCallback(async () => {
-    if (!conversationId || !pagination.oldestCursor || !pagination.hasMoreBefore || pagination.isLoadingBefore) {
+    const scope = requestScope;
+    if (
+      !conversationId ||
+      !isHistoryRequestCurrent(scopeRef, scope) ||
+      scope.conversationId !== conversationId ||
+      !pagination.oldestCursor ||
+      !pagination.hasMoreBefore ||
+      pagination.isLoadingBefore
+    ) {
       return false;
     }
-
-    setPagination((current) => ({ ...current, isLoadingBefore: true }));
+    const epoch = ++scope.epoch;
+    scope.navigationEpoch = epoch;
+    setPagination((current) => ({ ...current, isLoadingBefore: true, isLoadingAnchor: false }));
     try {
       const page = await loadConversationMessagePage(conversationId, {
         limit: DEFAULT_MESSAGE_PAGE_LIMIT,
         before: pagination.oldestCursor,
         contentMode: 'compact',
       });
+      if (!isHistoryRequestCurrent(scopeRef, scope, epoch)) return false;
       const messages = page.items.map(normalizeDbMessage);
-      prependHistoryPage(messages);
-      setPagination((current) => ({
-        ...current,
-        oldestCursor: page.oldest_cursor ?? current.oldestCursor,
-        newestCursor: current.newestCursor ?? page.newest_cursor ?? undefined,
-        hasMoreBefore: page.has_more_before,
-        hasMoreAfter: current.hasMoreAfter || page.has_more_after,
-        isLoadingBefore: false,
-      }));
+      prependHistoryPage(messages, () => isHistoryRequestCurrent(scopeRef, scope, epoch));
+      setPagination((current) =>
+        isHistoryRequestCurrent(scopeRef, scope, epoch)
+          ? {
+              ...current,
+              oldestCursor: page.oldest_cursor ?? current.oldestCursor,
+              newestCursor: current.newestCursor ?? page.newest_cursor ?? undefined,
+              hasMoreBefore: page.has_more_before,
+              hasMoreAfter: current.hasMoreAfter,
+              isLoadingBefore: false,
+            }
+          : current
+      );
       return true;
     } catch (error) {
+      if (!isHistoryRequestCurrent(scopeRef, scope, epoch)) return false;
       console.error('[useLoadPreviousMessagePage] Failed to load previous messages:', error);
       setPagination((current) => ({ ...current, isLoadingBefore: false }));
       return false;
+    } finally {
+      if (scope.navigationEpoch === epoch) delete scope.navigationEpoch;
     }
   }, [
     conversationId,
@@ -892,6 +962,8 @@ export const useLoadPreviousMessagePage = (conversationId?: string) => {
     pagination.isLoadingBefore,
     pagination.oldestCursor,
     prependHistoryPage,
+    requestScope,
+    scopeRef,
     setPagination,
   ]);
 };
@@ -899,34 +971,59 @@ export const useLoadPreviousMessagePage = (conversationId?: string) => {
 export const useLoadAnchorMessageWindow = (conversationId?: string) => {
   const setPagination = useUpdateMessagePaginationState();
   const replaceWithAnchorWindow = useReplaceWithAnchorWindow();
+  const setLoading = useUpdateMessageListLoading();
+  const scopeRef = useHistoryRequestScope(conversationId);
+  const requestScope = scopeRef.current;
 
   return useCallback(
     async (messageId: string) => {
-      if (!conversationId || !messageId) return false;
-
-      setPagination((current) => ({ ...current, isLoadingAnchor: true }));
+      const scope = requestScope;
+      if (
+        !conversationId ||
+        !messageId ||
+        !isHistoryRequestCurrent(scopeRef, scope) ||
+        scope.conversationId !== conversationId
+      )
+        return false;
+      const epoch = ++scope.epoch;
+      scope.navigationEpoch = epoch;
+      const previousWindow = scope.window;
+      scope.window = 'anchor';
+      setLoading(false);
+      setPagination((current) => ({ ...current, isLoadingBefore: false, isLoadingAnchor: true }));
       try {
         const page = await loadConversationAnchorWindow(conversationId, messageId, {
           limit: DEFAULT_MESSAGE_PAGE_LIMIT,
           contentMode: 'compact',
         });
-        replaceWithAnchorWindow(conversationId, page.items.map(normalizeDbMessage));
-        setPagination({
-          oldestCursor: page.oldest_cursor ?? undefined,
-          newestCursor: page.newest_cursor ?? undefined,
-          hasMoreBefore: page.has_more_before,
-          hasMoreAfter: page.has_more_after,
-          isLoadingBefore: false,
-          isLoadingAnchor: false,
-        });
+        if (!isHistoryRequestCurrent(scopeRef, scope, epoch)) return false;
+        replaceWithAnchorWindow(conversationId, page.items.map(normalizeDbMessage), () =>
+          isHistoryRequestCurrent(scopeRef, scope, epoch)
+        );
+        setPagination((current) =>
+          isHistoryRequestCurrent(scopeRef, scope, epoch)
+            ? {
+                oldestCursor: page.oldest_cursor ?? undefined,
+                newestCursor: page.newest_cursor ?? undefined,
+                hasMoreBefore: page.has_more_before,
+                hasMoreAfter: page.has_more_after,
+                isLoadingBefore: false,
+                isLoadingAnchor: false,
+              }
+            : current
+        );
         return true;
       } catch (error) {
+        if (!isHistoryRequestCurrent(scopeRef, scope, epoch)) return false;
+        scope.window = previousWindow;
         console.error('[useLoadAnchorMessageWindow] Failed to load anchor messages:', error);
         setPagination((current) => ({ ...current, isLoadingAnchor: false }));
         return false;
+      } finally {
+        if (scope.navigationEpoch === epoch) delete scope.navigationEpoch;
       }
     },
-    [conversationId, replaceWithAnchorWindow, setPagination]
+    [conversationId, replaceWithAnchorWindow, requestScope, scopeRef, setLoading, setPagination]
   );
 };
 
@@ -935,6 +1032,16 @@ export const useMessageLstCache = (key: string) => {
   const list = useMessageList();
   const setLoading = useUpdateMessageListLoading();
   const setPagination = useUpdateMessagePaginationState();
+  const scopeRef = useHistoryRequestScope(key);
+  const { user, status } = useAuth();
+  const ownerId = status === 'authenticated' ? (user?.id ?? (window.electronAPI ? 'desktop' : null)) : null;
+  const ownerRef = useRef(ownerId);
+  if (ownerRef.current !== ownerId) {
+    ownerRef.current = ownerId;
+    scopeRef.current.active = false;
+    scopeRef.current = { conversationId: key, epoch: scopeRef.current.epoch + 1, active: false, window: 'latest' };
+  }
+  const scope = scopeRef.current;
   // Mirrors the current list into a ref so the turnCompleted handler below
   // can inspect it synchronously without re-subscribing to the WS event on
   // every list change (useState's functional updater runs asynchronously,
@@ -943,45 +1050,86 @@ export const useMessageLstCache = (key: string) => {
   useEffect(() => {
     listRef.current = list;
   }, [list]);
-  const loadMessages = useCallback(async (): Promise<TMessage[]> => {
-    const result = await loadLatestConversationMessages(key, {
-      limit: DEFAULT_MESSAGE_PAGE_LIMIT,
-      contentMode: 'compact',
-    });
-    const messages = result?.items?.map(normalizeDbMessage);
-    if (messages && Array.isArray(messages)) {
-      update((currentList) => mergeLoadedPageWithCurrent(key, messages, currentList));
-      setPagination({
-        oldestCursor: result.oldest_cursor ?? undefined,
-        newestCursor: result.newest_cursor ?? undefined,
-        hasMoreBefore: result.has_more_before,
-        hasMoreAfter: result.has_more_after,
-        isLoadingBefore: false,
-        isLoadingAnchor: false,
-      });
-      return messages;
-    }
-    return [];
-  }, [key, setPagination, update]);
+  const loadMessages = useCallback(
+    async (reconcile = false): Promise<TMessage[]> => {
+      if (
+        !ownerId ||
+        !isHistoryRequestCurrent(scopeRef, scope) ||
+        scope.window !== 'latest' ||
+        scope.navigationEpoch === scope.epoch
+      )
+        return [];
+      const epoch = ++scope.epoch;
+      const startedIds = new Set(listRef.current.map((message) => message.id));
+      try {
+        const result = await loadLatestConversationMessages(key, {
+          limit: DEFAULT_MESSAGE_PAGE_LIMIT,
+          contentMode: 'compact',
+        });
+        if (!isHistoryRequestCurrent(scopeRef, scope, epoch)) return [];
+        const messages = result?.items?.map(normalizeDbMessage);
+        if (messages && Array.isArray(messages)) {
+          const loadedIds = new Set(messages.map((message) => message.id));
+          const loadedKeys = new Set(messages.map(getMessageMergeKey));
+          const retainsEarlierBoundary =
+            reconcile &&
+            listRef.current.some((message) => loadedIds.has(message.id) || loadedKeys.has(getMessageMergeKey(message)));
+          update((currentList) =>
+            isHistoryRequestCurrent(scopeRef, scope, epoch)
+              ? reconcile
+                ? mergeLatestReconciliation(key, messages, currentList, startedIds)
+                : mergeLoadedPageWithCurrent(key, messages, currentList)
+              : currentList
+          );
+          setPagination((current) =>
+            isHistoryRequestCurrent(scopeRef, scope, epoch)
+              ? {
+                  oldestCursor: retainsEarlierBoundary
+                    ? (current.oldestCursor ?? result.oldest_cursor ?? undefined)
+                    : (result.oldest_cursor ?? undefined),
+                  newestCursor: result.newest_cursor ?? undefined,
+                  hasMoreBefore:
+                    retainsEarlierBoundary && current.oldestCursor ? current.hasMoreBefore : result.has_more_before,
+                  hasMoreAfter: result.has_more_after,
+                  isLoadingBefore: false,
+                  isLoadingAnchor: false,
+                }
+              : current
+          );
+          return messages;
+        }
+        return [];
+      } catch (error) {
+        if (isHistoryRequestCurrent(scopeRef, scope, epoch)) throw error;
+        return [];
+      } finally {
+        setLoading((current) => (isHistoryRequestCurrent(scopeRef, scope, epoch) ? false : current));
+      }
+    },
+    [key, ownerId, scope, scopeRef, setLoading, setPagination, update]
+  );
 
   useEffect(() => {
-    if (!key) return;
-    let cancelled = false;
-    setLoading(true);
+    update([]);
     setPagination({ ...EMPTY_MESSAGE_PAGINATION_STATE });
-    void loadMessages()
-      .catch((error) => {
+    if (!key || !ownerId) {
+      setLoading(false);
+      return;
+    }
+    scope.active = true;
+    scope.window = 'latest';
+    ++scope.epoch;
+    setLoading(true);
+    void loadMessages().catch((error) => {
+      if (isHistoryRequestCurrent(scopeRef, scope)) {
         console.error('[useMessageLstCache] Failed to load messages from database:', error);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+      }
+    });
     return () => {
-      cancelled = true;
+      scope.active = false;
+      ++scope.epoch;
     };
-  }, [key, loadMessages, setLoading, setPagination]);
+  }, [key, loadMessages, ownerId, scope, scopeRef, setLoading, setPagination, update]);
 
   useEffect(() => {
     if (!key) {
@@ -989,11 +1137,13 @@ export const useMessageLstCache = (key: string) => {
     }
 
     return ipcBridge.conversation.userCreated.on((payload) => {
-      if (payload.conversation_id !== key) {
+      if (payload.conversation_id !== key || !isHistoryRequestCurrent(scopeRef, scope)) {
         return;
       }
 
       update((list) => {
+        if (!isHistoryRequestCurrent(scopeRef, scope)) return list;
+        if (scope.window !== 'latest' && !list.some((message) => message.msg_id === payload.msg_id)) return list;
         const index = getOrBuildIndex(list);
         return composeMessageWithIndex(
           {
@@ -1014,7 +1164,7 @@ export const useMessageLstCache = (key: string) => {
         );
       });
     });
-  }, [key, update]);
+  }, [key, scope, scopeRef, update]);
 
   useEffect(() => {
     if (!key) {
@@ -1027,15 +1177,19 @@ export const useMessageLstCache = (key: string) => {
     // server-assigned id message.userCreated used to add the row — never by
     // text/time.
     return ipcBridge.conversation.statusChanged.on((payload) => {
-      if (payload.conversation_id !== key) {
+      if (payload.conversation_id !== key || !isHistoryRequestCurrent(scopeRef, scope)) {
         return;
       }
 
       update((list) =>
-        list.map((message) => (message.msg_id === payload.msg_id ? { ...message, status: payload.status } : message))
+        isHistoryRequestCurrent(scopeRef, scope)
+          ? list.map((message) =>
+              message.msg_id === payload.msg_id ? { ...message, status: payload.status } : message
+            )
+          : list
       );
     });
-  }, [key, update]);
+  }, [key, scope, scopeRef, update]);
 
   useEffect(() => {
     if (!key) {
@@ -1052,7 +1206,7 @@ export const useMessageLstCache = (key: string) => {
     // loadMessages's merge (preferPersistedOrLiveMessage) lets DB truth win
     // without disturbing anything else in the list.
     return ipcBridge.conversation.turnCompleted.on((payload) => {
-      if (payload.session_id !== key) {
+      if (payload.session_id !== key || !isHistoryRequestCurrent(scopeRef, scope) || scope.window !== 'latest') {
         return;
       }
 
@@ -1061,12 +1215,13 @@ export const useMessageLstCache = (key: string) => {
       );
 
       if (hasPendingDelivery) {
-        void loadMessages().catch((error) => {
+        void loadMessages(true).catch((error) => {
+          if (!isHistoryRequestCurrent(scopeRef, scope)) return;
           console.error('[useMessageLstCache] Failed to reconcile pending messages after turn completion:', error);
         });
       }
     });
-  }, [key, loadMessages]);
+  }, [key, loadMessages, scope, scopeRef]);
 };
 
 export const beforeUpdateMessageList = (fn: (list: TMessage[]) => TMessage[]) => {

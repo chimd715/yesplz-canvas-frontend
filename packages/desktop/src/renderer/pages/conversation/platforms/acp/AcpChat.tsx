@@ -22,7 +22,7 @@ import {
   MessagePaginationProvider,
   useMessageLstCache,
 } from '@renderer/pages/conversation/Messages/hooks';
-import { usePendingConfirmationsRecovery } from '@renderer/pages/conversation/Messages/usePendingConfirmationsRecovery';
+import { usePendingConfirmationsRecovery } from '@renderer/pages/conversation/Messages/historyScope';
 import HOC from '@renderer/utils/ui/HOC';
 import React from 'react';
 import AcpE2EStreamInjector from './AcpE2EStreamInjector';
