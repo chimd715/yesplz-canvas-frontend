@@ -75,6 +75,39 @@ describe('httpRequest 401 → refresh → replay (WebUI #4124 fix)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('reports a retryable refresh outage instead of the expired access-token 401', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url === '/api/auth/refresh' ? { ok: false, status: 503 } : errorResponse(401, { code: 'UNAUTHORIZED' })
+      )
+    );
+    await expect(httpRequest('POST', '/api/data', { text: 'retain draft' })).rejects.toMatchObject({
+      status: 503,
+      code: 'SESSION_REFRESH_UNAVAILABLE',
+    });
+  });
+
+  it('attaches the actual Core CSRF token to state changes and replayed requests', async () => {
+    const token = 'b'.repeat(64);
+    document.cookie = `aionui-csrf-token=${token}; Path=/`;
+    let calls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/auth/refresh') return { ok: true };
+      return ++calls === 1 ? errorResponse(401, {}) : jsonResponse(200, { success: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await httpRequest('POST', '/api/data', {});
+    expect(
+      fetchMock.mock.calls.every(
+        (call) =>
+          (call as unknown as [string, RequestInit])[1].headers &&
+          (call as unknown as [string, { headers: Record<string, string> }])[1].headers['x-csrf-token'] === token
+      )
+    ).toBe(true);
+    document.cookie = 'aionui-csrf-token=; Max-Age=0; Path=/';
+  });
+
   it('does not refresh when the first response succeeds', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { data: { ok: true } }));
     vi.stubGlobal('fetch', fetchMock);

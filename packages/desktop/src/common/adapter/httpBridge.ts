@@ -6,7 +6,7 @@
  * so existing renderer code works without changes.
  */
 
-import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
+import { refreshSession, SessionRefreshUnavailableError, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 
 // ---------------------------------------------------------------------------
 // Base URL
@@ -184,23 +184,16 @@ function isAuthEndpoint(path: string): boolean {
   return path.startsWith(REFRESH_ENDPOINT) || path === '/login' || path === '/logout';
 }
 
-/**
- * Resolve the Core CSRF double-submit token for the current context.
- *
- * The open-source WebUI removed its CSRF layer with the legacy webserver (M6);
- * a double-submit scheme is slated to return in M7. Until then this is a stub
- * that reports "no token available", so the shared session-refresh primitive
- * (`sessionRefresh.ts`) attaches no `x-csrf-token` header and the backend —
- * which enforces no CSRF check here — accepts the request unchanged.
- *
- * It exists as the single seam every state-changing request would call for its
- * token, so restoring CSRF in M7 (and the aionpro superset, whose backend does
- * enforce the double-submit check) only swaps this body — no caller changes.
- *
- * Returns '' — always, for now.
- */
+/** Read only the non-secret Core double-submit token, never credential cookies. */
 export function resolveCoreCsrfToken(): string {
-  return '';
+  if (typeof document === 'undefined') return '';
+  const values = document.cookie
+    .split(';')
+    .map((value) => value.trim())
+    .filter((value) => value.startsWith('aionui-csrf-token='));
+  if (values.length !== 1) return '';
+  const token = values[0].slice('aionui-csrf-token='.length);
+  return /^[0-9a-f]{64}$/.test(token) ? token : '';
 }
 
 function sendHttpRequest(
@@ -210,7 +203,12 @@ function sendHttpRequest(
   body?: unknown
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
+  const csrfToken = resolveCoreCsrfToken();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase()) && csrfToken) {
+    headers['x-csrf-token'] = csrfToken;
+  }
   return fetch(url, {
+    credentials: 'include',
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -246,7 +244,15 @@ export async function httpRequest<T>(
   // The auth endpoints themselves are skipped to avoid recursion.
   if (response.status === 401 && !isAuthEndpoint(path)) {
     console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
-    const refreshed = await refreshSession();
+    let refreshed: boolean;
+    try {
+      refreshed = await refreshSession();
+    } catch (error) {
+      if (error instanceof SessionRefreshUnavailableError) {
+        throw new BackendHttpError({ method, path, status: 503, body: { code: error.code } });
+      }
+      throw error;
+    }
     if (refreshed) {
       console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
       response = await sendHttpRequest(method, path, headers, body);
@@ -510,10 +516,14 @@ function scheduleWsReconnect(): void {
  * A failed refresh means the session is truly dead — we stop rather than loop.
  */
 async function handleWsAuthClose(): Promise<void> {
-  const refreshed = await refreshSession();
-  if (refreshed) {
-    wsReconnectAttempt = 0;
-    ensureWs();
+  try {
+    if (await refreshSession()) {
+      wsReconnectAttempt = 0;
+      ensureWs();
+    }
+  } catch {
+    // Retry with bounded backoff; transport failure does not revoke a login.
+    scheduleWsReconnect();
   }
 }
 

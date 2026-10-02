@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PREVIEW_SCOPE_KEY_PREFIX } from '@/renderer/pages/conversation/Preview/context/previewScope';
-import { refreshSession } from '@/common/adapter/sessionRefresh';
+import { refreshSession, SessionRefreshUnavailableError } from '@/common/adapter/sessionRefresh';
+import { resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
 // M6: CSRF removed with legacy webserver — stub functions for compatibility, re-implement in M7
 const withCsrfToken = <T extends Record<string, unknown>>(data: T): T => data;
 const hasValidCsrfToken = (): boolean => true;
@@ -85,47 +86,14 @@ function clearAuthCache(): void {
 }
 
 async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> {
-  try {
-    let response = await fetch(AUTH_USER_ENDPOINT, {
-      method: 'GET',
-      credentials: 'include',
-      signal,
-    });
-
-    // The access cookie may have expired — attempt one silent session refresh
-    // and re-check before concluding the user is unauthenticated. Without this
-    // the status poll would kick a refreshable session to /login (#4124).
-    // refreshSession() single-flights with the httpBridge refresh path.
-    if (response.status === 401) {
-      const refreshed = await refreshSession();
-      if (refreshed) {
-        response = await fetch(AUTH_USER_ENDPOINT, {
-          method: 'GET',
-          credentials: 'include',
-          signal,
-        });
-      }
-    }
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as {
-      success: boolean;
-      user?: AuthUser;
-    };
-    if (data.success && data.user) {
-      return data.user;
-    }
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') {
-      return null;
-    }
-    console.error('Failed to fetch current user:', error);
-  }
-
-  return null;
+  const check = () => fetch(AUTH_USER_ENDPOINT, { method: 'GET', credentials: 'include', signal });
+  let response = await check();
+  if (response.status === 401 && (await refreshSession())) response = await check();
+  if (response.status === 401) return null;
+  if (!response.ok) throw new SessionRefreshUnavailableError();
+  const data = (await response.json()) as { success: boolean; user?: AuthUser };
+  if (data.success && data.user) return data.user;
+  throw new SessionRefreshUnavailableError();
 }
 
 export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
@@ -133,6 +101,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [ready, setReady] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const explicitlyLoggedOut = useRef(false);
 
   const refresh = useCallback(async () => {
     if (isDesktopRuntime) {
@@ -142,26 +111,38 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       return;
     }
 
+    if (explicitlyLoggedOut.current) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setStatus('checking');
-
-    const currentUser = await fetchCurrentUser(controller.signal);
-    if (currentUser) {
+    // Preserve a live chat while checking; temporary failures must not unmount it.
+    setStatus((previous) => (previous === 'authenticated' ? previous : 'checking'));
+    try {
+      const currentUser = await fetchCurrentUser(controller.signal);
+      if (controller.signal.aborted || abortRef.current !== controller) return;
       setUser(currentUser);
-      setStatus('authenticated');
-    } else {
-      setUser(null);
-      setStatus('unauthenticated');
+      setStatus(currentUser ? 'authenticated' : 'unauthenticated');
+      setReady(true);
+    } catch {
+      // The next poll/online/focus check retries. Only an explicit 401 ends login.
     }
-    setReady(true);
   }, []);
 
   useEffect(() => {
     void refresh();
+    const retry = window.setInterval((): void => {
+      void refresh();
+    }, 30_000);
+    const recheck = (): void => {
+      void refresh();
+    };
+    window.addEventListener('online', recheck);
+    window.addEventListener('focus', recheck);
     return () => {
       abortRef.current?.abort();
+      window.clearInterval(retry);
+      window.removeEventListener('online', recheck);
+      window.removeEventListener('focus', recheck);
     };
   }, [refresh]);
 
@@ -234,6 +215,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         };
       }
 
+      abortRef.current?.abort();
+      explicitlyLoggedOut.current = false;
       setUser(data.user);
       setStatus('authenticated');
       setReady(true);
@@ -276,16 +259,22 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       return;
     }
 
+    explicitlyLoggedOut.current = true;
+    abortRef.current?.abort();
     try {
-      await fetch('/logout', {
-        method: 'POST',
-        // Logout also needs CSRF token / 登出同样需要 CSRF Token
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(withCsrfToken({})),
-      });
+      const sendLogout = () =>
+        fetch('/logout', {
+          method: 'POST',
+          // Logout also needs CSRF token / 登出同样需要 CSRF Token
+          headers: {
+            'Content-Type': 'application/json',
+            ...(resolveCoreCsrfToken() ? { 'x-csrf-token': resolveCoreCsrfToken() } : {}),
+          },
+          credentials: 'include',
+          body: JSON.stringify(withCsrfToken({})),
+        });
+      const response = await sendLogout();
+      if (response.status === 401 && (await refreshSession())) await sendLogout();
     } catch (error) {
       console.error('Logout request failed:', error);
     } finally {

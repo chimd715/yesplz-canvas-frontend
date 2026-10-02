@@ -4,33 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * WebUI browser-mode session refresh.
- *
- * The desktop app runs the backend in local mode (no tokens), but the remote
- * WebUI (phone browser) authenticates with a short-lived access cookie plus a
- * long-lived refresh cookie (HttpOnly, `Path=/api/auth/refresh`). When the access
- * cookie expires the backend answers API calls with `401` and closes realtime
- * sockets with code `1008` (`REALTIME_AUTH_EXPIRED`). Before the #4124 fix the
- * client had no refresh step, so it either surfaced the 401 or blindly
- * reconnected the socket with the same dead cookie — an unthrottled loop that
- * ended in a hard kick to `/login`.
- *
- * `refreshSession()` performs the missing step: `POST /api/auth/refresh`, which
- * the browser answers by attaching the HttpOnly refresh cookie. On success the
- * backend `Set-Cookie`s a fresh access + refresh pair, so the caller can replay
- * the failed request / reconnect the socket transparently. On failure the refresh
- * cookie is also dead and the session is genuinely over.
- *
- * Concurrency: one expired access cookie fails many in-flight API calls and both
- * realtime sockets at the same instant. A module-level single-flight collapses
- * them into ONE POST, mirroring the backend `RefreshCoalescer` and staying under
- * the refresh endpoint's rate limiter. Callers that lose the race await the same
- * in-flight result.
- *
- * This module has no import-time side effects, so both `httpBridge.ts` and
- * `browser.ts` can share it without bootstrapping each other's WebSocket.
- */
+/** Browser cookie refresh shared by HTTP, realtime and auth status checks. */
 
 import { resolveCoreCsrfToken } from './httpBridge';
 
@@ -54,14 +28,22 @@ function isWebUiBrowserMode(): boolean {
   );
 }
 
+export class SessionRefreshUnavailableError extends Error {
+  readonly status = 503;
+  readonly code = 'SESSION_REFRESH_UNAVAILABLE';
+
+  constructor() {
+    super('Session renewal temporarily unavailable');
+    this.name = 'SessionRefreshUnavailableError';
+  }
+}
+
 let inFlight: Promise<boolean> | null = null;
 
 /**
- * Attempt a single silent session refresh. Concurrent callers share one POST.
- *
- * Resolves `true` when the session was renewed (fresh cookies now set), `false`
- * when the refresh token is missing/expired or the request failed. Never throws —
- * callers branch on the boolean and fall back to their existing failure handling.
+ * Concurrent callers share one POST. False means a rejected credential (401) or
+ * desktop mode. Outages, rate limits and CSRF errors throw a retryable error;
+ * callers must preserve the session instead of treating those as a logout.
  */
 export function refreshSession(): Promise<boolean> {
   if (!isWebUiBrowserMode()) {
@@ -79,12 +61,7 @@ export function refreshSession(): Promise<boolean> {
 
 async function performRefresh(): Promise<boolean> {
   try {
-    // Attach the CSRF double-submit header when a token is available. The
-    // open-source WebUI has no CSRF layer yet (M6 removed it, M7 restores it), so
-    // resolveCoreCsrfToken() returns '' and no header is sent; the aionpro superset
-    // resolves a real token here and its backend enforces the check. The matching
-    // cookie, when one exists, rides `credentials: 'include'`.
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const csrfToken = resolveCoreCsrfToken();
     if (csrfToken) {
       headers['x-csrf-token'] = csrfToken;
@@ -92,15 +69,18 @@ async function performRefresh(): Promise<boolean> {
     const response = await fetch(REFRESH_ENDPOINT, {
       method: 'POST',
       // Same-origin request: the browser attaches the HttpOnly refresh cookie
-      // (scoped to Path=/api/auth/refresh). No body is needed — the backend reads
-      // the cookie and only falls back to a body token for legacy native clients.
+      // (scoped to Path=/api/auth/refresh). An empty legacy credential makes old
+      // Core return 401 when that cookie is absent instead of a JSON 415. No
+      // browser-readable credential is stored or sent; the cookie takes priority.
       credentials: 'include',
       headers,
+      body: JSON.stringify({ token: '' }),
+      signal: AbortSignal.timeout(10000),
     });
-    return response.ok;
+    if (response.ok) return true;
+    if (response.status === 401) return false;
+    throw new SessionRefreshUnavailableError();
   } catch {
-    // Network failure — treat as "not refreshed" so callers keep their existing
-    // failure handling rather than assuming a live session.
-    return false;
+    throw new SessionRefreshUnavailableError();
   }
 }

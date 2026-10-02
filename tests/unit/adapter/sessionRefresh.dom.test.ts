@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { refreshSession } from '@/common/adapter/sessionRefresh';
+import { refreshSession, SessionRefreshUnavailableError } from '@/common/adapter/sessionRefresh';
 
 type WindowWithPort = { __backendPort?: number };
 
@@ -14,6 +14,7 @@ describe('refreshSession (WebUI session refresh)', () => {
     // Browser mode: real DOM (jsdom) with no Electron preload port.
     delete (window as WindowWithPort).__backendPort;
     vi.restoreAllMocks();
+    document.cookie = 'aionui-csrf-token=; Max-Age=0; Path=/';
   });
 
   afterEach(() => {
@@ -21,7 +22,7 @@ describe('refreshSession (WebUI session refresh)', () => {
     delete (window as WindowWithPort).__backendPort;
   });
 
-  it('POSTs /api/auth/refresh (cookie-borne, no body) and resolves true on success', async () => {
+  it('POSTs /api/auth/refresh with cookie credentials and an empty legacy fallback and resolves true on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -31,21 +32,20 @@ describe('refreshSession (WebUI session refresh)', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/auth/refresh');
     expect(init).toMatchObject({ method: 'POST', credentials: 'include' });
-    // No body — the browser attaches the HttpOnly refresh cookie.
-    expect(init.body).toBeUndefined();
+    // The HttpOnly cookie is the credential; the empty body keeps old Core compatible.
+    expect(JSON.parse(init.body)).toEqual({ token: '' });
   });
 
-  it('sends no x-csrf-token header (open-source WebUI has no CSRF layer — M6 removed, M7 restores)', async () => {
-    // resolveCoreCsrfToken() is a stub returning '' here, so the shared refresh
-    // primitive attaches no CSRF header. The aionpro superset resolves a real
-    // token and asserts the header is present instead.
+  it('attaches the actual Core double-submit cookie to refresh requests', async () => {
+    const token = 'a'.repeat(64);
+    document.cookie = `aionui-csrf-token=${token}; Path=/`;
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
-
     await expect(refreshSession()).resolves.toBe(true);
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers ?? {}).not.toHaveProperty('x-csrf-token');
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'x-csrf-token': token,
+    });
   });
 
   it('resolves false when the refresh token is also expired (non-ok response)', async () => {
@@ -53,9 +53,14 @@ describe('refreshSession (WebUI session refresh)', () => {
     await expect(refreshSession()).resolves.toBe(false);
   });
 
-  it('resolves false (never throws) on network failure', async () => {
+  it('preserves the login decision on network failure by returning a retryable error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
-    await expect(refreshSession()).resolves.toBe(false);
+    await expect(refreshSession()).rejects.toBeInstanceOf(SessionRefreshUnavailableError);
+  });
+
+  it.each([403, 429, 500, 503])('does not treat HTTP %s as credential revocation', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status }));
+    await expect(refreshSession()).rejects.toMatchObject({ status: 503, code: 'SESSION_REFRESH_UNAVAILABLE' });
   });
 
   it('single-flights concurrent callers into one POST, then refreshes anew afterwards', async () => {

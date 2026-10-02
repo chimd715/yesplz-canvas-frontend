@@ -232,13 +232,23 @@ describe('browser WebSocket realtime error handling', () => {
     expect(location.hash).toBe('');
   });
 
-  it('does not redirect to login from close code 1008 without an auth error event', async () => {
+  it('checks refresh credentials before reconnecting a policy-closed socket', async () => {
     const { location, socket } = await loadBrowserAdapter();
 
     socket.dispatchClose(1008);
-    vi.advanceTimersByTime(500);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(location.hash).toBe('/login');
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
 
-    expect(location.hash).toBe('');
+  it('retries a temporarily unavailable refresh with backoff without leaving chat', async () => {
+    const { location, socket } = await loadBrowserAdapter();
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    location.hash = '/conversation/existing';
+    socket.dispatchClose(1008);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(location.hash).toBe('/conversation/existing');
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });

@@ -6,7 +6,7 @@
 
 import { bridge } from '@/common/platform/bridge';
 import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
-import { refreshSession } from './sessionRefresh';
+import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 import type { ElectronBridgeAPI } from '@/common/types/platform/electron';
 
 interface CustomWindow extends Window {
@@ -140,6 +140,29 @@ if (win.electronAPI) {
     }, 1000);
   };
 
+  const recoverSession = () => {
+    shouldReconnect = false;
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    socket?.close();
+    void refreshSession()
+      .then((refreshed) => {
+        if (!refreshed) {
+          redirectToLogin();
+          return;
+        }
+        shouldReconnect = true;
+        reconnectDelay = BASE_RECONNECT_DELAY;
+        connect();
+      })
+      .catch(() => {
+        shouldReconnect = true;
+        scheduleReconnect();
+      });
+  };
+
   // 3.建立 WebSocket 连接（或复用已有的 OPEN/CONNECTING 状态）
   const connect = () => {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
@@ -191,27 +214,7 @@ if (win.electronAPI) {
         if (isRealtimeAuthTerminalError(payload)) {
           console.warn('[WebSocket] Authentication expired, attempting silent refresh');
 
-          // 续期期间暂停自动重连，避免拿着失效 Cookie 空转（#4124 的重连风暴）
-          // Pause auto-reconnect while refreshing so the dead cookie can't loop
-          // (the #4124 reconnect storm).
-          shouldReconnect = false;
-          if (reconnectTimer !== null) {
-            window.clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-          }
-          socket?.close();
-
-          void refreshSession().then((refreshed) => {
-            if (refreshed) {
-              // 新 Cookie 已就位，重连即可携带
-              // Fresh cookie is in place — the reconnect carries it.
-              shouldReconnect = true;
-              reconnectDelay = 500;
-              connect();
-              return;
-            }
-            redirectToLogin();
-          });
+          recoverSession();
 
           return;
         }
@@ -243,6 +246,10 @@ if (win.electronAPI) {
       }
       connectedAt = 0;
 
+      if (event.code === WS_CLOSE_POLICY_VIOLATION) {
+        if (shouldReconnect) recoverSession();
+        return;
+      }
       scheduleReconnect();
     });
 
