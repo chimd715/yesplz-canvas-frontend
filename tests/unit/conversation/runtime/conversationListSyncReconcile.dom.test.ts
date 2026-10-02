@@ -15,6 +15,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ status: 'authenticated', user: { id: 'reconcile-owner' } }),
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
     database: {

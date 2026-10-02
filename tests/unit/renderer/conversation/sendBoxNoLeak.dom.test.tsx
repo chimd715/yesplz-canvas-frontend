@@ -28,6 +28,7 @@ vi.mock('@/common', () => ({
   ipcBridge: {
     acpConversation: { sendMessage: { invoke: vi.fn() } },
     conversation: { stop: { invoke: vi.fn() } },
+    fs: { listAvailableSkills: { invoke: vi.fn().mockResolvedValue([]) } },
   },
 }));
 
@@ -64,12 +65,19 @@ vi.mock('@/renderer/hooks/chat/useSendBoxFiles', () => ({
 }));
 vi.mock('@/renderer/hooks/chat/useAutoTitle', () => ({ useAutoTitle: () => ({ checkAndUpdateTitle: vi.fn() }) }));
 vi.mock('@/renderer/hooks/context/ConversationContext', () => ({ useConversationContextSafe: () => null }));
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ status: 'authenticated', user: { id: 'no-leak-owner' } }),
+}));
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({ useLayoutContext: () => ({ isMobile: false }) }));
 vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
   useOpenFileSelector: () => ({ openFileSelector: vi.fn(), onSlashBuiltinCommand: vi.fn() }),
 }));
 vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({ useLatestRef: <T,>(v: T) => ({ current: v }) }));
-vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({ useAddOrUpdateMessage: () => vi.fn() }));
+vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({
+  useAddOrUpdateMessage: () => vi.fn(),
+  useMessageList: () => [],
+  useMessagePaginationState: () => ({ hasMoreAfter: false }),
+}));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
   shouldEnqueueConversationCommand: () => false,
   useConversationCommandQueue: () => ({
